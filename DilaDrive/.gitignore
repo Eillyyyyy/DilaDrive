@@ -1,0 +1,20 @@
+# Java / Maven
+backend/target/
+*.class
+*.log
+# Node
+admin-web/node_modules/
+admin-web/dist/
+# Flutter
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins*
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+# Secrets and uploads
+.env
+*.env.local
+backend/uploads/

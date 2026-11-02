@@ -1,0 +1,4 @@
+logging:
+  level:
+    com.diladrive: DEBUG
+    org.springframework.security: INFO
