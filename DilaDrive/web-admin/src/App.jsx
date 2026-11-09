@@ -1,4 +1,5 @@
-import { useState } from "react";
+import axios from "axios";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -15,12 +16,7 @@ import {
   UserRound,
 } from "lucide-react";
 
-import {
-  bookingsSeed,
-  customers,
-  drivers,
-  vehicles,
-} from "./data/demoData";
+import { bookingsSeed, customers, drivers, vehicles } from "./data/demoData";
 
 import Dashboard from "./pages/Dashboard";
 import Customers from "./pages/Customers";
@@ -59,7 +55,10 @@ export default function App() {
   const [mobileMenu, setMobileMenu] = useState(false);
   const [bookings, setBookings] = useState(bookingsSeed);
 
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    const savedUser = localStorage.getItem("currentUser");
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
 
   const [profile, setProfile] = useState({
     name: "DilaDrive Admin",
@@ -68,67 +67,121 @@ export default function App() {
     role: "Administrator",
   });
 
-  function handleLogin(credentials) {
-    setCurrentUser(credentials);
+  useEffect(() => {
+  const savedProfile =
+    localStorage.getItem("profile");
 
-    setProfile((prev) => ({
-      ...prev,
-      email: credentials.email,
-    }));
+  if (savedProfile) {
+    setProfile(JSON.parse(savedProfile));
+  }
+}, []);
 
-    setActivePage("Dashboard");
+  async function handleLogin(credentials) {
+    try {
+      const response = await axios.post(
+        "http://localhost:8080/api/auth/login",
+        {
+          email: credentials.email,
+          password: credentials.password,
+        },
+      );
+
+      if (!response.data?.email) {
+        throw new Error("Invalid Email or Password");
+      }
+
+      const user = {
+        email: response.data.email,
+      };
+
+      setCurrentUser(user);
+
+      localStorage.setItem("currentUser", JSON.stringify(user));
+      setProfile(response.data);
+      localStorage.setItem(
+  "profile",
+  JSON.stringify(response.data)
+);
+      setActivePage("Dashboard");
+    } catch (error) {
+      throw new Error(
+        error.response?.data || error.message || "Unable to login",
+      );
+    }
   }
 
   function handleLogout() {
-    setCurrentUser(null);
-    setActivePage("Dashboard");
-    setMobileMenu(false);
+  localStorage.removeItem("currentUser");
+  localStorage.removeItem("profile");
+
+  setCurrentUser(null);
+  setActivePage("Dashboard");
+  setMobileMenu(false);
+}
+
+  async function handleSaveProfile(updatedProfile, currentPassword) {
+    try {
+      const response = await axios.put(
+        "http://localhost:8080/api/auth/profile",
+        {
+          ...updatedProfile,
+          currentPassword,
+        },
+        { params: { email: currentUser.email } },
+      );
+      setProfile(response.data);
+      setCurrentUser({ email: response.data.email });
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data || error.message || "Unable to update profile",
+      );
+    }
   }
 
-  function handleSaveProfile(updatedProfile) {
-    setProfile(updatedProfile);
+  async function handleChangePassword(currentPassword, newPassword) {
+    try {
+      const response = await axios.post(
+        "http://localhost:8080/api/auth/profile/password",
+        { currentPassword, newPassword },
+        { params: { email: currentUser.email } },
+      );
+      return response.data;
+    } catch (error) {
+      throw new Error(
+        error.response?.data || error.message || "Unable to change password",
+      );
+    }
   }
 
   function approveBooking(id) {
     setBookings((prev) =>
       prev.map((booking) =>
-        booking.id === id
-          ? { ...booking, status: "Approved" }
-          : booking
-      )
+        booking.id === id ? { ...booking, status: "Approved" } : booking,
+      ),
     );
   }
 
   function renderPage() {
     switch (activePage) {
       case "Dashboard":
-        return (
-          <Dashboard
-            bookings={bookings}
-            onNavigate={setActivePage}
-          />
-        );
+        return <Dashboard bookings={bookings} onNavigate={setActivePage} />;
 
       case "Customers":
-        return (
-          <Customers customers={customers} />
-        );
+        return <Customers customers={customers} />;
 
       case "Drivers":
-        return (
-          <Drivers drivers={drivers} />
-        );
+        return <Drivers drivers={drivers} />;
 
       case "Vehicles":
-        return (
-          <Vehicles vehicles={vehicles} />
-        );
+        return <Vehicles vehicles={vehicles} />;
 
       case "Bookings":
         return (
           <Bookings
             bookings={bookings}
             onApprove={approveBooking}
+            onNavigate={setActivePage}
           />
         );
 
@@ -149,16 +202,12 @@ export default function App() {
           <Profile
             user={profile}
             onSave={handleSaveProfile}
+            onChangePassword={handleChangePassword}
           />
         );
 
       default:
-        return (
-          <Dashboard
-            bookings={bookings}
-            onNavigate={setActivePage}
-          />
-        );
+        return <Dashboard bookings={bookings} onNavigate={setActivePage} />;
     }
   }
 
@@ -168,7 +217,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-
       {/* Sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 z-40 w-64
@@ -177,19 +225,14 @@ export default function App() {
       >
         {/* Logo */}
         <div className="flex h-20 items-center gap-3 border-b border-white/10 px-6">
-
           <div className="grid h-10 w-10 place-items-center rounded-xl bg-teal-500 font-bold text-slate-950">
             D
           </div>
 
           <div>
-            <h1 className="text-lg font-bold">
-              DilaDrive
-            </h1>
+            <h1 className="text-lg font-bold">DilaDrive</h1>
 
-            <p className="text-xs text-slate-400">
-              TRANSPORT MANAGEMENT
-            </p>
+            <p className="text-xs text-slate-400">TRANSPORT MANAGEMENT</p>
           </div>
 
           <button
@@ -206,7 +249,6 @@ export default function App() {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto px-3">
-
           {menuItems.map(({ name, icon: Icon }) => (
             <button
               key={name}
@@ -229,23 +271,23 @@ export default function App() {
 
         {/* User */}
         <div className="border-t border-white/10 p-4">
-
           <div className="mb-3 flex items-center gap-3 px-2">
-
-            <div className="grid h-10 w-10 place-items-center rounded-full bg-teal-100 font-bold text-teal-700">
-              {(profile.name || "A")
-                .charAt(0)
-                .toUpperCase()}
-            </div>
+            {profile.profileImage ? (
+              <img
+                src={profile.profileImage}
+                alt=""
+                className="h-10 w-10 rounded-full object-cover"
+              />
+            ) : (
+              <div className="grid h-10 w-10 place-items-center rounded-full bg-teal-100 font-bold text-teal-700">
+                {(profile.name || "A").charAt(0).toUpperCase()}
+              </div>
+            )}
 
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">
-                {profile.name}
-              </p>
+              <p className="truncate text-sm font-semibold">{profile.name}</p>
 
-              <p className="truncate text-xs text-slate-400">
-                {profile.role}
-              </p>
+              <p className="truncate text-xs text-slate-400">{profile.role}</p>
             </div>
           </div>
 
@@ -269,12 +311,9 @@ export default function App() {
 
       {/* Main */}
       <main className="min-h-screen md:ml-64">
-
         {/* Header */}
         <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b bg-white px-4 md:px-8">
-
           <div className="flex items-center gap-3">
-
             <button
               onClick={() => setMobileMenu(true)}
               className="rounded-lg p-2 hover:bg-slate-100 md:hidden"
@@ -283,22 +322,15 @@ export default function App() {
             </button>
 
             <div>
-              <p className="text-xs text-slate-500">
-                Workspace / {activePage}
-              </p>
+              <p className="text-xs text-slate-500">Workspace / {activePage}</p>
 
-              <h2 className="font-bold">
-                {activePage}
-              </h2>
+              <h2 className="font-bold">{activePage}</h2>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-
             <button
-              onClick={() =>
-                setActivePage("Notifications")
-              }
+              onClick={() => setActivePage("Notifications")}
               className="rounded-xl border p-2.5 hover:bg-slate-50"
             >
               <Bell size={19} />
@@ -308,29 +340,29 @@ export default function App() {
               onClick={() => setActivePage("Profile")}
               className="flex items-center gap-2 rounded-xl p-1 hover:bg-slate-50"
             >
-              <div className="grid h-10 w-10 place-items-center rounded-full bg-teal-100 font-bold text-teal-700">
-                {(profile.name || "A")
-                  .charAt(0)
-                  .toUpperCase()}
-              </div>
+              {profile.profileImage ? (
+                <img
+                  src={profile.profileImage}
+                  alt=""
+                  className="h-10 w-10 rounded-full object-cover"
+                />
+              ) : (
+                <div className="grid h-10 w-10 place-items-center rounded-full bg-teal-100 font-bold text-teal-700">
+                  {(profile.name || "A").charAt(0).toUpperCase()}
+                </div>
+              )}
 
               <div className="hidden sm:block text-left">
-                <p className="text-sm font-semibold">
-                  {profile.name}
-                </p>
+                <p className="text-sm font-semibold">{profile.name}</p>
 
-                <p className="text-xs text-slate-500">
-                  {profile.role}
-                </p>
+                <p className="text-xs text-slate-500">{profile.role}</p>
               </div>
             </button>
-
           </div>
         </header>
 
         {/* Content */}
         <section className="p-4 md:p-8">
-
           {activePage === "Dashboard" && (
             <div className="mb-6">
               <p className="text-sm text-slate-500">
@@ -341,7 +373,6 @@ export default function App() {
 
           {renderPage()}
         </section>
-
       </main>
     </div>
   );

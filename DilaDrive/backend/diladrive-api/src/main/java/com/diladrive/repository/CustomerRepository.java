@@ -3,5 +3,10 @@ package com.diladrive.repository;
 import com.diladrive.entity.Customer;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface CustomerRepository extends JpaRepository<Customer, Long> {
+import java.util.Optional;
+
+public interface CustomerRepository
+        extends JpaRepository<Customer, Long> {
+
+    Optional<Customer> findByCustEmailIgnoreCase(String email);
 }

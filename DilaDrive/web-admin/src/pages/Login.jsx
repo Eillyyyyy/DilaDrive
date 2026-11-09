@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  Truck,
+  CarFront,
   Mail,
   LockKeyhole,
   Eye,
@@ -55,7 +55,7 @@ export default function Login({ onLogin }) {
       {/* Logo Outside the Card */}
       <div className="mb-7 flex flex-col items-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#27B5A8] text-white shadow-sm">
-          <Truck size={32} strokeWidth={2} />
+          <CarFront size={32} strokeWidth={2} />
         </div>
 
         <h1 className="mt-3 text-3xl font-bold tracking-tight text-[#020B2D]">

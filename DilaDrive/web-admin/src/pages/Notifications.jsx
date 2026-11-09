@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import axios from "axios";
 import {
   Search,
   Eye,
@@ -15,35 +16,39 @@ import {
   Clock,
 } from "lucide-react";
 
-const initialNotifications = [
-  {
-    id: "NOT-001",
-    title: "New Booking Request",
-    message: "Customer submitted Booking DD-1028.",
-    date: "21 Oct 2026",
-    time: "09:30 AM",
-    status: "Unread",
-    type: "Booking",
-  },
-  {
-    id: "NOT-002",
-    title: "Driver Assigned",
-    message: "Driver Farid assigned to DD-1027.",
-    date: "20 Oct 2026",
-    time: "03:15 PM",
-    status: "Read",
-    type: "Driver",
-  },
-  {
-    id: "NOT-003",
-    title: "Payment Submitted",
-    message: "Payment PAY-001 awaiting verification.",
-    date: "20 Oct 2026",
-    time: "11:45 AM",
-    status: "Unread",
-    type: "Payment",
-  },
-];
+const API_URL = "http://localhost:8080/api";
+
+const mapNotification = (notification) => {
+  const sentAt = new Date(notification.sentAt);
+  const rawType = String(notification.notificationType || "GENERAL").toUpperCase();
+  const type = rawType === "ASSIGNMENT" ? "Driver" :
+    rawType.charAt(0) + rawType.slice(1).toLowerCase();
+  return {
+    id: String(notification.notificationId),
+    driverId: notification.driverId,
+    driverName: notification.driverName,
+    title: notification.title,
+    message: notification.message,
+    date: sentAt.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    time: sentAt.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    status: notification.read ? "Read" : "Unread",
+    type,
+  };
+};
+
+const getApiError = (error) => {
+  const response = error.response?.data;
+  return (typeof response === "string" ? response : response?.message || response?.detail)
+    || error.message
+    || "Unable to update notifications.";
+};
 
 const getNotificationIcon = (type) => {
   switch (type) {
@@ -72,8 +77,10 @@ const getNotificationColor = (type) => {
 };
 
 export default function Notifications() {
-  const [notifications, setNotifications] =
-    useState(initialNotifications);
+  const [notifications, setNotifications] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
@@ -87,7 +94,24 @@ export default function Notifications() {
     title: "",
     message: "",
     type: "General",
+    driverId: "",
   });
+
+  useEffect(() => {
+    Promise.all([
+      axios.get(`${API_URL}/notifications`),
+      axios.get(`${API_URL}/drivers`),
+    ])
+      .then(([notificationResponse, driverResponse]) => {
+        setNotifications(notificationResponse.data.map(mapNotification));
+        setDrivers(driverResponse.data);
+      })
+      .catch((requestError) => {
+        console.error("Unable to load notifications:", requestError);
+        setError(getApiError(requestError));
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const unreadCount = notifications.filter(
     (notification) => notification.status === "Unread"
@@ -115,112 +139,118 @@ export default function Notifications() {
     }
   );
 
-  const handleMarkRead = (id) => {
-    setNotifications((previous) =>
-      previous.map((notification) =>
-        notification.id === id
-          ? { ...notification, status: "Read" }
-          : notification
-      )
-    );
-
-    setSelectedNotification((previous) =>
-      previous && previous.id === id
-        ? { ...previous, status: "Read" }
-        : previous
-    );
+  const handleMarkRead = async (id) => {
+    setError("");
+    try {
+      await axios.patch(`${API_URL}/notifications/${id}/read`);
+      setNotifications((previous) =>
+        previous.map((notification) =>
+          notification.id === id
+            ? { ...notification, status: "Read" }
+            : notification
+        )
+      );
+      setSelectedNotification((previous) =>
+        previous && previous.id === id
+          ? { ...previous, status: "Read" }
+          : previous
+      );
+    } catch (requestError) {
+      console.error("Unable to mark notification as read:", requestError);
+      setError(getApiError(requestError));
+    }
   };
 
-  const handleMarkAllRead = () => {
-    setNotifications((previous) =>
-      previous.map((notification) => ({
-        ...notification,
-        status: "Read",
-      }))
+  const handleMarkAllRead = async () => {
+    const unread = notifications.filter(
+      (notification) => notification.status === "Unread"
     );
-
-    setSelectedNotification((previous) =>
-      previous ? { ...previous, status: "Read" } : null
-    );
+    setError("");
+    try {
+      await Promise.all(
+        unread.map((notification) =>
+          axios.patch(`${API_URL}/notifications/${notification.id}/read`)
+        )
+      );
+      setNotifications((previous) =>
+        previous.map((notification) => ({ ...notification, status: "Read" }))
+      );
+      setSelectedNotification((previous) =>
+        previous ? { ...previous, status: "Read" } : null
+      );
+    } catch (requestError) {
+      console.error("Unable to mark all notifications as read:", requestError);
+      setError(getApiError(requestError));
+    }
   };
 
-  const handleView = (notification) => {
+  const handleView = async (notification) => {
     // Automatically mark as read when opened.
-    handleMarkRead(notification.id);
-
-    setSelectedNotification({
-      ...notification,
-      status: "Read",
-    });
+    setSelectedNotification(notification);
+    if (notification.status === "Unread") {
+      await handleMarkRead(notification.id);
+    }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const confirmed = window.confirm(
       "Are you sure you want to delete this notification?"
     );
 
     if (!confirmed) return;
 
-    setNotifications((previous) =>
-      previous.filter((notification) => notification.id !== id)
-    );
-
-    setSelectedNotification((previous) =>
-      previous?.id === id ? null : previous
-    );
+    setError("");
+    try {
+      await axios.delete(`${API_URL}/notifications/${id}`);
+      setNotifications((previous) =>
+        previous.filter((notification) => notification.id !== id)
+      );
+      setSelectedNotification((previous) =>
+        previous?.id === id ? null : previous
+      );
+    } catch (requestError) {
+      console.error("Unable to delete notification:", requestError);
+      setError(getApiError(requestError));
+    }
   };
 
-  const handleCreateNotification = (event) => {
+  const handleCreateNotification = async (event) => {
     event.preventDefault();
 
     if (
       !newNotification.title.trim() ||
-      !newNotification.message.trim()
+      !newNotification.message.trim() ||
+      !newNotification.driverId
     ) {
-      alert("Please fill in the title and message.");
+      setError("Please select a driver and enter a title and message.");
       return;
     }
 
-    const nextNumber =
-      notifications.reduce((max, notification) => {
-        const number = Number(notification.id.split("-")[1]);
-        return Math.max(max, number || 0);
-      }, 0) + 1;
-
-    const now = new Date();
-
-    const createdNotification = {
-      id: `NOT-${String(nextNumber).padStart(3, "0")}`,
-      title: newNotification.title.trim(),
-      message: newNotification.message.trim(),
-      date: now.toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
-      time: now.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      status: "Unread",
-      type: newNotification.type,
-    };
-
-    setNotifications((previous) => [
-      createdNotification,
-      ...previous,
-    ]);
-
-    setSearch("");
-    setFilterStatus("All");
-
-    setNewNotification({
-      title: "",
-      message: "",
-      type: "General",
-    });
-
-    setShowCreateForm(false);
+    setError("");
+    try {
+      const response = await axios.post(`${API_URL}/notifications`, {
+        driverId: Number(newNotification.driverId),
+        title: newNotification.title.trim(),
+        message: newNotification.message.trim(),
+        notificationType: newNotification.type,
+      });
+      setNotifications((previous) => [
+        mapNotification(response.data),
+        ...previous,
+      ]);
+      setSearch("");
+      setFilterStatus("All");
+      setNewNotification({
+        title: "",
+        message: "",
+        type: "General",
+        driverId: "",
+      });
+      setShowCreateForm(false);
+    } catch (requestError) {
+      console.error("Unable to create notification:", requestError);
+      setError(getApiError(requestError));
+    }
   };
 
   return (
@@ -265,6 +295,25 @@ export default function Notifications() {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <p>{error}</p>
+          <button
+            onClick={() => setError("")}
+            className="ml-auto"
+            aria-label="Dismiss error"
+          >
+            <X size={17} />
+          </button>
+        </div>
+      )}
+
+      {loading && (
+        <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+          Loading notifications...
+        </p>
+      )}
 
       {/* Statistics */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -466,6 +515,10 @@ export default function Notifications() {
                           </p>
 
                           <p className="mt-1 text-xs text-slate-400">
+                            Driver: {notification.driverName}
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-400">
                             {notification.id}
                           </p>
                         </div>
@@ -654,6 +707,16 @@ export default function Notifications() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2 rounded-xl bg-slate-50 p-4">
+                  <p className="text-xs font-medium text-slate-500">
+                    Driver
+                  </p>
+
+                  <p className="mt-2 font-semibold text-slate-800">
+                    {selectedNotification.driverName}
+                  </p>
+                </div>
+
                 <div className="rounded-xl bg-slate-50 p-4">
                   <p className="text-xs font-medium text-slate-500">
                     Category
@@ -791,6 +854,31 @@ export default function Notifications() {
                   <option value="Booking">Booking</option>
                   <option value="Driver">Driver</option>
                   <option value="Payment">Payment</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Driver
+                </label>
+
+                <select
+                  required
+                  value={newNotification.driverId}
+                  onChange={(event) =>
+                    setNewNotification((previous) => ({
+                      ...previous,
+                      driverId: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                >
+                  <option value="">Select a driver</option>
+                  {drivers.map((driver) => (
+                    <option key={driver.driverId} value={driver.driverId}>
+                      {driver.driverName} ({driver.driverEmail})
+                    </option>
+                  ))}
                 </select>
               </div>
 

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import axios from "axios";
+import { useMemo, useState, useEffect } from "react";
 import {
   Search,
   Eye,
@@ -65,6 +66,52 @@ export default function Customers({ customers = [], onVerifyCustomer }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [customerList, setCustomerList] = useState(customers);
+  useEffect(() => {
+
+  fetchCustomers();
+
+}, []);
+
+const fetchCustomers = async () => {
+
+  try {
+
+    const response = await axios.get(
+      "http://localhost:8080/api/customers"
+    );
+
+    const formattedCustomers =
+      response.data.map(customer => ({
+
+        id: customer.custId,
+
+        name: customer.custName,
+
+        email: customer.custEmail,
+
+        phone: customer.custPhoneno,
+
+        status:
+          customer.custStatus === "ACTIVE"
+            ? "Verified"
+            : "Pending",
+
+        customerType:
+          customer.custType === "COMPANY"
+            ? "Corporate"
+            : "Normal"
+
+      }));
+
+    setCustomerList(formattedCustomers);
+
+  } catch(error) {
+
+    console.error(error);
+
+  }
+
+};
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerToVerify, setCustomerToVerify] = useState(null);
 

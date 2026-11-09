@@ -1,17 +1,24 @@
 import 'package:flutter/material.dart';
 
+import '../../services/booking_service.dart';
+
 class CreateBookingPage extends StatefulWidget {
-  const CreateBookingPage({super.key});
+  const CreateBookingPage({
+    super.key,
+    required this.customerId,
+  });
+
+  final String customerId;
 
   @override
-  State<CreateBookingPage> createState() =>
-      _CreateBookingPageState();
+  State<CreateBookingPage> createState() => _CreateBookingPageState();
 }
 
-class _CreateBookingPageState
-    extends State<CreateBookingPage> {
-  String selectedVehicle = "Van";
+class _CreateBookingPageState extends State<CreateBookingPage> {
+  final BookingService _bookingService = BookingService();
+  String selectedVehicle = "Sedan";
   String selectedCapacity = "Small";
+  bool isSubmitting = false;
 
   final pickupController = TextEditingController();
   final dropoffController = TextEditingController();
@@ -24,6 +31,15 @@ class _CreateBookingPageState
   String fareResult = "";
 
   double calculatedFare = 0;
+
+  @override
+  void dispose() {
+    _bookingService.dispose();
+    pickupController.dispose();
+    dropoffController.dispose();
+    remarksController.dispose();
+    super.dispose();
+  }
 
   Future<void> pickDate() async {
     final date = await showDatePicker(
@@ -59,14 +75,12 @@ class _CreateBookingPageState
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7FB),
-
       appBar: AppBar(
         title: const Text("Create Booking"),
         automaticallyImplyLeading: false,
         backgroundColor: Colors.white,
         elevation: 0,
       ),
-
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -79,8 +93,7 @@ class _CreateBookingPageState
                 borderRadius: BorderRadius.circular(24),
               ),
               child: const Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     "BOOK TRANSPORT",
@@ -100,28 +113,21 @@ class _CreateBookingPageState
                 ],
               ),
             ),
-
             const SizedBox(height: 25),
-
             buildTextField(
               controller: pickupController,
               label: "Pickup Location",
               icon: Icons.location_on_outlined,
             ),
-
             const SizedBox(height: 15),
-
             buildTextField(
               controller: dropoffController,
               label: "Drop-off Location",
               icon: Icons.flag_outlined,
             ),
-
             const SizedBox(height: 15),
-
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 15),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
@@ -134,16 +140,12 @@ class _CreateBookingPageState
                 ),
                 items: const [
                   DropdownMenuItem(
-                    value: "Van",
-                    child: Text("Van"),
+                    value: "Sedan",
+                    child: Text("Sedan"),
                   ),
                   DropdownMenuItem(
-                    value: "Pickup Truck",
-                    child: Text("Pickup Truck"),
-                  ),
-                  DropdownMenuItem(
-                    value: "Lorry",
-                    child: Text("Lorry"),
+                    value: "MPV",
+                    child: Text("MPV"),
                   ),
                 ],
                 onChanged: (value) {
@@ -153,12 +155,9 @@ class _CreateBookingPageState
                 },
               ),
             ),
-
             const SizedBox(height: 15),
-
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 15),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
@@ -190,9 +189,7 @@ class _CreateBookingPageState
                 },
               ),
             ),
-
             const SizedBox(height: 15),
-
             GestureDetector(
               onTap: pickDate,
               child: Container(
@@ -216,9 +213,7 @@ class _CreateBookingPageState
                 ),
               ),
             ),
-
             const SizedBox(height: 15),
-
             GestureDetector(
               onTap: pickTime,
               child: Container(
@@ -235,17 +230,14 @@ class _CreateBookingPageState
                       child: Text(
                         selectedTime == null
                             ? "Select Pickup Time"
-                            : selectedTime!
-                                .format(context),
+                            : selectedTime!.format(context),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-
             const SizedBox(height: 15),
-
             TextField(
               controller: remarksController,
               maxLines: 4,
@@ -254,31 +246,22 @@ class _CreateBookingPageState
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
                 ),
               ),
             ),
-
             const SizedBox(height: 25),
-
             SizedBox(
               width: double.infinity,
               height: 55,
               child: OutlinedButton(
-                onPressed: () {
-                  setState(() {
-                    availabilityResult =
-                        "Available Drivers : 3\nAvailable Vehicles : 2\nStatus : Available";
-                  });
-                },
+                onPressed: checkBookingAvailability,
                 child: const Text(
                   "Check Availability",
                 ),
               ),
             ),
-
             if (availabilityResult.isNotEmpty)
               Container(
                 width: double.infinity,
@@ -295,9 +278,7 @@ class _CreateBookingPageState
                   ),
                 ),
               ),
-
             const SizedBox(height: 15),
-
             SizedBox(
               width: double.infinity,
               height: 55,
@@ -308,26 +289,19 @@ class _CreateBookingPageState
                 onPressed: () {
                   double fare = 50;
 
-                  if (selectedVehicle == "Van") {
+                  if (selectedVehicle == "Sedan") {
                     fare += 30;
                   }
 
-                  if (selectedVehicle ==
-                      "Pickup Truck") {
+                  if (selectedVehicle == "MPV") {
                     fare += 60;
                   }
 
-                  if (selectedVehicle == "Lorry") {
-                    fare += 120;
-                  }
-
-                  if (selectedCapacity ==
-                      "Medium") {
+                  if (selectedCapacity == "Medium") {
                     fare += 25;
                   }
 
-                  if (selectedCapacity ==
-                      "Large") {
+                  if (selectedCapacity == "Large") {
                     fare += 60;
                   }
 
@@ -346,7 +320,6 @@ class _CreateBookingPageState
                 ),
               ),
             ),
-
             if (fareResult.isNotEmpty)
               Container(
                 width: double.infinity,
@@ -357,8 +330,7 @@ class _CreateBookingPageState
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       "Trip Fare",
@@ -367,9 +339,7 @@ class _CreateBookingPageState
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-
                     const SizedBox(height: 10),
-
                     Text(
                       fareResult,
                       style: const TextStyle(
@@ -380,9 +350,7 @@ class _CreateBookingPageState
                   ],
                 ),
               ),
-
             const SizedBox(height: 25),
-
             SizedBox(
               width: double.infinity,
               height: 55,
@@ -401,32 +369,10 @@ class _CreateBookingPageState
                 style: ElevatedButton.styleFrom(
                   backgroundColor: primaryColor,
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                 ),
-                onPressed: () {
-                  if (fareResult.isEmpty) {
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "Please calculate trip fare first.",
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        "Booking submitted successfully.",
-                      ),
-                    ),
-                  );
-                },
+                onPressed: isSubmitting ? null : submitBooking,
               ),
             ),
           ],
@@ -452,6 +398,95 @@ class _CreateBookingPageState
           borderSide: BorderSide.none,
         ),
       ),
+    );
+  }
+
+  Future<void> submitBooking() async {
+    if (fareResult.isEmpty) {
+      showMessage("Please calculate trip fare first.");
+      return;
+    }
+
+    if (pickupController.text.trim().isEmpty ||
+        dropoffController.text.trim().isEmpty ||
+        selectedDate == null ||
+        selectedTime == null) {
+      showMessage("Please enter your locations and pickup date/time.");
+      return;
+    }
+
+    final customerId = int.tryParse(widget.customerId);
+    if (customerId == null) {
+      showMessage(
+          "Your customer account could not be identified. Please log in again.");
+      return;
+    }
+
+    setState(() {
+      isSubmitting = true;
+    });
+
+    try {
+      await _bookingService.createBooking(
+        customerId: customerId,
+        pickupDate: _formatDate(selectedDate!),
+        pickupTime: _formatTime(selectedTime!),
+        pickupAddress: pickupController.text.trim(),
+        destinationAddress: dropoffController.text.trim(),
+        vehicleType: selectedVehicle,
+        fare: calculatedFare,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Booking submitted for admin verification."),
+        ),
+      );
+      Navigator.of(context).pop();
+    } on BookingException catch (exception) {
+      if (!mounted) return;
+      showMessage(exception.message);
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> checkBookingAvailability() async {
+    if (selectedDate == null || selectedTime == null) {
+      showMessage("Please select a pickup date and time first.");
+      return;
+    }
+
+    try {
+      final result = await _bookingService.checkAvailability(
+        pickupDate: _formatDate(selectedDate!),
+        pickupTime: _formatTime(selectedTime!),
+        vehicleType: selectedVehicle,
+      );
+      if (!mounted) return;
+      setState(() {
+        availabilityResult = result;
+      });
+    } on BookingException catch (exception) {
+      if (!mounted) return;
+      showMessage(exception.message);
+    }
+  }
+
+  String _formatDate(DateTime date) =>
+      "${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+
+  String _formatTime(TimeOfDay time) =>
+      "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00";
+
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
     );
   }
 }

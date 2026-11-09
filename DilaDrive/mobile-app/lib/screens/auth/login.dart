@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../services/auth_service.dart';
 import '../customer/customer_navigation.dart';
 import '../driver/driver_navigation.dart';
 import 'register.dart';
@@ -14,12 +15,66 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   bool isCustomer = true;
   bool obscurePassword = true;
+  bool isLoading = false;
+  final AuthService _authService = AuthService();
 
-  final TextEditingController emailController =
-  TextEditingController();
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
 
-  final TextEditingController passwordController =
-  TextEditingController();
+  @override
+  void dispose() {
+    _authService.dispose();
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    if (isLoading) {
+      return;
+    }
+
+    if (emailController.text.trim().isEmpty ||
+        passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your email and password.')),
+      );
+      return;
+    }
+
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      final user = await _authService.login(
+        email: emailController.text,
+        password: passwordController.text,
+        role: isCustomer ? 'CUSTOMER' : 'DRIVER',
+      );
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => isCustomer
+              ? CustomerNavigationPage(customerId: user.id)
+              : const DriverNavigationPage(),
+        ),
+      );
+    } on AuthException catch (exception) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(exception.message)),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,15 +82,12 @@ class _LoginPageState extends State<LoginPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F8FA),
-
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-
           child: Column(
             children: [
               const SizedBox(height: 50),
-
               Container(
                 width: 90,
                 height: 90,
@@ -49,9 +101,7 @@ class _LoginPageState extends State<LoginPage> {
                   size: 45,
                 ),
               ),
-
               const SizedBox(height: 20),
-
               const Text(
                 "DilaDrive",
                 style: TextStyle(
@@ -60,96 +110,79 @@ class _LoginPageState extends State<LoginPage> {
                   color: primaryColor,
                 ),
               ),
-
               const SizedBox(height: 8),
-
               const Text(
                 "Transport Management System",
                 style: TextStyle(
                   color: Colors.grey,
                 ),
               ),
-
               const SizedBox(height: 40),
-
               Container(
                 height: 55,
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade200,
-                  borderRadius:
-                  BorderRadius.circular(15),
+                  borderRadius: BorderRadius.circular(15),
                 ),
                 child: Row(
                   children: [
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
+                          if (isLoading) return;
                           setState(() {
                             isCustomer = true;
                           });
                         },
                         child: AnimatedContainer(
-                          duration:
-                          const Duration(
+                          duration: const Duration(
                             milliseconds: 200,
                           ),
                           decoration: BoxDecoration(
-                            color: isCustomer
-                                ? primaryColor
-                                : Colors.transparent,
-                            borderRadius:
-                            BorderRadius.circular(
+                            color:
+                                isCustomer ? primaryColor : Colors.transparent,
+                            borderRadius: BorderRadius.circular(
                               12,
                             ),
                           ),
-                          alignment:
-                          Alignment.center,
+                          alignment: Alignment.center,
                           child: Text(
                             "Customer",
                             style: TextStyle(
-                              color: isCustomer
-                                  ? Colors.white
-                                  : Colors.black87,
-                              fontWeight:
-                              FontWeight.bold,
+                              color: isCustomer ? Colors.white : Colors.black87,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
                       ),
                     ),
-
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
+                          if (isLoading) return;
                           setState(() {
                             isCustomer = false;
                           });
                         },
                         child: AnimatedContainer(
-                          duration:
-                          const Duration(
+                          duration: const Duration(
                             milliseconds: 200,
                           ),
                           decoration: BoxDecoration(
-                            color: !isCustomer
-                                ? primaryColor
-                                : Colors.transparent,
-                            borderRadius:
-                            BorderRadius.circular(
+                            color:
+                                !isCustomer ? primaryColor : Colors.transparent,
+                            borderRadius: BorderRadius.circular(
                               12,
                             ),
                           ),
-                          alignment:
-                          Alignment.center,
+                          alignment: Alignment.center,
                           child: Text(
                             "Driver",
                             style: TextStyle(
-                              color: !isCustomer
-                                  ? Colors.white
-                                  : Colors.black87,
-                              fontWeight:
-                              FontWeight.bold,
+                              color:
+                                  !isCustomer ? Colors.white : Colors.black87,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
@@ -158,9 +191,7 @@ class _LoginPageState extends State<LoginPage> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 30),
-
               TextField(
                 controller: emailController,
                 decoration: InputDecoration(
@@ -171,21 +202,15 @@ class _LoginPageState extends State<LoginPage> {
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
-                    borderRadius:
-                    BorderRadius.circular(15),
-                    borderSide:
-                    BorderSide.none,
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
-
               const SizedBox(height: 20),
-
               TextField(
-                controller:
-                passwordController,
-                obscureText:
-                obscurePassword,
+                controller: passwordController,
+                obscureText: obscurePassword,
                 decoration: InputDecoration(
                   hintText: "Password",
                   prefixIcon: const Icon(
@@ -193,35 +218,27 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      obscurePassword
-                          ? Icons.visibility
-                          : Icons.visibility_off,
+                      obscurePassword ? Icons.visibility : Icons.visibility_off,
                     ),
                     onPressed: () {
                       setState(() {
-                        obscurePassword =
-                        !obscurePassword;
+                        obscurePassword = !obscurePassword;
                       });
                     },
                   ),
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
-                    borderRadius:
-                    BorderRadius.circular(
+                    borderRadius: BorderRadius.circular(
                       15,
                     ),
-                    borderSide:
-                    BorderSide.none,
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
-
               const SizedBox(height: 10),
-
               Align(
-                alignment:
-                Alignment.centerRight,
+                alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () {},
                   child: const Text(
@@ -229,73 +246,44 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 25),
-
               SizedBox(
                 width: double.infinity,
                 height: 55,
                 child: ElevatedButton(
-                  style:
-                  ElevatedButton.styleFrom(
-                    backgroundColor:
-                    primaryColor,
-                    shape:
-                    RoundedRectangleBorder(
-                      borderRadius:
-                      BorderRadius
-                          .circular(15),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
                     ),
                   ),
-                  onPressed: () {
-                    if (isCustomer) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                          const CustomerNavigationPage(),
-                        ),
-                      );
-                    } else {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                          const DriverNavigationPage(),
-                        ),
-                      );
-                    }
-                  },
+                  onPressed: isLoading ? null : _login,
                   child: const Text(
                     "Login",
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 18,
-                      fontWeight:
-                      FontWeight.bold,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
               ),
-
               const SizedBox(height: 20),
-
               if (isCustomer)
                 TextButton(
                   onPressed: () {
+                    if (isLoading) return;
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                        const RegisterPage(),
+                        builder: (_) => const RegisterPage(),
                       ),
                     );
                   },
                   child: const Text(
                     "Create Customer Account",
                     style: TextStyle(
-                      fontWeight:
-                      FontWeight.w600,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),

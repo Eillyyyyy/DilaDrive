@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   UserRound,
   Mail,
@@ -9,13 +9,19 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
+  Camera,
+  KeyRound,
+  LockKeyhole,
+  Trash2,
 } from "lucide-react";
 
-export default function Profile({ user, onSave }) {
+export default function Profile({ user, onSave, onChangePassword }) {
   const getProfile = () => ({
     name: user?.name || "DilaDrive Admin",
     email: user?.email || "",
     phone: user?.phone || "",
+    address: user?.address || "",
+    profileImage: user?.profileImage || "",
     role: user?.role || "Administrator",
   });
 
@@ -23,8 +29,16 @@ export default function Profile({ user, onSave }) {
   const [originalForm, setOriginalForm] = useState(getProfile);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
+  const imageInputRef = useRef(null);
 
   useEffect(() => {
     const profile = getProfile();
@@ -46,7 +60,47 @@ export default function Profile({ user, onSave }) {
   function handleCancel() {
     setForm(originalForm);
     setIsEditing(false);
+    setCurrentPassword("");
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
     setMessage("");
+  }
+
+  function handleImageChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      setMessage("Please choose a PNG, JPG, or WebP image.");
+      setMessageType("error");
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setMessage("The profile image must be 2 MB or smaller.");
+      setMessageType("error");
+      e.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setForm((prev) => ({ ...prev, profileImage: reader.result }));
+        setMessage("");
+      } else {
+        setMessage("Unable to read the selected image.");
+        setMessageType("error");
+      }
+    };
+    reader.onerror = () => {
+      setMessage("Unable to read the selected image.");
+      setMessageType("error");
+    };
+    reader.readAsDataURL(file);
   }
 
   async function handleSubmit(e) {
@@ -57,6 +111,7 @@ export default function Profile({ user, onSave }) {
       name: form.name.trim(),
       email: form.email.trim().toLowerCase(),
       phone: form.phone.trim(),
+      address: form.address.trim(),
     };
 
     if (!updatedProfile.name || !updatedProfile.email) {
@@ -80,6 +135,12 @@ export default function Profile({ user, onSave }) {
       return;
     }
 
+    if (!currentPassword) {
+      setMessage("Enter your current password to save profile changes.");
+      setMessageType("error");
+      return;
+    }
+
     if (typeof onSave !== "function") {
       setMessage("Unable to save profile. Please connect the save function.");
       setMessageType("error");
@@ -90,11 +151,15 @@ export default function Profile({ user, onSave }) {
       setSaving(true);
       setMessage("");
 
-      await onSave(updatedProfile);
+      const savedProfile = await onSave(updatedProfile, currentPassword);
 
-      setForm(updatedProfile);
-      setOriginalForm(updatedProfile);
+      setForm(savedProfile || updatedProfile);
+      setOriginalForm(savedProfile || updatedProfile);
       setIsEditing(false);
+      setCurrentPassword("");
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
       setMessage("Profile updated successfully.");
       setMessageType("success");
     } catch (error) {
@@ -103,6 +168,53 @@ export default function Profile({ user, onSave }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handlePasswordSubmit(e) {
+    e.preventDefault();
+    setMessage("");
+
+    if (passwordForm.newPassword.length < 8) {
+      setMessage("The new password must be at least 8 characters.");
+      setMessageType("error");
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setMessage("The new passwords do not match.");
+      setMessageType("error");
+      return;
+    }
+    if (typeof onChangePassword !== "function") {
+      setMessage("Unable to change password. Please connect the password function.");
+      setMessageType("error");
+      return;
+    }
+
+    try {
+      setPasswordSaving(true);
+      await onChangePassword(
+        passwordForm.currentPassword,
+        passwordForm.newPassword,
+      );
+      setPasswordForm({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+      setMessage("Password changed successfully.");
+      setMessageType("success");
+    } catch (error) {
+      setMessage(error?.message || "Failed to change password.");
+      setMessageType("error");
+    } finally {
+      setPasswordSaving(false);
+    }
+  }
+
+  function handlePasswordFieldChange(e) {
+    const { name, value } = e.target;
+    setPasswordForm((prev) => ({ ...prev, [name]: value }));
+    setMessage("");
   }
 
   const initials = (form.name || "Admin")
@@ -144,8 +256,40 @@ export default function Profile({ user, onSave }) {
       {/* Profile Summary */}
       <div className="rounded-2xl bg-white p-5 shadow-sm sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-teal-50 text-2xl font-bold text-teal-700">
-            {initials || <UserRound size={32} />}
+          <div className="relative h-20 w-20 shrink-0">
+            {form.profileImage ? (
+              <img
+                src={form.profileImage}
+                alt="Profile"
+                className="h-20 w-20 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-teal-50 text-2xl font-bold text-teal-700">
+                {initials || <UserRound size={32} />}
+              </div>
+            )}
+
+            {isEditing && (
+              <>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleImageChange}
+                  className="hidden"
+                  aria-label="Choose profile image"
+                />
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  className="absolute bottom-0 right-0 grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-teal-700 text-white shadow-sm transition hover:bg-teal-800"
+                  aria-label="Change profile image"
+                  title="Change profile image"
+                >
+                  <Camera size={15} />
+                </button>
+              </>
+            )}
           </div>
 
           <div className="min-w-0">
@@ -163,6 +307,26 @@ export default function Profile({ user, onSave }) {
             </span>
           </div>
         </div>
+        {isEditing && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-500 sm:ml-24">
+            <span>PNG, JPG or WebP (maximum 2 MB)</span>
+            {form.profileImage && (
+              <button
+                type="button"
+                  onClick={() => {
+                    setForm((prev) => ({ ...prev, profileImage: "" }));
+                    if (imageInputRef.current) {
+                      imageInputRef.current.value = "";
+                    }
+                  }}
+                className="inline-flex items-center gap-1 font-medium text-red-600 hover:text-red-700"
+              >
+                <Trash2 size={14} />
+                Remove photo
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Success / Error Message */}
@@ -238,6 +402,30 @@ export default function Profile({ user, onSave }) {
               placeholder="Enter phone number"
             />
 
+            <div className="sm:col-span-2">
+              <label
+                htmlFor="profile-address"
+                className="mb-2 block text-sm font-medium text-gray-700"
+              >
+                Address
+              </label>
+              <textarea
+                id="profile-address"
+                name="address"
+                value={form.address}
+                onChange={handleChange}
+                readOnly={!isEditing}
+                maxLength={500}
+                rows={3}
+                placeholder="Enter your address"
+                className={`w-full rounded-xl border px-3.5 py-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 read-only:cursor-default ${
+                  isEditing
+                    ? "border-gray-300 bg-white focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+                    : "border-gray-200 bg-gray-50"
+                }`}
+              />
+            </div>
+
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">
                 Account Role
@@ -257,6 +445,25 @@ export default function Profile({ user, onSave }) {
                 Role can only be changed by an authorized administrator.
               </p>
             </div>
+
+            {isEditing && (
+              <div className="sm:col-span-2">
+                <ProfileField
+                  label="Current Password"
+                  name="currentPassword"
+                  value={currentPassword}
+                  onChange={(e) => {
+                    setCurrentPassword(e.target.value);
+                    setMessage("");
+                  }}
+                  editing
+                  icon={LockKeyhole}
+                  type="password"
+                  placeholder="Confirm your current password"
+                  required
+                />
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}
@@ -282,6 +489,71 @@ export default function Profile({ user, onSave }) {
               </button>
             </div>
           )}
+        </div>
+      </form>
+
+      <form onSubmit={handlePasswordSubmit}>
+        <div className="rounded-2xl bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-6 flex items-center gap-3 border-b border-gray-100 pb-4">
+            <div className="rounded-xl bg-teal-50 p-2.5 text-teal-700">
+              <KeyRound size={21} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">
+                Change Password
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Use at least 8 characters for your new password.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <ProfileField
+              label="Current Password"
+              name="currentPassword"
+              value={passwordForm.currentPassword}
+              onChange={handlePasswordFieldChange}
+              editing
+              icon={LockKeyhole}
+              type="password"
+              placeholder="Enter current password"
+              required
+            />
+            <ProfileField
+              label="New Password"
+              name="newPassword"
+              value={passwordForm.newPassword}
+              onChange={handlePasswordFieldChange}
+              editing
+              icon={KeyRound}
+              type="password"
+              placeholder="Enter new password"
+              required
+            />
+            <ProfileField
+              label="Confirm New Password"
+              name="confirmPassword"
+              value={passwordForm.confirmPassword}
+              onChange={handlePasswordFieldChange}
+              editing
+              icon={KeyRound}
+              type="password"
+              placeholder="Re-enter new password"
+              required
+            />
+          </div>
+
+          <div className="mt-7 flex justify-end border-t border-gray-100 pt-5">
+            <button
+              type="submit"
+              disabled={passwordSaving}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              <KeyRound size={17} />
+              {passwordSaving ? "Changing..." : "Change Password"}
+            </button>
+          </div>
         </div>
       </form>
     </div>
@@ -333,7 +605,11 @@ function ProfileField({
               ? "name"
               : name === "email"
                 ? "email"
-                : "tel"
+                : name.toLowerCase().includes("password")
+                  ? name === "currentPassword"
+                    ? "current-password"
+                    : "new-password"
+                  : "tel"
           }
           className="w-full min-w-0 bg-transparent py-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 read-only:cursor-default"
         />

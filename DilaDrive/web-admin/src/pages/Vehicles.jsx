@@ -1,5 +1,6 @@
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import axios from "axios";
 import {
   Eye,
   Pencil,
@@ -35,10 +36,50 @@ const labelClass =
   "mb-2 block text-sm font-medium text-slate-700";
 
 export default function Vehicles({ vehicles = [] }) {
-  const [vehicleList, setVehicleList] = useState(() =>
-    Array.isArray(vehicles) ? vehicles : []
-  );
+  const [vehicleList, setVehicleList] = useState([]);
+  useEffect(() => {
+  fetchVehicles();
+}, []);
 
+const fetchVehicles = async () => {
+  try {
+
+    const response = await axios.get(
+      "http://localhost:8080/api/vehicles"
+    );
+
+    const formattedVehicles =
+      response.data.map(vehicle => ({
+
+        plate: vehicle.vehiclePlateno,
+
+        type: vehicle.vehicleType,
+
+        capacity: vehicle.vehicleCapacity,
+
+        roadTaxExpiry:
+          vehicle.vehicleRoadtaxexpiry,
+
+        serviceExpiry:
+          vehicle.vehicleServiceexpiry,
+
+        status:
+          vehicle.vehicleStatus === "AVAILABLE"
+            ? "Available"
+            : vehicle.vehicleStatus === "IN_USE"
+            ? "In Use"
+            : "Maintenance"
+
+      }));
+
+    setVehicleList(formattedVehicles);
+
+  } catch (error) {
+
+    console.error(error);
+
+  }
+};
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selectedVehicle, setSelectedVehicle] = useState(null);
@@ -735,11 +776,6 @@ function VehicleForm({
             <option value="">Select vehicle type</option>
             <option value="Car">Car</option>
             <option value="MPV">MPV</option>
-            <option value="Van">Van</option>
-            <option value="Bus">Bus</option>
-            <option value="Lorry">Lorry</option>
-            <option value="Motorcycle">Motorcycle</option>
-            <option value="Other">Other</option>
           </select>
         </div>
 

@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import axios from "axios";
 import {
   CalendarDays,
   Clock,
@@ -14,6 +16,31 @@ export default function Dashboard({ bookings = [], onNavigate }) {
     (booking) => booking.status === "Pending"
   ).length;
 
+  const [statsData, setStatsData] = useState({
+  customers: 0,
+  drivers: 0,
+  vehicles: 0,
+  bookings: 0,
+});
+useEffect(() => {
+  fetchDashboardStats();
+}, []);
+
+const fetchDashboardStats = async () => {
+  try {
+
+    const response = await axios.get(
+      "http://localhost:8080/api/dashboard/stats"
+    );
+
+    setStatsData(response.data);
+
+  } catch (error) {
+
+    console.error(error);
+
+  }
+};
   const stats = [
     {
       title: "Total Bookings",

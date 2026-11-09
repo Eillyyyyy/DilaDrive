@@ -1,5 +1,6 @@
 
 import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import {
   Search,
   Eye,
@@ -13,65 +14,108 @@ import {
   Plane,
   Clock,
   Truck,
-  UserRound,
   ClipboardCheck,
   RefreshCw,
   ArrowRight,
   AlertCircle,
 } from "lucide-react";
 
-const TRIP_STATUSES = [
-  "Assigned",
-  "OTW",
-  "Waiting",
-  "Pickup",
-  "Drop",
-  "Completed",
-];
-
 const BOOKING_STATUSES = [
   "Pending Verification",
   "Confirmed",
+  "Completed",
   "Cancelled",
 ];
 
-const initialAssignment = {
-  driver: "",
-  vehicle: "",
-};
-
 export default function Bookings({
   bookings = [],
-  drivers = [],
-  vehicles = [],
   onVerifyBooking,
-  onAssignTrip,
-  onReassignTrip,
+  onNavigate,
 }) {
-  const [bookingList, setBookingList] = useState(
-    () => bookings || []
-  );
+ const [bookingList, setBookingList] = useState([]);
+ useEffect(() => {
+   fetchBookings();
+ }, []);
 
-  const [driverList] = useState(() => drivers || []);
-  const [vehicleList] = useState(() => vehicles || []);
+const fetchBookings = async () => {
+  try {
+
+    const response = await axios.get(
+      "http://localhost:8080/api/bookings"
+    );
+
+    const formattedBookings =
+      response.data.map(booking => ({
+
+        id: booking.bookingId,
+
+        customer:
+          "Customer #" + booking.custId,
+
+        date:
+          booking.bookingTripdate,
+
+        pickupTime:
+          booking.bookingPickuptime,
+
+        pickup:
+          booking.bookingPickupaddress,
+
+        dropoff:
+          booking.bookingDestinationaddress,
+
+        flight:
+          booking.bookingFlightno,
+
+        passengers:
+          booking.bookingPassengercount,
+
+        luggageCount:
+          booking.bookingLuggagecount,
+
+        luggageSize:
+          booking.bookingLuggagesize,
+
+        fare:
+          booking.bookingTripfare,
+
+        driverId: booking.driverId,
+
+        vehicleId: booking.vehicleId,
+
+        driver: booking.driverId
+          ? `Driver #${booking.driverId}`
+          : "",
+
+        vehicle: booking.vehicleId
+          ? `Vehicle #${booking.vehicleId}`
+          : "",
+
+        status: ({
+          PENDING: "Pending Verification",
+          PENDING_VERIFICATION: "Pending Verification",
+          CONFIRMED: "Confirmed",
+          CANCELLED: "Cancelled",
+        }[String(booking.bookingStatus || "").toUpperCase()] ||
+          booking.bookingStatus ||
+          "Pending Verification")
+
+      }));
+
+    setBookingList(formattedBookings);
+
+  } catch (error) {
+    console.error("Unable to load bookings:", error);
+  }
+  };
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
 
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [bookingToVerify, setBookingToVerify] = useState(null);
-  const [bookingToAssign, setBookingToAssign] = useState(null);
-
-  const [assignment, setAssignment] = useState({
-    ...initialAssignment,
-  });
 
   const [error, setError] = useState("");
-
-  // Keep displayed records synchronized with parent data.
-  useEffect(() => {
-    setBookingList(bookings || []);
-  }, [bookings]);
 
   const stats = useMemo(() => ({
     total: bookingList.length,
@@ -140,130 +184,48 @@ export default function Bookings({
 
     const booking = bookingToVerify;
 
-    // Booking verification must check schedule and resources.
-    if (booking.status === "Cancelled") {
-      setError("Cancelled bookings cannot be confirmed.");
+    if (["Cancelled", "Completed"].includes(booking.status)) {
+      setError("Cancelled or completed bookings cannot be confirmed.");
       return;
     }
 
     try {
+      let verifiedBooking;
       if (onVerifyBooking) {
-        await onVerifyBooking(booking.id);
+        verifiedBooking = await onVerifyBooking(booking.id);
+      } else {
+        const response = await axios.put(
+          `http://localhost:8080/api/bookings/${booking.id}/verify`
+        );
+        verifiedBooking = response.data;
       }
 
       updateBooking(booking.id, {
         status: "Confirmed",
+        driverId: verifiedBooking?.driverId ?? booking.driverId,
+        vehicleId: verifiedBooking?.vehicleId ?? booking.vehicleId,
+        driver: verifiedBooking?.driverId
+          ? `Driver #${verifiedBooking.driverId}`
+          : booking.driver,
+        vehicle: verifiedBooking?.vehicleId
+          ? `Vehicle #${verifiedBooking.vehicleId}`
+          : booking.vehicle,
       });
 
       setBookingToVerify(null);
       setError("");
-    } catch {
+    } catch (verificationError) {
       setError(
+        verificationError.response?.data?.message ||
+        verificationError.response?.data?.detail ||
         "Unable to confirm this booking. Please try again."
       );
     }
   };
 
-  const openAssignment = (booking) => {
-    setBookingToAssign(booking);
-
-    setAssignment({
-      driver: booking.driverId || booking.driver || "",
-      vehicle: booking.vehicleId || booking.vehicle || "",
-    });
-
+  const openAssignment = () => {
     setError("");
-  };
-
-  const handleAssignTrip = async (e) => {
-    e.preventDefault();
-
-    if (!bookingToAssign) return;
-
-    if (
-      !assignment.driver ||
-      !assignment.vehicle
-    ) {
-      setError("Please select both a driver and a vehicle.");
-      return;
-    }
-
-    const selectedDriver = driverList.find(
-      (driver) =>
-        String(driver.id || driver.name) ===
-        String(assignment.driver)
-    );
-
-    const selectedVehicle = vehicleList.find(
-      (vehicle) =>
-        String(vehicle.id || vehicle.plate) ===
-        String(assignment.vehicle)
-    );
-
-    if (!selectedDriver || !selectedVehicle) {
-      setError("The selected driver or vehicle was not found.");
-      return;
-    }
-
-    const driverAvailable =
-      selectedDriver.status === "Available";
-
-    const vehicleAvailable =
-      selectedVehicle.status === "Available";
-
-    if (!driverAvailable) {
-      setError("The selected driver is not available.");
-      return;
-    }
-
-    if (!vehicleAvailable) {
-      setError("The selected vehicle is not available.");
-      return;
-    }
-
-    const passengers = Number(
-      bookingToAssign.passengers || 1
-    );
-
-    if (Number(selectedVehicle.capacity) < passengers) {
-      setError(
-        "Vehicle passenger capacity is insufficient for this booking."
-      );
-      return;
-    }
-
-    const isReassignment = Boolean(
-      bookingToAssign.driverId || bookingToAssign.driver
-    );
-
-    try {
-      const payload = {
-        bookingId: bookingToAssign.id,
-        driverId: selectedDriver.id || selectedDriver.name,
-        vehicleId: selectedVehicle.id || selectedVehicle.plate,
-      };
-
-      if (isReassignment && onReassignTrip) {
-        await onReassignTrip(payload);
-      } else if (onAssignTrip) {
-        await onAssignTrip(payload);
-      }
-
-      updateBooking(bookingToAssign.id, {
-        driverId: payload.driverId,
-        driver: selectedDriver.name || selectedDriver.id,
-        vehicleId: payload.vehicleId,
-        vehicle: selectedVehicle.plate || selectedVehicle.id,
-        tripStatus: "Assigned",
-      });
-
-      setBookingToAssign(null);
-      setError("");
-    } catch {
-      setError(
-        "Unable to save the assignment. Please try again."
-      );
-    }
+    onNavigate?.("Assignments");
   };
 
   const getBookingStyle = (status) => {
@@ -274,6 +236,8 @@ export default function Bookings({
         "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
       Verified:
         "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+      Completed:
+        "bg-slate-100 text-slate-600 ring-slate-500/20",
       Cancelled:
         "bg-rose-50 text-rose-700 ring-rose-600/20",
     };
@@ -732,125 +696,6 @@ export default function Bookings({
         </Modal>
       )}
 
-      {/* Driver and vehicle assignment */}
-      {bookingToAssign && (
-        <Modal
-          title={
-            bookingToAssign.driver
-              ? "Reassign Trip"
-              : "Assign Driver & Vehicle"
-          }
-          subtitle="Select available resources for this confirmed booking."
-          onClose={() => {
-            setBookingToAssign(null);
-            setError("");
-          }}
-          icon={<Truck size={21} />}
-        >
-          <form onSubmit={handleAssignTrip} className="space-y-5">
-            <div className="rounded-xl bg-slate-50 p-4">
-              <Detail label="Booking ID" value={bookingToAssign.id} />
-              <Detail label="Customer" value={bookingToAssign.customer} />
-              <Detail label="Passengers" value={bookingToAssign.passengers || 1} />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-700">
-                Available Driver
-              </label>
-
-              <select
-                value={assignment.driver}
-                onChange={(e) =>
-                  setAssignment((old) => ({
-                    ...old,
-                    driver: e.target.value,
-                  }))
-                }
-                required
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-500"
-              >
-                <option value="">Select driver</option>
-                {driverList
-                  .filter((driver) => driver.status === "Available")
-                  .map((driver) => (
-                    <option
-                      key={driver.id || driver.name}
-                      value={driver.id || driver.name}
-                    >
-                      {driver.name} — {driver.status}
-                    </option>
-                  ))}
-              </select>
-
-              {driverList.length === 0 && (
-                <p className="mt-2 text-xs text-amber-700">
-                  No driver records were provided to this page.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-slate-700">
-                Available Vehicle
-              </label>
-
-              <select
-                value={assignment.vehicle}
-                onChange={(e) =>
-                  setAssignment((old) => ({
-                    ...old,
-                    vehicle: e.target.value,
-                  }))
-                }
-                required
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-500"
-              >
-                <option value="">Select vehicle</option>
-                {vehicleList
-                  .filter((vehicle) => vehicle.status === "Available")
-                  .map((vehicle) => (
-                    <option
-                      key={vehicle.id || vehicle.plate}
-                      value={vehicle.id || vehicle.plate}
-                    >
-                      {vehicle.plate} — {vehicle.type} — {vehicle.capacity} seats
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            {error && <ErrorMessage>{error}</ErrorMessage>}
-
-            <p className="text-xs leading-5 text-slate-400">
-              Assignment checks the selected driver's availability
-              and the vehicle's passenger capacity. The backend
-              must also validate schedule conflicts before saving.
-            </p>
-
-            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setBookingToAssign(null);
-                  setError("");
-                }}
-                className="rounded-xl border border-slate-200 px-4 py-2.5 font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 font-semibold text-white hover:bg-teal-700"
-              >
-                <CheckCircle2 size={17} />
-                Save Assignment
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }

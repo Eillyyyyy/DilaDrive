@@ -1,5 +1,6 @@
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import {
   Plus,
   Search,
@@ -17,91 +18,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-// Demo booking data.
-// In the actual system, fetch this data from the backend.
-const initialBookings = [
-  {
-    id: "DD-1028",
-    customer: "Aina Logistics",
-    pickup: "KLIA Terminal 1",
-    destination: "Shah Alam",
-    date: "2026-10-22",
-    time: "09:00",
-    passengers: 2,
-    status: "Confirmed",
-  },
-  {
-    id: "DD-1027",
-    customer: "Maju Jaya Enterprise",
-    pickup: "Subang Airport",
-    destination: "Kuala Lumpur",
-    date: "2026-10-22",
-    time: "10:00",
-    passengers: 3,
-    status: "Confirmed",
-  },
-  {
-    id: "DD-1026",
-    customer: "Nusa Travel",
-    pickup: "KLIA Terminal 2",
-    destination: "Putrajaya",
-    date: "2026-10-23",
-    time: "14:00",
-    passengers: 4,
-    status: "Pending Verification",
-  },
-  {
-    id: "DD-1025",
-    customer: "Bina Maju Sdn Bhd",
-    pickup: "Petaling Jaya",
-    destination: "Kuala Lumpur",
-    date: "2026-10-24",
-    time: "08:30",
-    passengers: 2,
-    status: "Confirmed",
-  },
-];
-
-const initialDrivers = [
-  { id: "DR-001", name: "Ahmad Firdaus", active: true },
-  { id: "DR-002", name: "Farid Iskandar", active: true },
-  { id: "DR-003", name: "Mohd Hakim", active: true },
-];
-
-const initialVehicles = [
-  { id: "V-001", plate: "VAN-1024", type: "Van", capacity: 7, active: true },
-  { id: "V-002", plate: "LOR-2018", type: "Lorry", capacity: 10, active: true },
-  { id: "V-003", plate: "VAN-1025", type: "Van", capacity: 6, active: true },
-];
-
-const initialAssignments = [
-  {
-    id: "AS-001",
-    bookingId: "DD-1028",
-    customer: "Aina Logistics",
-    driverId: "DR-001",
-    vehicleId: "V-001",
-    date: "2026-10-22",
-    time: "09:00",
-    durationHours: 2,
-    tripStatus: "Assigned",
-    history: [],
-    notificationSent: false,
-  },
-  {
-    id: "AS-002",
-    bookingId: "DD-1027",
-    customer: "Maju Jaya Enterprise",
-    driverId: "DR-002",
-    vehicleId: "V-002",
-    date: "2026-10-22",
-    time: "10:00",
-    durationHours: 2,
-    tripStatus: "OTW",
-    history: [],
-    notificationSent: false,
-  },
-];
+const API_URL = "http://localhost:8080/api";
 
 const tripStatuses = [
   "Assigned",
@@ -129,28 +46,72 @@ const emptyForm = {
   vehicleId: "",
 };
 
-function getTripDateTime(date, time) {
-  return new Date(`${date}T${time}:00`).getTime();
-}
+const getApiError = (error, fallback) => {
+  const response = error.response?.data;
+  return (typeof response === "string" ? response : response?.message || response?.detail)
+    || error.message
+    || fallback;
+};
 
-function getTripEndTime(item) {
-  return (
-    getTripDateTime(item.date, item.time) +
-    (item.durationHours || 2) * 60 * 60 * 1000
-  );
-}
+const normalizeStatus = (status) => {
+  const normalized = String(status || "").trim().toUpperCase();
+  return normalized === "IN_PROGRESS" ? "OTW" : normalized;
+};
 
-function tripsOverlap(first, second) {
-  if (first.date !== second.date) return false;
+const mapBooking = (booking) => ({
+  id: booking.bookingId,
+  customer: `Customer #${booking.custId}`,
+  pickup: booking.bookingPickupaddress || "",
+  destination: booking.bookingDestinationaddress || "",
+  date: booking.bookingTripdate || "",
+  time: String(booking.bookingPickuptime || "").slice(0, 5),
+  passengers: booking.bookingPassengercount || 0,
+  bookingType: booking.bookingType || "",
+  status: ({
+    CONFIRMED: "Confirmed",
+    CANCELLED: "Cancelled",
+    COMPLETED: "Completed",
+    ASSIGNED: "Assigned",
+  }[String(booking.bookingStatus || "").toUpperCase()] || "Pending Verification"),
+});
 
-  const firstStart = getTripDateTime(first.date, first.time);
-  const secondStart = getTripDateTime(second.date, second.time);
+const mapDriver = (driver) => ({
+  id: driver.driverId,
+  name: driver.driverName || "Unnamed driver",
+  availability: normalizeStatus(driver.driverAvailability),
+  accountStatus: normalizeStatus(driver.driverStatus),
+});
 
-  return (
-    firstStart < getTripEndTime(second) &&
-    secondStart < getTripEndTime(first)
-  );
-}
+const mapVehicle = (vehicle) => ({
+  id: vehicle.vehicleId,
+  plate: vehicle.vehiclePlateno || `Vehicle #${vehicle.vehicleId}`,
+  type: vehicle.vehicleType || "",
+  capacity: vehicle.vehicleCapacity || 0,
+  status: normalizeStatus(vehicle.vehicleStatus),
+});
+
+const mapAssignment = (assignment) => ({
+  id: assignment.assignmentId,
+  bookingId: assignment.bookingId,
+  customer: assignment.customer || `Booking #${assignment.bookingId}`,
+  driverId: assignment.driverId,
+  vehicleId: assignment.vehicleId,
+  date: assignment.tripDate || "",
+  time: String(assignment.pickupTime || "").slice(0, 5),
+  durationHours: 2,
+  tripStatus: ({
+    ASSIGNED: "Assigned",
+    OTW: "OTW",
+    WAITING: "Waiting",
+    PICKUP: "Pickup",
+    DROP: "Drop",
+    COMPLETED: "Completed",
+    CANCELLED: "Cancelled",
+  }[normalizeStatus(assignment.assignmentStatus)] || "Assigned"),
+  notificationSent: assignment.notificationSent,
+  pickup: assignment.pickupAddress || "",
+  destination: assignment.destinationAddress || "",
+});
 
 function formatDate(date) {
   if (!date) return "-";
@@ -163,11 +124,13 @@ function formatDate(date) {
 }
 
 export default function Assignments() {
-  const [bookings] = useState(initialBookings);
-  const [drivers] = useState(initialDrivers);
-  const [vehicles] = useState(initialVehicles);
-
-  const [assignments, setAssignments] = useState(initialAssignments);
+  const [bookings, setBookings] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [availableDriverIds, setAvailableDriverIds] = useState(new Set());
+  const [availableVehicleIds, setAvailableVehicleIds] = useState(new Set());
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
 
@@ -180,14 +143,54 @@ export default function Assignments() {
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
+  useEffect(() => {
+    loadData().catch((error) => {
+      console.error("Unable to load assignment data:", error);
+      setFormError(getApiError(error, "Unable to load assignment data."));
+    });
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [
+        bookingResponse,
+        driverResponse,
+        availableDriverResponse,
+        vehicleResponse,
+        availableVehicleResponse,
+        assignmentResponse,
+      ] = await Promise.all([
+        axios.get(`${API_URL}/bookings`),
+        axios.get(`${API_URL}/drivers`),
+        axios.get(`${API_URL}/drivers/available`),
+        axios.get(`${API_URL}/vehicles`),
+        axios.get(`${API_URL}/vehicles/available`),
+        axios.get(`${API_URL}/assignments`),
+      ]);
+      setBookings(bookingResponse.data.map(mapBooking));
+      setDrivers(driverResponse.data.map(mapDriver));
+      setAvailableDriverIds(
+        new Set(availableDriverResponse.data.map((driver) => String(driver.driverId)))
+      );
+      setVehicles(vehicleResponse.data.map(mapVehicle));
+      setAvailableVehicleIds(
+        new Set(availableVehicleResponse.data.map((vehicle) => String(vehicle.vehicleId)))
+      );
+      setAssignments(assignmentResponse.data.map(mapAssignment));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getDriver = (driverId) =>
-    drivers.find((driver) => driver.id === driverId);
+    drivers.find((driver) => String(driver.id) === String(driverId));
 
   const getVehicle = (vehicleId) =>
-    vehicles.find((vehicle) => vehicle.id === vehicleId);
+    vehicles.find((vehicle) => String(vehicle.id) === String(vehicleId));
 
   const getBooking = (bookingId) =>
-    bookings.find((booking) => booking.id === bookingId);
+    bookings.find((booking) => String(booking.id) === String(bookingId));
 
   const activeAssignments = assignments.filter(
     (item) => !terminalStatuses.includes(item.tripStatus)
@@ -204,80 +207,36 @@ export default function Assignments() {
 
   const selectedBooking = getBooking(assignmentForm.bookingId);
 
-  // Check schedule conflicts before allowing an assignment.
-  const isDriverAvailable = (driverId, booking, ignoreAssignmentId = null) => {
-    const driver = getDriver(driverId);
-
-    if (!driver || !driver.active || !booking) return false;
-
-    return !activeAssignments.some((assignment) => {
-      if (assignment.id === ignoreAssignmentId) return false;
-      if (assignment.driverId !== driverId) return false;
-
-      return tripsOverlap(assignment, booking);
-    });
-  };
-
-  const isVehicleAvailable = (
-    vehicleId,
-    booking,
-    ignoreAssignmentId = null
-  ) => {
-    const vehicle = getVehicle(vehicleId);
-
-    if (!vehicle || !vehicle.active || !booking) return false;
-
-    if (vehicle.capacity < booking.passengers) return false;
-
-    return !activeAssignments.some((assignment) => {
-      if (assignment.id === ignoreAssignmentId) return false;
-      if (assignment.vehicleId !== vehicleId) return false;
-
-      return tripsOverlap(assignment, booking);
-    });
-  };
-
   const availableDrivers = drivers.filter((driver) =>
-    isDriverAvailable(
-      driver.id,
-      selectedBooking ||
-        (selectedRecord
-          ? {
-              date: selectedRecord.date,
-              time: selectedRecord.time,
-              durationHours: selectedRecord.durationHours,
-            }
-          : null),
-      selectedRecord?.id
-    )
+    availableDriverIds.has(String(driver.id)) ||
+    (selectedRecord && String(selectedRecord.driverId) === String(driver.id))
   );
-
-  const availableVehicles = vehicles.filter((vehicle) =>
-    isVehicleAvailable(
-      vehicle.id,
-      selectedBooking ||
-        (selectedRecord
-          ? {
-              date: selectedRecord.date,
-              time: selectedRecord.time,
-              durationHours: selectedRecord.durationHours,
-              passengers: getBooking(selectedRecord.bookingId)?.passengers || 1,
-            }
-          : null),
-      selectedRecord?.id
-    )
-  );
+  const currentBooking = getBooking(selectedRecord?.bookingId);
+  const resourceBooking = selectedBooking || currentBooking;
+  const availableVehicles = vehicles.filter((vehicle) => {
+    const available =
+      availableVehicleIds.has(String(vehicle.id)) ||
+      (selectedRecord && String(selectedRecord.vehicleId) === String(vehicle.id));
+    const matchesType =
+      !resourceBooking?.bookingType ||
+      !vehicle.type ||
+      vehicle.type.toLowerCase() === resourceBooking.bookingType.toLowerCase();
+    const fitsCapacity =
+      !resourceBooking?.passengers ||
+      vehicle.capacity >= resourceBooking.passengers;
+    return available && matchesType && fitsCapacity;
+  });
 
   const filteredAssignments = useMemo(() => {
     const query = search.toLowerCase().trim();
 
     return assignments.filter((item) => {
       const driverName = drivers.find(
-        (driver) => driver.id === item.driverId
+        (driver) => String(driver.id) === String(item.driverId)
       )?.name || "";
 
       const vehiclePlate = vehicles.find(
-        (vehicle) => vehicle.id === item.vehicleId
+        (vehicle) => String(vehicle.id) === String(item.vehicleId)
       )?.plate || "";
 
       const matchesSearch = [
@@ -286,7 +245,7 @@ export default function Assignments() {
         item.customer,
         driverName,
         vehiclePlate,
-      ].some((value) => value.toLowerCase().includes(query));
+      ].some((value) => String(value || "").toLowerCase().includes(query));
 
       const matchesStatus =
         statusFilter === "All" || item.tripStatus === statusFilter;
@@ -340,7 +299,7 @@ export default function Assignments() {
     resetForm();
   };
 
-  const handleAssign = () => {
+  const handleAssign = async () => {
     setFormError("");
     setSuccessMessage("");
 
@@ -356,57 +315,44 @@ export default function Assignments() {
       return;
     }
 
-    if (
-      assignments.some(
-        (item) =>
-          item.bookingId === booking.id &&
-          !terminalStatuses.includes(item.tripStatus)
-      )
-    ) {
-      setFormError("This booking already has an active assignment.");
-      return;
-    }
-
     if (!assignmentForm.driverId || !assignmentForm.vehicleId) {
       setFormError("Please select both a driver and a vehicle.");
       return;
     }
 
-    if (!isDriverAvailable(assignmentForm.driverId, booking)) {
-      setFormError(
-        "This driver is unavailable during the selected trip time."
-      );
+    if (!availableDriverIds.has(String(assignmentForm.driverId))) {
+      setFormError("Only available drivers can be assigned.");
       return;
     }
 
-    if (!isVehicleAvailable(assignmentForm.vehicleId, booking)) {
-      setFormError(
-        "This vehicle is unavailable or does not have enough passenger capacity."
-      );
+    if (!availableVehicleIds.has(String(assignmentForm.vehicleId))) {
+      setFormError("Only available vehicles can be assigned.");
       return;
     }
 
-    const newAssignment = {
-      id: `AS-${String(assignments.length + 1).padStart(3, "0")}`,
-      bookingId: booking.id,
-      customer: booking.customer,
-      driverId: assignmentForm.driverId,
-      vehicleId: assignmentForm.vehicleId,
-      date: booking.date,
-      time: booking.time,
-      durationHours: 2,
-      tripStatus: "Assigned",
-      history: [],
-      notificationSent: false,
-    };
-
-    setAssignments((prev) => [...prev, newAssignment]);
-    closeAssignModal();
-    setSuccessMessage("Driver and vehicle assigned successfully.");
+    try {
+      const response = await axios.post(`${API_URL}/assignments`, {
+        bookingId: Number(booking.id),
+        driverId: Number(assignmentForm.driverId),
+        vehicleId: Number(assignmentForm.vehicleId),
+      });
+      setAssignments((previous) => [
+        mapAssignment(response.data),
+        ...previous,
+      ]);
+      closeAssignModal();
+      await loadData();
+      setSuccessMessage(
+        "Driver and vehicle assigned successfully. The driver was notified."
+      );
+    } catch (error) {
+      console.error("Unable to create assignment:", error);
+      setFormError(getApiError(error, "Unable to create assignment."));
+    }
   };
 
   const openReassignModal = (assignment) => {
-    if (assignment.tripStatus === "Completed") {
+    if (terminalStatuses.includes(assignment.tripStatus)) {
       setSuccessMessage("");
       setFormError("Completed trips cannot be reassigned.");
       return;
@@ -422,7 +368,7 @@ export default function Assignments() {
     setShowReassignModal(true);
   };
 
-  const handleReassign = () => {
+  const handleReassign = async () => {
     setFormError("");
     setSuccessMessage("");
 
@@ -443,109 +389,82 @@ export default function Assignments() {
       return;
     }
 
-    if (
-      !isDriverAvailable(
-        assignmentForm.driverId,
-        booking,
-        selectedRecord.id
-      )
-    ) {
-      setFormError(
-        "The selected driver has another trip during this time."
-      );
+    const driverChanged =
+      String(assignmentForm.driverId) !== String(selectedRecord.driverId);
+    const vehicleChanged =
+      String(assignmentForm.vehicleId) !== String(selectedRecord.vehicleId);
+    if (!driverChanged && !vehicleChanged) {
+      setFormError("Choose a different driver or vehicle to reassign.");
       return;
     }
 
     if (
-      !isVehicleAvailable(
-        assignmentForm.vehicleId,
-        booking,
-        selectedRecord.id
-      )
+      driverChanged &&
+      !availableDriverIds.has(String(assignmentForm.driverId))
     ) {
-      setFormError(
-        "The selected vehicle is unavailable or has insufficient capacity."
+      setFormError("Only available drivers can be selected.");
+      return;
+    }
+    if (
+      vehicleChanged &&
+      !availableVehicleIds.has(String(assignmentForm.vehicleId))
+    ) {
+      setFormError("Only available vehicles can be selected.");
+      return;
+    }
+
+    try {
+      const response = await axios.put(
+        `${API_URL}/assignments/${selectedRecord.id}/reassign`,
+        {
+          driverId: Number(assignmentForm.driverId),
+          vehicleId: Number(assignmentForm.vehicleId),
+        }
       );
-      return;
+      const updatedAssignment = mapAssignment(response.data);
+      setAssignments((previous) =>
+        previous.map((item) =>
+          item.id === updatedAssignment.id ? updatedAssignment : item
+        )
+      );
+      setSelectedAssignment((previous) =>
+        previous?.id === updatedAssignment.id ? updatedAssignment : previous
+      );
+      setShowReassignModal(false);
+      resetForm();
+      await loadData();
+      setSuccessMessage(
+        "Assignment updated successfully. The new driver was notified."
+      );
+    } catch (error) {
+      console.error("Unable to reassign trip:", error);
+      setFormError(getApiError(error, "Unable to reassign trip."));
     }
-
-    setAssignments((prev) =>
-      prev.map((item) => {
-        if (item.id !== selectedRecord.id) return item;
-
-        const driverChanged = item.driverId !== assignmentForm.driverId;
-        const vehicleChanged = item.vehicleId !== assignmentForm.vehicleId;
-
-        if (!driverChanged && !vehicleChanged) return item;
-
-        return {
-          ...item,
-          driverId: assignmentForm.driverId,
-          vehicleId: assignmentForm.vehicleId,
-          notificationSent: false,
-          history: [
-            ...(item.history || []),
-            {
-              driverId: item.driverId,
-              vehicleId: item.vehicleId,
-              changedAt: new Date().toISOString(),
-              reason: "Driver or vehicle reassigned",
-            },
-          ],
-        };
-      })
-    );
-
-    setShowReassignModal(false);
-    resetForm();
-    setSuccessMessage(
-      "Assignment updated. The previous assignment details were kept in history."
-    );
   };
 
-  const handleNotification = (assignment) => {
-    const driver = getDriver(assignment.driverId);
-
-    if (!driver) {
-      setFormError("Cannot notify the driver because the driver record is missing.");
-      return;
-    }
-
-    setAssignments((prev) =>
-      prev.map((item) =>
-        item.id === assignment.id
-          ? { ...item, notificationSent: true }
-          : item
-      )
-    );
-
-    setSuccessMessage(
-      `Notification marked as sent for ${driver.name} (${assignment.id}).`
-    );
-
-    // Connect this action to the real notification service in the backend.
-  };
-
-  const handleAdvanceTrip = (assignment) => {
+  const handleAdvanceTrip = async (assignment) => {
     const nextStatus = nextTripStatus[assignment.tripStatus];
 
     if (!nextStatus) return;
 
-    setAssignments((prev) =>
-      prev.map((item) =>
-        item.id === assignment.id
-          ? { ...item, tripStatus: nextStatus }
-          : item
-      )
-    );
-
-    setSelectedAssignment((prev) =>
-      prev?.id === assignment.id
-        ? { ...prev, tripStatus: nextStatus }
-        : prev
-    );
-
-    setSuccessMessage(`Trip status updated to ${nextStatus}.`);
+    try {
+      const response = await axios.patch(
+        `${API_URL}/assignments/${assignment.id}/status`,
+        { status: nextStatus }
+      );
+      const updatedAssignment = mapAssignment(response.data);
+      setAssignments((previous) =>
+        previous.map((item) =>
+          item.id === updatedAssignment.id ? updatedAssignment : item
+        )
+      );
+      setSelectedAssignment(updatedAssignment);
+      await loadData();
+      setSuccessMessage(`Trip status updated to ${nextStatus}.`);
+    } catch (error) {
+      console.error("Unable to update trip status:", error);
+      setFormError(getApiError(error, "Unable to update trip status."));
+    }
   };
 
   const statusStyle = (status) => {
@@ -571,7 +490,7 @@ export default function Assignments() {
     <>
       <option value="">Select available driver</option>
       {availableDrivers.map((driver) => (
-        <option key={driver.id} value={driver.id}>
+        <option key={driver.id} value={String(driver.id)}>
           {driver.name}
         </option>
       ))}
@@ -582,7 +501,7 @@ export default function Assignments() {
     <>
       <option value="">Select available vehicle</option>
       {availableVehicles.map((vehicle) => (
-        <option key={vehicle.id} value={vehicle.id}>
+        <option key={vehicle.id} value={String(vehicle.id)}>
           {vehicle.plate} — {vehicle.type} (Capacity: {vehicle.capacity})
         </option>
       ))}
@@ -608,6 +527,7 @@ export default function Assignments() {
 
           <button
             onClick={openAssignModal}
+            disabled={loading}
             className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700"
           >
             <Plus size={18} />
@@ -633,6 +553,12 @@ export default function Assignments() {
 
       {formError && !showAssignModal && !showReassignModal && (
         <ErrorMessage message={formError} />
+      )}
+
+      {loading && (
+        <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+          Loading assignments and available resources...
+        </p>
       )}
 
       {/* Summary */}
@@ -738,11 +664,6 @@ export default function Assignments() {
                   >
                     <td className="whitespace-nowrap px-6 py-5 font-semibold text-slate-900">
                       {assignment.id}
-                      {assignment.history?.length > 0 && (
-                        <p className="mt-1 text-xs font-normal text-purple-600">
-                          Reassigned
-                        </p>
-                      )}
                     </td>
 
                     <td className="px-6 py-5">
@@ -804,18 +725,14 @@ export default function Assignments() {
                         </button>
 
                         <button
-                          onClick={() => handleNotification(assignment)}
-                          disabled={assignment.tripStatus === "Completed"}
-                          title={
-                            assignment.notificationSent
-                              ? "Notification marked as sent"
-                              : "Notify assigned driver"
-                          }
-                          aria-label={`Notify driver for ${assignment.id}`}
-                          className={`rounded-xl p-2.5 text-white disabled:cursor-not-allowed disabled:opacity-40 ${
-                            assignment.notificationSent
-                              ? "bg-emerald-700"
-                              : "bg-emerald-600 hover:bg-emerald-700"
+                          type="button"
+                          disabled
+                          title={assignment.notificationSent
+                            ? "Assignment notification recorded"
+                            : "No notification record"}
+                          aria-label={`Notification status for ${assignment.id}`}
+                          className={`rounded-xl p-2.5 text-white disabled:cursor-default disabled:opacity-100 ${
+                            assignment.notificationSent ? "bg-emerald-700" : "bg-slate-300"
                           }`}
                         >
                           <Bell size={16} />
@@ -867,7 +784,7 @@ export default function Assignments() {
               >
                 <option value="">Select booking</option>
                 {eligibleBookings.map((booking) => (
-                  <option key={booking.id} value={booking.id}>
+                  <option key={booking.id} value={String(booking.id)}>
                     {booking.id} — {booking.customer}
                   </option>
                 ))}
@@ -914,7 +831,7 @@ export default function Assignments() {
               >
                 <option value="">Select available driver</option>
                 {availableDrivers.map((driver) => (
-                  <option key={driver.id} value={driver.id}>
+                  <option key={driver.id} value={String(driver.id)}>
                     {driver.name}
                   </option>
                 ))}
@@ -1076,33 +993,6 @@ export default function Assignments() {
                   </p>
                 </div>
 
-                {selectedAssignment.history?.length > 0 && (
-                  <div className="rounded-2xl border border-purple-200 bg-purple-50 p-4">
-                    <p className="font-semibold text-purple-900">
-                      Reassignment History
-                    </p>
-                    <div className="mt-3 space-y-3">
-                      {selectedAssignment.history.map((entry, index) => (
-                        <div
-                          key={`${selectedAssignment.id}-history-${index}`}
-                          className="border-t border-purple-200 pt-3 text-sm"
-                        >
-                          <p className="font-medium text-slate-800">
-                            Previous driver:{" "}
-                            {getDriver(entry.driverId)?.name || "Unknown"}
-                          </p>
-                          <p className="text-slate-600">
-                            Previous vehicle:{" "}
-                            {getVehicle(entry.vehicleId)?.plate || "Unknown"}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {new Date(entry.changedAt).toLocaleString("en-MY")}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })()}
@@ -1167,7 +1057,7 @@ export default function Assignments() {
             </Field>
 
             <p className="text-xs text-slate-500">
-              The system checks resource availability and keeps a record of the previous assignment.
+              The system revalidates availability before saving and returns changed resources to Available.
             </p>
 
             {formError && <ErrorMessage message={formError} />}
