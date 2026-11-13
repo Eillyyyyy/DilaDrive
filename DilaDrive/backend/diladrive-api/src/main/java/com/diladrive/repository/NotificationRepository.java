@@ -16,6 +16,10 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
 
     List<Notification> findByDriverDriverIdOrderBySentAtDesc(Long driverId);
 
+    List<Notification> findByRecipientRoleIgnoreCaseAndRecipientIdOrderBySentAtDesc(
+            String recipientRole,
+            Long recipientId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select n from Notification n where n.notificationId = :id")
     Optional<Notification> findByIdForUpdate(@Param("id") Long id);

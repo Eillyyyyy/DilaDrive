@@ -9,6 +9,11 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   http: ^1.6.0
+  image_picker: ^1.1.2
+  file_picker: ^13.3.3
+  pdfrx: ^2.4.8
+  firebase_core: ^5.1.0
+  firebase_messaging: ^17.0.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

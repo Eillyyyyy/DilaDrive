@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
+import api from "../services/api";
 import {
   Search,
   Eye,
@@ -20,7 +20,6 @@ import {
   Power,
   LockKeyhole,
   CircleCheck,
-  Trash2,
 } from "lucide-react";
 
 // ==========================================
@@ -35,13 +34,20 @@ const emptyDriver = {
   licenseNo: "",
   licenseExpiry: "",
   driverType: "Company Driver",
-  vehicle: "",
+  vehicle: {
+    model: "",
+    plate: "",
+    type: "",
+    capacity: "",
+    luggageCapacity: "",
+    roadTaxExpiry: "",
+    serviceExpiry: "",
+    status: "Available",
+  },
   availability: "Available",
   password: "",
   confirmPassword: "",
 };
-
-const driversApiUrl = "http://localhost:8080/api/drivers";
 
 const formatDriver = (driver) => ({
   id: driver.driverId,
@@ -52,7 +58,7 @@ const formatDriver = (driver) => ({
   licenseNo: driver.driverLicenseno || "",
   licenseExpiry: driver.driverLicenseExpiry || "",
   driverType: driver.driverType || "Company Driver",
-  vehicle: "",
+  vehicle: driver.vehiclePlateno || "",
   availability: driver.driverAvailability || "Available",
   accountStatus:
     driver.driverStatus?.toUpperCase() === "ACTIVE"
@@ -77,6 +83,25 @@ const toDriverPayload = (driver) => ({
       : driver.accountStatus === "Disabled"
         ? "DISABLED"
         : "PENDING",
+});
+
+const toDriverCreatePayload = (driver) => ({
+  ...toDriverPayload(driver),
+  vehicle: {
+    vehicleModel: driver.vehicle.model.trim(),
+    vehiclePlateno: driver.vehicle.plate.trim().toUpperCase(),
+    vehicleType: driver.vehicle.type.trim(),
+    vehicleCapacity: Number(driver.vehicle.capacity),
+    vehicleLuggageCapacity: Number(driver.vehicle.luggageCapacity),
+    vehicleRoadtaxexpiry: driver.vehicle.roadTaxExpiry || null,
+    vehicleServiceexpiry: driver.vehicle.serviceExpiry || null,
+    vehicleStatus:
+      driver.vehicle.status === "Available"
+        ? "AVAILABLE"
+        : driver.vehicle.status === "In Use"
+          ? "UNAVAILABLE"
+          : "MAINTENANCE",
+  },
 });
 
 const statusStyles = {
@@ -278,6 +303,7 @@ export default function Drivers() {
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const [newDriver, setNewDriver] = useState(emptyDriver);
+  const [savingDriver, setSavingDriver] = useState(false);
 
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -296,7 +322,7 @@ export default function Drivers() {
   const fetchDrivers = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(driversApiUrl);
+      const response = await api.get("/drivers");
       setDriverList(response.data.map(formatDriver));
     } finally {
       setLoading(false);
@@ -414,6 +440,27 @@ export default function Drivers() {
       return "This email address or phone number already exists.";
     }
 
+    if (currentId === null) {
+      if (
+        !driver.vehicle.model.trim() ||
+        !driver.vehicle.plate.trim() ||
+        !driver.vehicle.type.trim() ||
+        driver.vehicle.capacity === ""
+      ) {
+        return "Vehicle model, registration number, type and passenger capacity are required.";
+      }
+
+      const capacity = Number(driver.vehicle.capacity);
+      if (!Number.isInteger(capacity) || capacity < 1) {
+        return "Vehicle passenger capacity must be a whole number greater than zero.";
+      }
+
+      const luggageCapacity = Number(driver.vehicle.luggageCapacity);
+      if (!Number.isInteger(luggageCapacity) || luggageCapacity < 0) {
+        return "Vehicle luggage capacity must be a whole number zero or greater.";
+      }
+    }
+
     return "";
   };
 
@@ -425,7 +472,7 @@ export default function Drivers() {
     const responseMessage = requestError.response?.data;
     return typeof responseMessage === "string"
       ? responseMessage
-      : responseMessage?.message || fallback;
+      : responseMessage?.message || responseMessage?.detail || fallback;
   };
 
   const handleCreateDriver = async (event) => {
@@ -439,13 +486,16 @@ export default function Drivers() {
       return;
     }
 
+    setSavingDriver(true);
     try {
-      const response = await axios.post(driversApiUrl, {
-        ...toDriverPayload(newDriver),
+      const response = await api.post("/drivers", {
+        ...toDriverCreatePayload(newDriver),
         driverPassword: newDriver.password,
       });
+      const createdDriver = formatDriver(response.data);
+      createdDriver.vehicle = newDriver.vehicle.plate.trim().toUpperCase();
       setDriverList((previous) => [
-        formatDriver(response.data),
+        createdDriver,
         ...previous,
       ]);
       setNewDriver(emptyDriver);
@@ -459,6 +509,8 @@ export default function Drivers() {
       setError(
         getRequestError(requestError, "Failed to create driver account.")
       );
+    } finally {
+      setSavingDriver(false);
     }
   };
 
@@ -491,8 +543,8 @@ export default function Drivers() {
     };
 
     try {
-      const response = await axios.put(
-        `${driversApiUrl}/${updatedDriver.id}`,
+      const response = await api.put(
+        `/drivers/${updatedDriver.id}`,
         toDriverPayload(updatedDriver)
       );
       const savedDriver = formatDriver(response.data);
@@ -548,8 +600,8 @@ export default function Drivers() {
 
     try {
       const updatedDriver = { ...driver, accountStatus: nextStatus };
-      const response = await axios.put(
-        `${driversApiUrl}/${driver.id}`,
+      const response = await api.put(
+        `/drivers/${driver.id}`,
         toDriverPayload(updatedDriver)
       );
       const savedDriver = formatDriver(response.data);
@@ -572,27 +624,6 @@ export default function Drivers() {
     }
   };
 
-  const handleDeleteDriver = async (driver) => {
-    const confirmed = window.confirm(
-      `Delete the driver account for ${driver.name}? This action cannot be undone.`
-    );
-    if (!confirmed) return;
-
-    setError("");
-    setSuccessMessage("");
-    try {
-      await axios.delete(`${driversApiUrl}/${driver.id}`);
-      setDriverList((previous) =>
-        previous.filter((item) => item.id !== driver.id)
-      );
-      setSelectedDriver(null);
-      setSuccessMessage(`${driver.name}'s account was deleted.`);
-    } catch (requestError) {
-      console.error("Error deleting driver:", requestError);
-      setError(getRequestError(requestError, "Failed to delete driver."));
-    }
-  };
-
   // ==========================================
   // CLOSE MODALS
   // ==========================================
@@ -609,22 +640,22 @@ export default function Drivers() {
   // ==========================================
 
   return (
-    <div className="min-h-full space-y-6 bg-slate-50/60 p-4 sm:p-6 lg:p-8">
+    <div className="admin-page">
 
       {/* PAGE HEADER */}
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="admin-page-header">
         <div>
           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-teal-700">
             <ShieldCheck size={17} />
             Fleet Operations
           </div>
 
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+          <h1 className="admin-page-title">
             Driver Management
           </h1>
 
-          <p className="mt-2 text-sm text-slate-500 sm:text-base">
+          <p className="admin-page-description">
             Manage driver profiles, accounts and availability.
           </p>
         </div>
@@ -764,7 +795,7 @@ export default function Drivers() {
 
               <input
                 type="search"
-                placeholder="Search ID, name, email or vehicle..."
+                placeholder="Search name, email or vehicle..."
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 className="w-full rounded-xl border border-slate-200 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
@@ -816,6 +847,7 @@ export default function Drivers() {
           <table className="w-full min-w-[1100px] text-left">
             <thead className="bg-slate-50">
               <tr className="text-xs uppercase tracking-wider text-slate-500">
+                <th className="px-6 py-4 font-semibold">No.</th>
                 <th className="px-6 py-4 font-semibold">Driver</th>
                 <th className="px-6 py-4 font-semibold">Contact</th>
                 <th className="px-6 py-4 font-semibold">Vehicle</th>
@@ -826,11 +858,14 @@ export default function Drivers() {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredDrivers.map((driver) => (
+              {filteredDrivers.map((driver, index) => (
                 <tr
                   key={driver.id}
                   className="transition hover:bg-slate-50"
                 >
+                  <td className="px-6 py-5 text-sm font-medium text-slate-500">
+                    {index + 1}
+                  </td>
                   <td className="px-6 py-5">
                     <div className="flex items-center gap-3">
                       <DriverAvatar name={driver.name} />
@@ -840,9 +875,6 @@ export default function Drivers() {
                           {driver.name}
                         </p>
 
-                        <p className="mt-1 text-xs text-slate-500">
-                          {driver.id}
-                        </p>
                       </div>
                     </div>
                   </td>
@@ -918,14 +950,6 @@ export default function Drivers() {
                         )}
                       </button>
 
-                      <button
-                        onClick={() => handleDeleteDriver(driver)}
-                        title="Delete driver"
-                        aria-label={`Delete ${driver.name}`}
-                        className="rounded-lg bg-red-50 p-2 text-red-600 transition hover:bg-red-100"
-                      >
-                        <Trash2 size={16} />
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -933,7 +957,7 @@ export default function Drivers() {
 
               {filteredDrivers.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center">
+                  <td colSpan={7} className="px-6 py-16 text-center">
                     <Users
                       size={32}
                       className="mx-auto text-slate-300"
@@ -1200,6 +1224,159 @@ export default function Drivers() {
                 </div>
               </section>
 
+              {/* VEHICLE INFORMATION */}
+
+              <section className="space-y-4 border-t border-slate-100 pt-6">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Vehicle Information
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Register a vehicle and link it to this driver account.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Vehicle Model"
+                    value={newDriver.vehicle.model}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          model: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. Toyota Hiace"
+                    required
+                  />
+
+                  <Field
+                    label="Registration Number / Plate Number"
+                    value={newDriver.vehicle.plate}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          plate: event.target.value.toUpperCase(),
+                        },
+                      }))
+                    }
+                    placeholder="e.g. MCA1234"
+                    required
+                  />
+
+                  <Field
+                    label="Vehicle Type"
+                    value={newDriver.vehicle.type}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          type: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. MPV, Sedan, Bus"
+                    required
+                  />
+
+                  <Field
+                    label="Passenger Capacity"
+                    type="number"
+                    value={newDriver.vehicle.capacity}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          capacity: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. 7"
+                    required
+                  />
+
+                  <Field
+                    label="Luggage Capacity (items)"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={newDriver.vehicle.luggageCapacity}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          luggageCapacity: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="Enter the actual item capacity"
+                    required
+                  />
+
+                  <Field
+                    label="Road Tax Expiry Date"
+                    type="date"
+                    value={newDriver.vehicle.roadTaxExpiry}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          roadTaxExpiry: event.target.value,
+                        },
+                      }))
+                    }
+                  />
+
+                  <Field
+                    label="Next Service Date"
+                    type="date"
+                    value={newDriver.vehicle.serviceExpiry}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          serviceExpiry: event.target.value,
+                        },
+                      }))
+                    }
+                  />
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Vehicle Status
+                      <span className="ml-1 text-red-500">*</span>
+                    </span>
+                    <select
+                      value={newDriver.vehicle.status}
+                      onChange={(event) =>
+                        setNewDriver((previous) => ({
+                          ...previous,
+                          vehicle: {
+                            ...previous.vehicle,
+                            status: event.target.value,
+                          },
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+                    >
+                      <option value="Available">Available</option>
+                      <option value="In Use">In Use</option>
+                      <option value="Maintenance">Maintenance</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+
               {/* ERROR MESSAGE */}
 
               {error && (
@@ -1215,6 +1392,7 @@ export default function Drivers() {
               <button
                 type="button"
                 onClick={closeModals}
+                disabled={savingDriver}
                 className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-white"
               >
                 Cancel
@@ -1222,10 +1400,11 @@ export default function Drivers() {
 
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
+                disabled={savingDriver}
+                className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <UserPlus size={17} />
-                Create Account
+                {savingDriver ? "Creating..." : "Create Account"}
               </button>
             </div>
           </form>
@@ -1239,7 +1418,7 @@ export default function Drivers() {
       {selectedDriver && (
         <Modal
           title="Driver Account Details"
-          subtitle={`Driver ID: ${selectedDriver.id}`}
+          subtitle="Driver contact, vehicle, and account information"
           onClose={() => setSelectedDriver(null)}
         >
           <div className="max-h-[65vh] space-y-5 overflow-y-auto p-6">
@@ -1250,10 +1429,6 @@ export default function Drivers() {
                 <h3 className="font-bold text-slate-900">
                   {selectedDriver.name}
                 </h3>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedDriver.id}
-                </p>
 
                 <div className="mt-2">
                   <AccountBadge status={selectedDriver.accountStatus} />
@@ -1374,7 +1549,7 @@ export default function Drivers() {
       {editingDriver && (
         <Modal
           title="Update Driver"
-          subtitle={`Editing ${editingDriver.id}`}
+          subtitle={`Update details for ${editingDriver.name}`}
           onClose={() => {
             setEditingDriver(null);
             setError("");

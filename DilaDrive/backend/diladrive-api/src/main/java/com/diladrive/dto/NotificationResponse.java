@@ -12,17 +12,25 @@ public record NotificationResponse(
         String message,
         String notificationType,
         boolean read,
-        LocalDateTime sentAt) {
+        LocalDateTime sentAt,
+        String recipientRole,
+        Long recipientId) {
 
     public static NotificationResponse from(Notification notification) {
         return new NotificationResponse(
                 notification.getNotificationId(),
-                notification.getDriver().getDriverId(),
-                notification.getDriver().getDriverName(),
+                notification.getDriver() == null
+                        ? null
+                        : notification.getDriver().getDriverId(),
+                notification.getDriver() == null
+                        ? null
+                        : notification.getDriver().getDriverName(),
                 notification.getTitle(),
                 notification.getMessage(),
                 notification.getNotificationType(),
                 notification.isRead(),
-                notification.getSentAt());
+                notification.getSentAt(),
+                notification.getRecipientRole(),
+                notification.getRecipientId());
     }
 }

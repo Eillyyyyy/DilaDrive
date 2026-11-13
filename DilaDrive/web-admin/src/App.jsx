@@ -1,4 +1,3 @@
-import axios from "axios";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
@@ -14,9 +13,8 @@ import {
   X,
   LogOut,
   UserRound,
+  ShieldCheck,
 } from "lucide-react";
-
-import { bookingsSeed, customers, drivers, vehicles } from "./data/demoData";
 
 import Dashboard from "./pages/Dashboard";
 import Customers from "./pages/Customers";
@@ -29,12 +27,15 @@ import Documents from "./pages/Documents";
 import Notifications from "./pages/Notifications";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
+import Admins from "./pages/Admins";
+import api from "./services/api";
 
 const menuItems = [
   { name: "Dashboard", icon: LayoutDashboard },
 
   { name: "Customers", icon: Users },
   { name: "Drivers", icon: Truck },
+  { name: "Admins", icon: ShieldCheck },
 
   { name: "Vehicles", icon: CarFront },
 
@@ -53,7 +54,7 @@ const menuItems = [
 export default function App() {
   const [activePage, setActivePage] = useState("Dashboard");
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [bookings, setBookings] = useState(bookingsSeed);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   const [currentUser, setCurrentUser] = useState(() => {
     const savedUser = localStorage.getItem("currentUser");
@@ -64,22 +65,61 @@ export default function App() {
     name: "DilaDrive Admin",
     email: "",
     phone: "",
-    role: "Administrator",
+    role: "ADMIN",
   });
 
   useEffect(() => {
-  const savedProfile =
-    localStorage.getItem("profile");
+    if (!currentUser) return undefined;
+    let active = true;
+    api
+      .get("/auth/session")
+      .then(({ data }) => {
+        if (!active) return;
+        const user = { id: data.id, email: data.email, role: data.role };
+        setCurrentUser(user);
+        setProfile(data);
+        localStorage.setItem("currentUser", JSON.stringify(user));
+        localStorage.setItem("profile", JSON.stringify(data));
+      })
+      .catch(() => {
+        if (!active) return;
+        localStorage.removeItem("currentUser");
+        localStorage.removeItem("profile");
+        setCurrentUser(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  if (savedProfile) {
-    setProfile(JSON.parse(savedProfile));
-  }
-}, []);
+  useEffect(() => {
+    if (!currentUser) {
+      setUnreadNotifications(0);
+      return undefined;
+    }
+    let active = true;
+    const refreshUnreadCount = async () => {
+      try {
+        const { data } = await api.get("/notifications");
+        if (active && Array.isArray(data)) {
+          setUnreadNotifications(data.filter((notification) => !notification.read).length);
+        }
+      } catch (error) {
+        console.error("Unable to refresh notification count:", error);
+      }
+    };
+    refreshUnreadCount();
+    const interval = window.setInterval(refreshUnreadCount, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [currentUser]);
 
   async function handleLogin(credentials) {
     try {
-      const response = await axios.post(
-        "http://localhost:8080/api/auth/login",
+      const response = await api.post(
+        "/auth/login",
         {
           email: credentials.email,
           password: credentials.password,
@@ -91,7 +131,9 @@ export default function App() {
       }
 
       const user = {
+        id: response.data.id,
         email: response.data.email,
+        role: response.data.role || "ADMIN",
       };
 
       setCurrentUser(user);
@@ -110,42 +152,49 @@ export default function App() {
     }
   }
 
-  function handleLogout() {
-  localStorage.removeItem("currentUser");
-  localStorage.removeItem("profile");
-
-  setCurrentUser(null);
-  setActivePage("Dashboard");
-  setMobileMenu(false);
-}
-
-  async function handleSaveProfile(updatedProfile, currentPassword) {
+  async function handleLogout() {
     try {
-      const response = await axios.put(
-        "http://localhost:8080/api/auth/profile",
-        {
-          ...updatedProfile,
-          currentPassword,
-        },
-        { params: { email: currentUser.email } },
-      );
+      await api.post("/auth/logout");
+    } catch (error) {
+      console.error("Unable to invalidate the admin session.", error);
+    } finally {
+      localStorage.removeItem("currentUser");
+      localStorage.removeItem("profile");
+      setCurrentUser(null);
+      setActivePage("Dashboard");
+      setMobileMenu(false);
+    }
+  }
+
+  async function handleSaveProfile(updatedProfile) {
+    try {
+      const response = await api.put("/auth/profile", updatedProfile);
       setProfile(response.data);
-      setCurrentUser({ email: response.data.email });
+      const updatedUser = {
+        id: response.data.id,
+        email: response.data.email,
+        role: response.data.role,
+      };
+      setCurrentUser(updatedUser);
+      localStorage.setItem("currentUser", JSON.stringify(updatedUser));
+      localStorage.setItem("profile", JSON.stringify(response.data));
       return response.data;
     } catch (error) {
+      const response = error.response?.data;
       throw new Error(
-        error.response?.data || error.message || "Unable to update profile",
+        (typeof response === "string" ? response : response?.message)
+          || error.message
+          || "Unable to update profile",
       );
     }
   }
 
   async function handleChangePassword(currentPassword, newPassword) {
     try {
-      const response = await axios.post(
-        "http://localhost:8080/api/auth/profile/password",
-        { currentPassword, newPassword },
-        { params: { email: currentUser.email } },
-      );
+      const response = await api.post("/auth/profile/password", {
+        currentPassword,
+        newPassword,
+      });
       return response.data;
     } catch (error) {
       throw new Error(
@@ -154,36 +203,22 @@ export default function App() {
     }
   }
 
-  function approveBooking(id) {
-    setBookings((prev) =>
-      prev.map((booking) =>
-        booking.id === id ? { ...booking, status: "Approved" } : booking,
-      ),
-    );
-  }
-
   function renderPage() {
     switch (activePage) {
       case "Dashboard":
-        return <Dashboard bookings={bookings} onNavigate={setActivePage} />;
+        return <Dashboard onNavigate={setActivePage} />;
 
       case "Customers":
-        return <Customers customers={customers} />;
+        return <Customers />;
 
       case "Drivers":
-        return <Drivers drivers={drivers} />;
+        return <Drivers />;
 
       case "Vehicles":
-        return <Vehicles vehicles={vehicles} />;
+        return <Vehicles />;
 
       case "Bookings":
-        return (
-          <Bookings
-            bookings={bookings}
-            onApprove={approveBooking}
-            onNavigate={setActivePage}
-          />
-        );
+        return <Bookings onNavigate={setActivePage} />;
 
       case "Assignments":
         return <Assignments />;
@@ -206,8 +241,27 @@ export default function App() {
           />
         );
 
+      case "Admins":
+        return (
+          <Admins
+            currentUser={currentUser}
+            onAdminUpdated={(admin) => {
+              if (admin.id !== currentUser.id) return;
+              setProfile(admin);
+              const updatedUser = {
+                id: admin.id,
+                email: admin.email,
+                role: admin.role,
+              };
+              setCurrentUser(updatedUser);
+              localStorage.setItem("currentUser", JSON.stringify(updatedUser));
+              localStorage.setItem("profile", JSON.stringify(admin));
+            }}
+          />
+        );
+
       default:
-        return <Dashboard bookings={bookings} onNavigate={setActivePage} />;
+        return <Dashboard onNavigate={setActivePage} />;
     }
   }
 
@@ -312,7 +366,7 @@ export default function App() {
       {/* Main */}
       <main className="min-h-screen md:ml-64">
         {/* Header */}
-        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b bg-white px-4 md:px-8">
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileMenu(true)}
@@ -321,19 +375,21 @@ export default function App() {
               <Menu size={22} />
             </button>
 
-            <div>
-              <p className="text-xs text-slate-500">Workspace / {activePage}</p>
-
-              <h2 className="font-bold">{activePage}</h2>
-            </div>
+            <p className="text-sm font-medium text-slate-500">{activePage}</p>
           </div>
 
           <div className="flex items-center gap-3">
             <button
               onClick={() => setActivePage("Notifications")}
-              className="rounded-xl border p-2.5 hover:bg-slate-50"
+              aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : "Notifications"}
+              className="relative rounded-xl border p-2.5 hover:bg-slate-50"
             >
               <Bell size={19} />
+              {unreadNotifications > 0 && (
+                <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">
+                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                </span>
+              )}
             </button>
 
             <button
@@ -362,16 +418,10 @@ export default function App() {
         </header>
 
         {/* Content */}
-        <section className="p-4 md:p-8">
-          {activePage === "Dashboard" && (
-            <div className="mb-6">
-              <p className="text-sm text-slate-500">
-                Welcome back, {profile.name}
-              </p>
-            </div>
-          )}
-
+        <section className="p-4 sm:p-6 lg:p-8">
+          <div className="mx-auto w-full max-w-[1600px]">
           {renderPage()}
+          </div>
         </section>
       </main>
     </div>

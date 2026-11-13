@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import api from "../services/api";
 import {
   Search,
   Eye,
   Bell,
-  Trash2,
   CheckCircle,
   X,
   CheckCheck,
@@ -15,8 +14,6 @@ import {
   Filter,
   Clock,
 } from "lucide-react";
-
-const API_URL = "http://localhost:8080/api";
 
 const mapNotification = (notification) => {
   const sentAt = new Date(notification.sentAt);
@@ -98,19 +95,30 @@ export default function Notifications() {
   });
 
   useEffect(() => {
-    Promise.all([
-      axios.get(`${API_URL}/notifications`),
-      axios.get(`${API_URL}/drivers`),
-    ])
-      .then(([notificationResponse, driverResponse]) => {
+    let active = true;
+    const refreshNotifications = async (includeDrivers = false) => {
+      try {
+        const requests = [api.get("/notifications")];
+        if (includeDrivers) requests.push(api.get("/drivers"));
+        const [notificationResponse, driverResponse] = await Promise.all(requests);
+        if (!active) return;
         setNotifications(notificationResponse.data.map(mapNotification));
-        setDrivers(driverResponse.data);
-      })
-      .catch((requestError) => {
+        if (driverResponse) setDrivers(driverResponse.data);
+        setError("");
+      } catch (requestError) {
+        if (!active) return;
         console.error("Unable to load notifications:", requestError);
         setError(getApiError(requestError));
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    refreshNotifications(true);
+    const interval = window.setInterval(() => refreshNotifications(), 30000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, []);
 
   const unreadCount = notifications.filter(
@@ -126,7 +134,6 @@ export default function Notifications() {
       const searchText = search.toLowerCase();
 
       const matchesSearch =
-        notification.id.toLowerCase().includes(searchText) ||
         notification.title.toLowerCase().includes(searchText) ||
         notification.message.toLowerCase().includes(searchText) ||
         notification.type.toLowerCase().includes(searchText);
@@ -142,7 +149,7 @@ export default function Notifications() {
   const handleMarkRead = async (id) => {
     setError("");
     try {
-      await axios.patch(`${API_URL}/notifications/${id}/read`);
+      await api.patch(`/notifications/${id}/read`);
       setNotifications((previous) =>
         previous.map((notification) =>
           notification.id === id
@@ -169,7 +176,7 @@ export default function Notifications() {
     try {
       await Promise.all(
         unread.map((notification) =>
-          axios.patch(`${API_URL}/notifications/${notification.id}/read`)
+          api.patch(`/notifications/${notification.id}/read`)
         )
       );
       setNotifications((previous) =>
@@ -192,28 +199,6 @@ export default function Notifications() {
     }
   };
 
-  const handleDelete = async (id) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this notification?"
-    );
-
-    if (!confirmed) return;
-
-    setError("");
-    try {
-      await axios.delete(`${API_URL}/notifications/${id}`);
-      setNotifications((previous) =>
-        previous.filter((notification) => notification.id !== id)
-      );
-      setSelectedNotification((previous) =>
-        previous?.id === id ? null : previous
-      );
-    } catch (requestError) {
-      console.error("Unable to delete notification:", requestError);
-      setError(getApiError(requestError));
-    }
-  };
-
   const handleCreateNotification = async (event) => {
     event.preventDefault();
 
@@ -228,7 +213,7 @@ export default function Notifications() {
 
     setError("");
     try {
-      const response = await axios.post(`${API_URL}/notifications`, {
+      const response = await api.post("/notifications", {
         driverId: Number(newNotification.driverId),
         title: newNotification.title.trim(),
         message: newNotification.message.trim(),
@@ -254,22 +239,22 @@ export default function Notifications() {
   };
 
   return (
-    <div className="min-h-screen space-y-6 bg-slate-50/70 p-4 md:p-7">
+    <div className="admin-page">
 
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="admin-page-header">
         <div>
           <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-teal-100 p-3 text-teal-700">
-              <Bell size={25} />
+            <div className="rounded-xl bg-teal-50 p-2.5 text-teal-700">
+              <Bell size={20} />
             </div>
 
             <div>
-              <h1 className="text-2xl font-bold text-slate-800 md:text-3xl">
+              <h1 className="admin-page-title">
                 Notifications
               </h1>
 
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="admin-page-description">
                 Monitor booking, driver and payment activities.
               </p>
             </div>
@@ -452,6 +437,9 @@ export default function Notifications() {
             <thead className="bg-slate-50">
               <tr className="text-xs uppercase tracking-wider text-slate-500">
                 <th className="px-6 py-4 font-semibold">
+                  No.
+                </th>
+                <th className="px-6 py-4 font-semibold">
                   Notification
                 </th>
 
@@ -475,7 +463,7 @@ export default function Notifications() {
 
             <tbody className="divide-y divide-slate-100">
 
-              {filteredNotifications.map((notification) => {
+              {filteredNotifications.map((notification, index) => {
                 const Icon = getNotificationIcon(
                   notification.type
                 );
@@ -489,6 +477,9 @@ export default function Notifications() {
                         : ""
                     }`}
                   >
+                    <td className="px-6 py-5 text-sm font-medium text-slate-500">
+                      {index + 1}
+                    </td>
                     <td className="px-6 py-5">
                       <div className="flex items-start gap-3">
                         <div
@@ -518,9 +509,6 @@ export default function Notifications() {
                             Driver: {notification.driverName}
                           </p>
 
-                          <p className="mt-1 text-xs text-slate-400">
-                            {notification.id}
-                          </p>
                         </div>
                       </div>
                     </td>
@@ -581,17 +569,6 @@ export default function Notifications() {
                             <CheckCircle size={17} />
                           </button>
                         )}
-
-                        <button
-                          onClick={() =>
-                            handleDelete(notification.id)
-                          }
-                          title="Delete notification"
-                          aria-label="Delete notification"
-                          className="rounded-lg bg-red-50 p-2 text-red-600 transition hover:bg-red-100"
-                        >
-                          <Trash2 size={17} />
-                        </button>
 
                       </div>
                     </td>
@@ -664,9 +641,6 @@ export default function Notifications() {
                   Notification Details
                 </h2>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedNotification.id}
-                </p>
               </div>
 
               <button

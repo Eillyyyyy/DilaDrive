@@ -1,19 +1,21 @@
 export default function Receipts() {
   return (
-    <div className="rounded-2xl bg-white p-6 shadow">
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-2xl font-bold">
+    <div className="admin-page">
+      <header className="admin-page-header">
+        <h1 className="admin-page-title">
           Receipts
-        </h2>
+        </h1>
 
         <button className="rounded-xl bg-teal-500 px-4 py-2 text-white">
           Generate Receipt
         </button>
-      </div>
+      </header>
 
+      <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
       <table className="w-full">
         <thead>
           <tr className="border-b">
+            <th className="p-3 text-left">No.</th>
             <th className="p-3 text-left">Receipt No</th>
             <th className="p-3 text-left">Customer</th>
             <th className="p-3 text-left">Amount</th>
@@ -23,20 +25,13 @@ export default function Receipts() {
 
         <tbody>
           <tr>
-            <td className="p-3">RC-1001</td>
-            <td className="p-3">Aina Logistics</td>
-            <td className="p-3">RM 350</td>
-            <td className="p-3">21 Oct 2026</td>
-          </tr>
-
-          <tr>
-            <td className="p-3">RC-1002</td>
-            <td className="p-3">Kencana Trading</td>
-            <td className="p-3">RM 500</td>
-            <td className="p-3">20 Oct 2026</td>
+            <td className="p-6 text-center text-slate-500" colSpan={5}>
+              No receipts available.
+            </td>
           </tr>
         </tbody>
       </table>
+      </section>
     </div>
   );
 }

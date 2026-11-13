@@ -15,6 +15,10 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     List<Document> findAllByOrderByCreatedAtDesc();
 
+    List<Document> findByCustIdOrderByCreatedAtDesc(Long custId);
+
+    Optional<Document> findByDocumentIdAndCustId(Long documentId, Long custId);
+
     List<Document> findByDocumentNumberContainingIgnoreCaseOrCustNameContainingIgnoreCaseOrderByCreatedAtDesc(
             String documentNumber,
             String custName);
@@ -25,9 +29,13 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     boolean existsByDocumentTypeAndBookingId(DocumentType documentType, Long bookingId);
 
-    boolean existsByDocumentTypeAndRemarksStartingWith(
+    boolean existsByDocumentTypeAndPaymentId(DocumentType documentType, Long paymentId);
+
+    Optional<Document> findByDocumentTypeAndPaymentId(DocumentType documentType, Long paymentId);
+
+    boolean existsByDocumentTypeAndSourceDocumentId(
             DocumentType documentType,
-            String remarksPrefix);
+            Long sourceDocumentId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from Document d where d.documentId = :id")

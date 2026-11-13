@@ -1,22 +1,67 @@
 import 'package:flutter/material.dart';
 
+import '../../models/driver_profile.dart';
+import '../../models/mobile_user.dart';
+import '../../services/auth_service.dart' show AuthService;
+import '../../theme/app_theme.dart';
+
 import '../auth/login.dart';
 import 'view_account.dart';
 import 'update_account.dart';
 
+class DriverProfilePage extends StatefulWidget {
+  const DriverProfilePage({
+    super.key,
+    required this.driver,
+    this.onDriverUpdated,
+  });
 
-class DriverProfilePage extends StatelessWidget {
-  const DriverProfilePage({super.key});
+  final MobileUser driver;
+  final ValueChanged<MobileUser>? onDriverUpdated;
+
+  @override
+  State<DriverProfilePage> createState() => _DriverProfilePageState();
+}
+
+class _DriverProfilePageState extends State<DriverProfilePage> {
+  late String _name = widget.driver.name;
+  late String _email = widget.driver.email;
+
+  Future<void> _editProfile() async {
+    final updated = await Navigator.push<DriverProfile>(
+      context,
+      MaterialPageRoute(builder: (_) => const DriverUpdateAccountPage()),
+    );
+    if (updated == null || !mounted) return;
+    widget.onDriverUpdated?.call(
+      MobileUser(
+        id: updated.id,
+        name: updated.name,
+        email: updated.email,
+        phone: updated.phone,
+        status: updated.status,
+        role: widget.driver.role,
+      ),
+    );
+    setState(() {
+      _name = updated.name;
+      _email = updated.email;
+    });
+  }
+
+  void _openLogin() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF701A35);
+    const primaryColor = AppTheme.primaryNavy;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
-
-
-
+      backgroundColor: AppTheme.lightBlueBackground,
       body: SingleChildScrollView(
         child: Column(
           children: [
@@ -33,9 +78,9 @@ class DriverProfilePage extends StatelessWidget {
                   bottomRight: Radius.circular(30),
                 ),
               ),
-              child: const Column(
+              child: Column(
                 children: [
-                  CircleAvatar(
+                  const CircleAvatar(
                     radius: 45,
                     backgroundColor: Colors.white,
                     child: Icon(
@@ -44,44 +89,35 @@ class DriverProfilePage extends StatelessWidget {
                       color: primaryColor,
                     ),
                   ),
-
-                  SizedBox(height: 15),
-
+                  const SizedBox(height: 15),
                   Text(
-                    "Ahmad Faiz",
-                    style: TextStyle(
+                    _name,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-
-                  SizedBox(height: 5),
-
-                  Text(
+                  const SizedBox(height: 5),
+                  const Text(
                     "Driver",
                     style: TextStyle(
                       color: Colors.white70,
                     ),
                   ),
-
-                  SizedBox(height: 5),
-
+                  const SizedBox(height: 5),
                   Text(
-                    "driver@diladrive.com",
-                    style: TextStyle(
+                    _email,
+                    style: const TextStyle(
                       color: Colors.white70,
                     ),
                   ),
                 ],
               ),
             ),
-
             const SizedBox(height: 20),
-
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
                 children: [
                   _menuCard(
@@ -92,30 +128,17 @@ class DriverProfilePage extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                              const DriverViewAccountPage(),
+                          builder: (_) => const DriverViewAccountPage(),
                         ),
                       );
                     },
                   ),
-
                   _menuCard(
                     context,
                     icon: Icons.edit_outlined,
                     title: "Update Account",
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const DriverUpdateAccountPage(),
-                        ),
-                      );
-                    },
+                    onTap: _editProfile,
                   ),
-
-                  
-
                   _menuCard(
                     context,
                     icon: Icons.help_outline,
@@ -128,7 +151,7 @@ class DriverProfilePage extends StatelessWidget {
                             "Help & Support",
                           ),
                           content: const Text(
-                            "Contact DilaDrive support at support@diladrive.com",
+                            'For account or trip assistance, contact your DilaDrive administrator.',
                           ),
                           actions: [
                             TextButton(
@@ -142,7 +165,6 @@ class DriverProfilePage extends StatelessWidget {
                       );
                     },
                   ),
-
                   _menuCard(
                     context,
                     icon: Icons.info_outline,
@@ -169,14 +191,11 @@ class DriverProfilePage extends StatelessWidget {
                       );
                     },
                   ),
-
                   const SizedBox(height: 10),
-
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.red.shade50,
-                      borderRadius:
-                          BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(18),
                     ),
                     child: ListTile(
                       leading: const Icon(
@@ -195,19 +214,15 @@ class DriverProfilePage extends StatelessWidget {
                         color: Colors.red,
                         size: 16,
                       ),
-                      onTap: () {
-                        Navigator.pushAndRemoveUntil(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                const LoginPage(),
-                          ),
-                          (route) => false,
-                        );
+                      onTap: () async {
+                        final authService = AuthService();
+                        await authService.logout();
+                        authService.dispose();
+                        if (!mounted) return;
+                        _openLogin();
                       },
                     ),
                   ),
-
                   const SizedBox(height: 30),
                 ],
               ),
@@ -232,10 +247,10 @@ class DriverProfilePage extends StatelessWidget {
       ),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFFF3E8ED),
+          backgroundColor: AppTheme.paleBlue,
           child: Icon(
             icon,
-            color: const Color(0xFF701A35),
+            color: AppTheme.primaryNavy,
           ),
         ),
         title: Text(title),

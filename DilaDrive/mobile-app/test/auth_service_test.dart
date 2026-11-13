@@ -1,67 +1,46 @@
-import 'dart:convert';
-
-import 'package:diladrive_customer/services/auth_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:diladrive_customer/services/auth_service.dart';
+import 'package:diladrive_customer/services/mobile_session.dart';
+
 void main() {
-  test('sends login credentials and parses the authenticated account',
+  tearDown(MobileSession.clear);
+
+  test('invalidates the backend session and clears the mobile cookie',
       () async {
-    late http.Request sentRequest;
+    MobileSession.storeResponseCookies({
+      'set-cookie': 'JSESSIONID=driver-session; Path=/; HttpOnly',
+    });
+    late http.Request capturedRequest;
     final service = AuthService(
       client: MockClient((request) async {
-        sentRequest = request;
-        return http.Response(
-          jsonEncode({
-            'id': 12,
-            'name': 'Customer One',
-            'email': 'customer@example.com',
-            'role': 'CUSTOMER',
-          }),
-          200,
-        );
+        capturedRequest = request;
+        return http.Response('', 204);
       }),
     );
     addTearDown(service.dispose);
 
-    final user = await service.login(
-      email: ' customer@example.com ',
-      password: 'secret',
-      role: 'CUSTOMER',
-    );
+    await service.logout();
 
-    expect(sentRequest.url.path, '/api/auth/mobile/login');
-    expect(jsonDecode(sentRequest.body), {
-      'email': 'customer@example.com',
-      'password': 'secret',
-      'role': 'CUSTOMER',
-    });
-    expect(user.id, '12');
-    expect(user.role, 'CUSTOMER');
+    expect(capturedRequest.method, 'POST');
+    expect(capturedRequest.url.path, '/api/auth/logout');
+    expect(capturedRequest.headers['cookie'], 'JSESSIONID=driver-session');
+    expect(MobileSession.isAuthenticated, isFalse);
   });
 
-  test('rejects invalid credentials', () async {
+  test('clears the mobile cookie when the backend cannot be reached', () async {
+    MobileSession.storeResponseCookies({
+      'set-cookie': 'JSESSIONID=offline-session; Path=/; HttpOnly',
+    });
     final service = AuthService(
-      client: MockClient(
-        (_) async => http.Response('Invalid Email or Password', 401),
-      ),
+      client: MockClient((_) async => throw http.ClientException('offline')),
     );
     addTearDown(service.dispose);
 
-    await expectLater(
-      service.login(
-        email: 'customer@example.com',
-        password: 'wrong',
-        role: 'CUSTOMER',
-      ),
-      throwsA(
-        isA<AuthException>().having(
-          (exception) => exception.message,
-          'message',
-          'Invalid email or password.',
-        ),
-      ),
-    );
+    await service.logout();
+
+    expect(MobileSession.isAuthenticated, isFalse);
   });
 }

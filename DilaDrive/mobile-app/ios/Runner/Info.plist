@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Take pickup and drop-off photos to verify assigned trips.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Select pickup and drop-off photos to verify assigned trips.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

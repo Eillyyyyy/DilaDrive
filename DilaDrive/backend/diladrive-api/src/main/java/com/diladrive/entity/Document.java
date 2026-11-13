@@ -32,6 +32,12 @@ public class Document {
     @Column(name = "booking_id", nullable = false)
     private Long bookingId;
 
+    @Column(name = "source_document_id")
+    private Long sourceDocumentId;
+
+    @Column(name = "payment_id")
+    private Long paymentId;
+
     @Column(name = "cust_id", nullable = false)
     private Long custId;
 
@@ -95,6 +101,18 @@ public class Document {
         this.bookingId = bookingId;
     }
 
+    public Long getSourceDocumentId() {
+        return sourceDocumentId;
+    }
+
+    public void setSourceDocumentId(Long sourceDocumentId) {
+        this.sourceDocumentId = sourceDocumentId;
+    }
+
+    public Long getPaymentId() { return paymentId; }
+
+    public void setPaymentId(Long paymentId) { this.paymentId = paymentId; }
+
     public Long getCustId() {
         return custId;
     }
@@ -102,7 +120,7 @@ public class Document {
     public void setCustId(Long custId) {
         this.custId = custId;
     }
-
+    
     public String getCustName() {
         return custName;
     }

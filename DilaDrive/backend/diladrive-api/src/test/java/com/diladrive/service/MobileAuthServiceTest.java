@@ -2,6 +2,7 @@ package com.diladrive.service;
 
 import com.diladrive.dto.MobileLoginRequest;
 import com.diladrive.dto.MobileLoginResponse;
+import com.diladrive.dto.MobileRegistrationRequest;
 import com.diladrive.entity.Customer;
 import com.diladrive.entity.Driver;
 import com.diladrive.repository.CustomerRepository;
@@ -20,7 +21,7 @@ class MobileAuthServiceTest {
     private final CustomerRepository customerRepository = mock(CustomerRepository.class);
     private final DriverRepository driverRepository = mock(DriverRepository.class);
     private final MobileAuthService service =
-            new MobileAuthService(customerRepository, driverRepository);
+            new MobileAuthService(customerRepository, driverRepository, new PasswordService());
 
     @Test
     void customerLoginMigratesLegacyPasswordAndReturnsSafeProfile() throws Exception {
@@ -74,6 +75,53 @@ class MobileAuthServiceTest {
         assertTrue(service.login(
                 request("customer@example.com", "correct-password", "ADMIN")).isEmpty());
         verify(customerRepository, never()).save(any());
+    }
+
+    @Test
+    void customerRegistrationStoresHashedPasswordAndPendingCompanyDetails() {
+        when(customerRepository.findByCustEmailIgnoreCase("owner@example.com"))
+                .thenReturn(Optional.empty());
+
+        service.registerCustomer(new MobileRegistrationRequest(
+                "  Company Owner ", " owner@example.com ", " 0123 ", "company",
+                " Example Sdn Bhd ", " 123456-A ", "secure-pass-123"));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(Customer.class);
+        verify(customerRepository).saveAndFlush(captor.capture());
+        Customer saved = captor.getValue();
+        assertEquals("Company Owner", saved.getCustName());
+        assertEquals("owner@example.com", saved.getCustEmail());
+        assertEquals("COMPANY", saved.getCustType());
+        assertEquals("PENDING", saved.getCustStatus());
+        assertEquals("Example Sdn Bhd", saved.getCompanyName());
+        assertEquals("123456-A", saved.getCompanyRegistrationNumber());
+        assertTrue(new BCryptPasswordEncoder().matches("secure-pass-123", saved.getCustPassword()));
+    }
+
+    @Test
+    void rejectsDuplicateRegistrationEmail() {
+        when(customerRepository.findByCustEmailIgnoreCase("customer@example.com"))
+                .thenReturn(Optional.of(new Customer()));
+
+        var exception = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> service.registerCustomer(new MobileRegistrationRequest(
+                        "Customer", "customer@example.com", null, "NORMAL", null, null,
+                        "secure-pass-123")));
+
+        assertEquals(409, exception.getStatusCode().value());
+        verify(customerRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void corporateRegistrationRequiresCompanyDetails() {
+        when(customerRepository.findByCustEmailIgnoreCase("customer@example.com"))
+                .thenReturn(Optional.empty());
+
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> service.registerCustomer(new MobileRegistrationRequest(
+                        "Customer", "customer@example.com", null, "COMPANY", null, null,
+                        "secure-pass-123")));
+        verify(customerRepository, never()).saveAndFlush(any());
     }
 
     private MobileLoginRequest request(String email, String password, String role) {

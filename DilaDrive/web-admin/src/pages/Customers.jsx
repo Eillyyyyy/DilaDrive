@@ -1,5 +1,5 @@
-import axios from "axios";
-import { useMemo, useState, useEffect } from "react";
+import api from "../services/api";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import {
   Search,
   Eye,
@@ -62,58 +62,48 @@ function InfoItem({ icon: Icon, label, value }) {
   );
 }
 
-export default function Customers({ customers = [], onVerifyCustomer }) {
+export default function Customers() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [customerList, setCustomerList] = useState(customers);
-  useEffect(() => {
-
-  fetchCustomers();
-
-}, []);
-
-const fetchCustomers = async () => {
-
-  try {
-
-    const response = await axios.get(
-      "http://localhost:8080/api/customers"
-    );
-
-    const formattedCustomers =
-      response.data.map(customer => ({
-
-        id: customer.custId,
-
-        name: customer.custName,
-
-        email: customer.custEmail,
-
-        phone: customer.custPhoneno,
-
-        status:
-          customer.custStatus === "ACTIVE"
-            ? "Verified"
-            : "Pending",
-
-        customerType:
-          customer.custType === "COMPANY"
-            ? "Corporate"
-            : "Normal"
-
-      }));
-
-    setCustomerList(formattedCustomers);
-
-  } catch(error) {
-
-    console.error(error);
-
-  }
-
-};
+  const [customerList, setCustomerList] = useState([]);
+  const [customersLoading, setCustomersLoading] = useState(true);
+  const [customersError, setCustomersError] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerToVerify, setCustomerToVerify] = useState(null);
+  const [verifyingId, setVerifyingId] = useState(null);
+  const [verificationError, setVerificationError] = useState("");
+
+  const fetchCustomers = useCallback(async () => {
+    setCustomersLoading(true);
+    setCustomersError("");
+    try {
+      const { data } = await api.get("/customers");
+      setCustomerList(data.map((customer) => ({
+        ...customer,
+        id: customer.custId,
+        name: customer.custName,
+        email: customer.custEmail,
+        phone: customer.custPhoneno,
+        companyName: customer.companyName ?? customer.custCompanyname,
+        companyRegistrationNumber: customer.companyRegistrationNumber,
+        status: customer.custStatus === "ACTIVE" ? "Verified" : "Pending",
+        customerType: customer.custType === "COMPANY" ? "Corporate" : "Normal",
+      })));
+    } catch (error) {
+      const response = error.response?.data;
+      setCustomersError(
+        (typeof response === "string" ? response : response?.message)
+          || error.message
+          || "Unable to load customers.",
+      );
+    } finally {
+      setCustomersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, [fetchCustomers]);
 
   const verifiedCount = customerList.filter(
     (customer) => customer.status === "Verified"
@@ -143,37 +133,63 @@ const fetchCustomers = async () => {
     });
   }, [customerList, search, statusFilter]);
 
-  const handleVerify = (customer) => {
-    setCustomerList((current) =>
-      current.map((item) =>
-        item.email === customer.email
-          ? { ...item, status: "Verified" }
-          : item
-      )
-    );
+  const askToVerify = (customer) => {
+    setVerificationError("");
+    setCustomerToVerify(customer);
+  };
 
-    if (selectedCustomer?.email === customer.email) {
-      setSelectedCustomer({ ...selectedCustomer, status: "Verified" });
+  const handleVerify = async (customer) => {
+    if (!customer?.id || verifyingId !== null) return;
+
+    setVerifyingId(customer.id);
+    setVerificationError("");
+    try {
+      const { data } = await api.put(`/customers/${customer.id}`, {
+        custName: customer.custName ?? customer.name,
+        custEmail: customer.custEmail ?? customer.email,
+        custPhoneno: customer.custPhoneno ?? customer.phone ?? null,
+        custType: customer.custType
+          ?? (customer.customerType === "Corporate" ? "COMPANY" : "NORMAL"),
+        custStatus: "ACTIVE",
+      });
+      const verifiedCustomer = {
+        ...customer,
+        ...data,
+        id: data.custId ?? customer.id,
+        status: data.custStatus === "ACTIVE" ? "Verified" : "Pending",
+      };
+      setCustomerList((current) =>
+        current.map((item) => item.id === customer.id ? verifiedCustomer : item)
+      );
+      setSelectedCustomer((current) =>
+        current?.id === customer.id ? verifiedCustomer : current
+      );
+      setCustomerToVerify(null);
+    } catch (error) {
+      const response = error.response?.data;
+      setVerificationError(
+        (typeof response === "string" ? response : response?.message)
+          || error.message
+          || "Unable to verify this customer. Please try again.",
+      );
+    } finally {
+      setVerifyingId(null);
     }
-
-    // Optional callback lets the parent component persist the change.
-    onVerifyCustomer?.(customer);
-    setCustomerToVerify(null);
   };
 
   return (
-    <main className="min-h-full space-y-6 bg-slate-50/60 p-4 sm:p-6 lg:p-8">
+    <main className="admin-page">
       {/* Page heading */}
-      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <section className="admin-page-header">
         <div>
           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-teal-700">
             <ShieldCheck size={16} />
             Customer management
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+          <h1 className="admin-page-title">
             Customer accounts
           </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">
+          <p className="admin-page-description">
             Review registered customers and verify their accounts before they
             access transportation services.
           </p>
@@ -276,6 +292,7 @@ const fetchCustomers = async () => {
           <table className="w-full min-w-[760px] text-left">
             <thead className="bg-slate-50/80">
               <tr className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <th className="px-6 py-4">No.</th>
                 <th className="px-6 py-4">Customer</th>
                 <th className="px-6 py-4">Contact details</th>
                 <th className="px-6 py-4">Customer type</th>
@@ -284,7 +301,7 @@ const fetchCustomers = async () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredCustomers.map((customer) => {
+              {filteredCustomers.map((customer, index) => {
                 const corporate =
                   customer.customerType === "Corporate" ||
                   customer.customer_type === "Corporate" ||
@@ -296,6 +313,9 @@ const fetchCustomers = async () => {
                     key={customer.id ?? customer.email}
                     className="transition hover:bg-slate-50/80"
                   >
+                    <td className="px-6 py-4 text-sm font-medium text-slate-500">
+                      {index + 1}
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-sm font-bold text-teal-800">
@@ -349,7 +369,7 @@ const fetchCustomers = async () => {
                         {customer.status !== "Verified" && (
                           <button
                             type="button"
-                            onClick={() => setCustomerToVerify(customer)}
+                            onClick={() => askToVerify(customer)}
                             className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-4 focus:ring-teal-700/20"
                           >
                             <CheckCircle2 size={15} />
@@ -364,16 +384,29 @@ const fetchCustomers = async () => {
 
               {filteredCustomers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-16 text-center">
+                  <td colSpan={6} className="px-6 py-16 text-center">
                     <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
                       <Search size={21} />
                     </div>
                     <p className="mt-4 font-semibold text-slate-900">
-                      No customers found
+                      {customersLoading
+                        ? "Loading customers..."
+                        : customersError
+                          ? "Customers could not be loaded"
+                          : "No customers found"}
                     </p>
                     <p className="mt-1 text-sm text-slate-500">
-                      Try another search term or change the status filter.
+                      {customersError || "Try another search term or change the status filter."}
                     </p>
+                    {customersError && (
+                      <button
+                        type="button"
+                        onClick={fetchCustomers}
+                        className="mt-4 text-sm font-semibold text-teal-700 hover:text-teal-800"
+                      >
+                        Retry
+                      </button>
+                    )}
                     {(search || statusFilter !== "All") && (
                       <button
                         type="button"
@@ -488,7 +521,7 @@ const fetchCustomers = async () => {
               {selectedCustomer.status !== "Verified" && (
                 <button
                   type="button"
-                  onClick={() => setCustomerToVerify(selectedCustomer)}
+                  onClick={() => askToVerify(selectedCustomer)}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
                 >
                   <ShieldCheck size={17} />
@@ -516,8 +549,8 @@ const fetchCustomers = async () => {
               Verify customer account?
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              This will mark the account as verified in this page. Make sure the
-              customer details have been reviewed first.
+              This will save the customer account as active in the database.
+              Make sure the customer details have been reviewed first.
             </p>
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="font-semibold text-slate-900">
@@ -527,10 +560,19 @@ const fetchCustomers = async () => {
                 {customerToVerify.email || "No email provided"}
               </p>
             </div>
+            {verificationError && (
+              <p
+                role="alert"
+                className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700"
+              >
+                {verificationError}
+              </p>
+            )}
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setCustomerToVerify(null)}
+                disabled={verifyingId !== null}
                 className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Cancel
@@ -538,10 +580,13 @@ const fetchCustomers = async () => {
               <button
                 type="button"
                 onClick={() => handleVerify(customerToVerify)}
+                disabled={verifyingId === customerToVerify.id}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800"
               >
                 <Check size={16} />
-                Confirm verification
+                {verifyingId === customerToVerify.id
+                  ? "Saving..."
+                  : "Confirm verification"}
               </button>
             </div>
           </section>

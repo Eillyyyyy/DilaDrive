@@ -1,9 +1,9 @@
 package com.diladrive.dto;
 
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 
 public record AssignmentRequest(
-        @NotNull Long bookingId,
-        @NotNull Long driverId,
-        @NotNull Long vehicleId) {
+        @Positive Long bookingId,
+        @Positive Long driverId,
+        @Positive Long vehicleId) {
 }

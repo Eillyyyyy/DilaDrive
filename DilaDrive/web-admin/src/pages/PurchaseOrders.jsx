@@ -1,19 +1,21 @@
 export default function PurchaseOrders() {
   return (
-    <div className="rounded-2xl bg-white p-6 shadow">
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-2xl font-bold">
+    <div className="admin-page">
+      <header className="admin-page-header">
+        <h1 className="admin-page-title">
           Purchase Orders
-        </h2>
+        </h1>
 
         <button className="rounded-xl bg-teal-500 px-4 py-2 text-white">
           Generate PO
         </button>
-      </div>
+      </header>
 
+      <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
       <table className="w-full">
         <thead>
           <tr className="border-b">
+            <th className="p-3 text-left">No.</th>
             <th className="p-3 text-left">PO Number</th>
             <th className="p-3 text-left">Supplier</th>
             <th className="p-3 text-left">Amount</th>
@@ -23,20 +25,13 @@ export default function PurchaseOrders() {
 
         <tbody>
           <tr>
-            <td className="p-3">PO-1001</td>
-            <td className="p-3">ABC Vehicle Services</td>
-            <td className="p-3">RM 2,500</td>
-            <td className="p-3">Approved</td>
-          </tr>
-
-          <tr>
-            <td className="p-3">PO-1002</td>
-            <td className="p-3">Fuel Supplier Sdn Bhd</td>
-            <td className="p-3">RM 3,800</td>
-            <td className="p-3">Pending</td>
+            <td className="p-6 text-center text-slate-500" colSpan={5}>
+              No purchase orders available.
+            </td>
           </tr>
         </tbody>
       </table>
+      </section>
     </div>
   );
 }

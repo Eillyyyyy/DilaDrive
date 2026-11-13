@@ -27,16 +27,22 @@ public class Booking {
     @Column(name = "booking_type")
     private String bookingType;
 
+    @Column(name = "booking_triptype")
+    private String bookingTriptype;
+
+    @Column(name = "booking_notes", length = 1000)
+    private String bookingNotes;
+
     @Column(name = "booking_tripdate")
     private LocalDate bookingTripdate;
 
     @Column(name = "booking_pickuptime")
     private LocalTime bookingPickuptime;
 
-    @Column(name = "booking_pickupaddress")
+    @Column(name = "booking_pickupaddress", length = 500)
     private String bookingPickupaddress;
 
-    @Column(name = "booking_destinationaddress")
+    @Column(name = "booking_destinationaddress", length = 500)
     private String bookingDestinationaddress;
 
     @Column(name = "booking_flightno")
@@ -107,6 +113,22 @@ public class Booking {
 
     public void setBookingType(String bookingType) {
         this.bookingType = bookingType;
+    }
+
+    public String getBookingTriptype() {
+        return bookingTriptype;
+    }
+
+    public void setBookingTriptype(String bookingTriptype) {
+        this.bookingTriptype = bookingTriptype;
+    }
+
+    public String getBookingNotes() {
+        return bookingNotes;
+    }
+
+    public void setBookingNotes(String bookingNotes) {
+        this.bookingNotes = bookingNotes;
     }
 
     public LocalDate getBookingTripdate() {

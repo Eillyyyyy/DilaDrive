@@ -2,20 +2,11 @@ package com.diladrive.dto;
 
 public class ProfileUpdateRequest {
 
-    private String currentPassword;
     private String name;
     private String email;
     private String phone;
     private String address;
     private String profileImage;
-
-    public String getCurrentPassword() {
-        return currentPassword;
-    }
-
-    public void setCurrentPassword(String currentPassword) {
-        this.currentPassword = currentPassword;
-    }
 
     public String getName() {
         return name;

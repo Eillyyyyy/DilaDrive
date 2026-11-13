@@ -1,37 +1,23 @@
 import DataTable from "../components/DataTable";
 
-const quotations = [
-  {
-    id: "QT-001",
-    customer: "Aina Logistics",
-    date: "21 Oct 2026",
-    amount: "RM 280",
-    status: "Pending",
-  },
-  {
-    id: "QT-002",
-    customer: "Maju Jaya Enterprise",
-    date: "20 Oct 2026",
-    amount: "RM 420",
-    status: "Approved",
-  },
-];
-
 export default function Quotations() {
   return (
-    <div>
-      <h2 className="mb-2 text-2xl font-bold">
+    <div className="admin-page">
+      <header className="admin-page-header">
+      <div>
+      <h1 className="admin-page-title">
         Quotation Management
-      </h2>
+      </h1>
 
-      <p className="mb-6 text-gray-500">
+      <p className="admin-page-description">
         Manage transport quotations for customers.
       </p>
+      </div>
+      </header>
 
       <DataTable
-        rows={quotations}
+        rows={[]}
         columns={[
-          { key: "id", label: "Quotation ID" },
           { key: "customer", label: "Customer" },
           { key: "date", label: "Date" },
           { key: "amount", label: "Amount" },

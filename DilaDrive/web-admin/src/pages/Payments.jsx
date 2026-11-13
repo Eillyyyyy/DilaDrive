@@ -1,5 +1,6 @@
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import api from "../services/api";
 import {
   Search,
   Eye,
@@ -12,46 +13,8 @@ import {
   Wallet,
   ExternalLink,
   AlertCircle,
+  RefreshCw,
 } from "lucide-react";
-
-const initialPayments = [
-  {
-    id: "PAY-001",
-    bookingId: "DD-1028",
-    customer: "Aina Logistics",
-    amount: 280,
-    receipt: "receipt_001.pdf",
-    receiptUrl: "",
-    paymentMethod: "Online Transfer",
-    submittedAt: "2026-10-20T09:30:00",
-    status: "Pending Verification",
-    rejectionReason: "",
-  },
-  {
-    id: "PAY-002",
-    bookingId: "DD-1027",
-    customer: "Maju Jaya Enterprise",
-    amount: 420,
-    receipt: "receipt_002.pdf",
-    receiptUrl: "",
-    paymentMethod: "Online Transfer",
-    submittedAt: "2026-10-19T14:15:00",
-    status: "Verified",
-    rejectionReason: "",
-  },
-  {
-    id: "PAY-003",
-    bookingId: "DD-1026",
-    customer: "Nusa Travel",
-    amount: 350,
-    receipt: "receipt_003.pdf",
-    receiptUrl: "",
-    paymentMethod: "Bank Transfer",
-    submittedAt: "2026-10-21T10:00:00",
-    status: "Rejected",
-    rejectionReason: "The uploaded receipt is unclear. Please upload a readable copy.",
-  },
-];
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat("en-MY", {
@@ -75,8 +38,17 @@ const formatDateTime = (value) => {
   });
 };
 
+const paymentProofUrl = (path) => {
+  const base = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api")
+    .replace(/\/+$/, "")
+    .replace(/\/api$/, "");
+  return new URL(path, `${base}/`).toString();
+};
+
 export default function Payments() {
-  const [paymentList, setPaymentList] = useState(initialPayments);
+  const [paymentList, setPaymentList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [reviewing, setReviewing] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
 
@@ -84,8 +56,59 @@ export default function Payments() {
   const [paymentToReview, setPaymentToReview] = useState(null);
   const [reviewAction, setReviewAction] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
+  const [cashEntryOpen, setCashEntryOpen] = useState(false);
+  const [cashBookingId, setCashBookingId] = useState("");
+  const [cashAmount, setCashAmount] = useState("");
+  const [cashRecording, setCashRecording] = useState(false);
+  const [cashError, setCashError] = useState("");
 
   const [feedback, setFeedback] = useState(null);
+
+  const loadPayments = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get("/payments");
+      setPaymentList((response.data || []).map((payment) => ({
+        id: payment.paymentId,
+        bookingId: payment.bookingReference || `BK-${payment.bookingId}`,
+        customer: payment.customerName || `Customer ${payment.customerId}`,
+        amount: Number(payment.amount || 0),
+        surchargeAmount: Number(payment.surchargeAmount || 0),
+        paymentMethod: payment.paymentMethod,
+        recordedBy: payment.recordedByDriverId
+          ? `Driver #${payment.recordedByDriverId}`
+          : payment.recordedByAdminId
+            ? `Admin #${payment.recordedByAdminId}`
+            : null,
+        receipt: payment.proofUrl
+          ? "Uploaded payment proof"
+          : payment.paymentMethod === "CASH"
+            ? "Cash recorded by staff"
+            : "No proof uploaded",
+        receiptUrl: payment.proofUrl,
+        submittedAt: payment.submittedAt,
+        reviewedAt: payment.verifiedAt,
+        status: payment.paymentStatus === "VERIFIED"
+          ? "Verified"
+          : payment.paymentStatus === "REJECTED"
+            ? "Rejected"
+            : "Pending Verification",
+        rejectionReason: payment.rejectReason,
+      })));
+      setFeedback(null);
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        message: error.response?.data?.message || "Payment records could not be loaded. Check the API connection and retry.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPayments();
+  }, []);
 
   const stats = useMemo(() => {
     const pending = paymentList.filter(
@@ -106,7 +129,7 @@ export default function Payments() {
       verified: verified.length,
       rejected: rejected.length,
       verifiedAmount: verified.reduce(
-        (total, payment) => total + Number(payment.amount || 0),
+        (total, payment) => total + Number(payment.amount || 0) + Number(payment.surchargeAmount || 0),
         0
       ),
     };
@@ -143,7 +166,7 @@ export default function Payments() {
     }
   };
 
-  const updatePaymentStatus = (paymentId, status, reason = "") => {
+  const updatePaymentStatus = async (paymentId, status, reason = "") => {
     const payment = paymentList.find(
       (item) => item.id === paymentId
     );
@@ -167,32 +190,29 @@ export default function Payments() {
       return;
     }
 
-    const updatedPayment = {
-      ...payment,
-      status,
-      rejectionReason: status === "Rejected" ? reason.trim() : "",
-      reviewedAt: new Date().toISOString(),
-    };
-
-    setPaymentList((previous) =>
-      previous.map((item) =>
-        item.id === paymentId ? updatedPayment : item
-      )
-    );
-
-    if (selectedPayment?.id === paymentId) {
-      setSelectedPayment(updatedPayment);
+    setReviewing(true);
+    try {
+      await api.put(`/payments/${paymentId}/review`, {
+        decision: status === "Verified" ? "VERIFIED" : "REJECTED",
+        reason: status === "Rejected" ? reason.trim() : null,
+      });
+      await loadPayments();
+      setFeedback({
+        type: "success",
+        message: status === "Verified"
+          ? `Payment for ${payment.customer} has been verified and a receipt issued.`
+          : `Payment for ${payment.customer} has been rejected. The reason was sent to the customer.`,
+      });
+      setSelectedPayment(null);
+      closeReviewModal();
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        message: error.response?.data?.message || "The payment decision could not be saved. Retry the review.",
+      });
+    } finally {
+      setReviewing(false);
     }
-
-    setFeedback({
-      type: "success",
-      message:
-        status === "Verified"
-          ? `${payment.id} has been marked as verified.`
-          : `${payment.id} has been rejected. The rejection reason has been recorded.`,
-    });
-
-    closeReviewModal();
   };
 
   const openReviewModal = (payment, action) => {
@@ -216,21 +236,64 @@ export default function Payments() {
     setRejectionReason("");
   };
 
+  const recordCashPayment = async () => {
+    const bookingId = Number(cashBookingId.trim());
+    const amountText = cashAmount.trim();
+    const amount = Number(amountText);
+    if (!Number.isInteger(bookingId) || bookingId <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(amountText) || !Number.isFinite(amount) || amount < 0.01) {
+      setCashError("Enter a valid booking ID and cash amount with at most two decimal places.");
+      return;
+    }
+
+    setCashError("");
+    setCashRecording(true);
+    try {
+      await api.post(`/payments/bookings/${bookingId}/cash`, {
+        amount: amount.toFixed(2),
+      });
+      setCashEntryOpen(false);
+      setCashBookingId("");
+      setCashAmount("");
+      await loadPayments();
+      setFeedback({
+        type: "success",
+        message: "Cash receipt recorded and sent for Admin review.",
+      });
+    } catch (error) {
+      setCashError(error.response?.data?.message || "Cash received could not be recorded.");
+    } finally {
+      setCashRecording(false);
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="admin-page">
       {/* Header */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-teal-700">
-          Finance & Transactions
-        </p>
+      <div className="admin-page-header">
+        <div>
+          <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-teal-700">
+            Finance & Transactions
+          </p>
 
-        <h2 className="text-3xl font-bold text-slate-900">
-          Payment Verification
-        </h2>
+          <h1 className="admin-page-title">
+            Payment Verification
+          </h1>
 
-        <p className="mt-2 text-slate-500">
-          Review customer payment receipts and record payment verification decisions.
-        </p>
+          <p className="admin-page-description">
+            Review customer payment receipts and record payment verification decisions.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setCashEntryOpen(true);
+            setCashError("");
+            setFeedback(null);
+          }}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 font-medium text-white hover:bg-slate-800"
+        >
+          <Wallet size={17} />
+          Record cash received
+        </button>
       </div>
 
       {/* Feedback */}
@@ -302,7 +365,7 @@ export default function Payments() {
         </p>
 
         <p className="mt-2 text-xs text-slate-500">
-          Based on verified records in this demo. This is not a live bank balance.
+          This summary reflects verified records only; it is not a live bank balance.
         </p>
       </div>
 
@@ -320,6 +383,14 @@ export default function Payments() {
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={loadPayments}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              Refresh
+            </button>
             <div className="relative w-full sm:w-64">
               <Search
                 size={18}
@@ -353,7 +424,7 @@ export default function Payments() {
             <thead className="bg-slate-50 text-slate-500">
               <tr>
                 {[
-                  "Payment ID",
+                  "No.",
                   "Booking / Customer",
                   "Amount",
                   "Receipt",
@@ -372,18 +443,25 @@ export default function Payments() {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredPayments.map((payment) => (
+              {loading && (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
+                    Loading payment records…
+                  </td>
+                </tr>
+              )}
+              {filteredPayments.map((payment, index) => (
                 <tr
                   key={payment.id}
                   className="hover:bg-slate-50"
                 >
-                  <td className="whitespace-nowrap px-6 py-5 font-semibold text-slate-900">
-                    {payment.id}
+                  <td className="whitespace-nowrap px-6 py-5 font-medium text-slate-500">
+                    {index + 1}
                   </td>
 
                   <td className="px-6 py-5">
                     <p className="font-medium text-slate-900">
-                      {payment.bookingId}
+                      Booking {payment.bookingId}
                     </p>
                     <p className="mt-1 text-slate-500">
                       {payment.customer}
@@ -391,7 +469,10 @@ export default function Payments() {
                   </td>
 
                   <td className="whitespace-nowrap px-6 py-5 font-medium">
-                    {formatCurrency(payment.amount)}
+                    {formatCurrency(payment.amount + payment.surchargeAmount)}
+                    <p className="mt-1 text-xs font-normal text-slate-500">
+                      {payment.paymentMethod?.replaceAll("_", " ")}
+                    </p>
                   </td>
 
                   <td className="px-6 py-5">
@@ -448,7 +529,7 @@ export default function Payments() {
                 </tr>
               ))}
 
-              {filteredPayments.length === 0 && (
+              {!loading && filteredPayments.length === 0 && (
                 <tr>
                   <td
                     colSpan={7}
@@ -471,22 +552,26 @@ export default function Payments() {
       {selectedPayment && (
         <Modal
           title="Payment Information"
-          subtitle={`Payment ${selectedPayment.id}`}
+          subtitle={`Payment for ${selectedPayment.customer}`}
           onClose={() => setSelectedPayment(null)}
         >
           <div className="space-y-5">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Info label="Payment ID" value={selectedPayment.id} />
-              <Info label="Booking ID" value={selectedPayment.bookingId} />
+              <Info label="Booking Reference" value={selectedPayment.bookingId} />
               <Info label="Customer" value={selectedPayment.customer} />
               <Info
                 label="Amount"
-                value={formatCurrency(selectedPayment.amount)}
+                value={formatCurrency(selectedPayment.amount + selectedPayment.surchargeAmount)}
+              />
+              <Info
+                label="Card surcharge"
+                value={formatCurrency(selectedPayment.surchargeAmount)}
               />
               <Info
                 label="Payment Method"
                 value={selectedPayment.paymentMethod}
               />
+              <Info label="Recorded By" value={selectedPayment.recordedBy} />
               <Info
                 label="Submitted At"
                 value={formatDateTime(selectedPayment.submittedAt)}
@@ -522,7 +607,7 @@ export default function Payments() {
 
               {selectedPayment.receiptUrl ? (
                 <a
-                  href={selectedPayment.receiptUrl}
+                  href={paymentProofUrl(selectedPayment.receiptUrl)}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-teal-700 hover:bg-slate-50"
@@ -532,7 +617,9 @@ export default function Payments() {
                 </a>
               ) : (
                 <p className="mt-3 text-xs text-amber-700">
-                  Receipt preview is unavailable in demo mode. Connect this record to the uploaded file URL to enable viewing.
+                  {selectedPayment.paymentMethod === "CASH"
+                    ? "Cash was recorded by staff. Admin verification will issue the receipt."
+                    : "Receipt preview is unavailable until an uploaded receipt URL is linked."}
                 </p>
               )}
             </div>
@@ -583,7 +670,7 @@ export default function Payments() {
               ? "Confirm Payment Verification"
               : "Reject Payment"
           }
-          subtitle={`Payment ${paymentToReview.id} · ${paymentToReview.bookingId}`}
+          subtitle={`Payment for ${paymentToReview.customer} · Booking ${paymentToReview.bookingId}`}
           onClose={closeReviewModal}
           layer={60}
         >
@@ -649,6 +736,7 @@ export default function Payments() {
               </button>
 
               <button
+                disabled={reviewing}
                 onClick={() => {
                   if (reviewAction === "verify") {
                     updatePaymentStatus(
@@ -663,16 +751,73 @@ export default function Payments() {
                     );
                   }
                 }}
-                className={`rounded-xl px-5 py-2.5 font-medium text-white ${
+                className={`rounded-xl px-5 py-2.5 font-medium text-white disabled:cursor-wait disabled:opacity-50 ${
                   reviewAction === "verify"
                     ? "bg-emerald-600 hover:bg-emerald-700"
                     : "bg-red-600 hover:bg-red-700"
                 }`}
               >
-                {reviewAction === "verify"
+                {reviewing
+                  ? "Saving decision…"
+                  : reviewAction === "verify"
                   ? "Confirm Verification"
                   : "Confirm Rejection"}
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {cashEntryOpen && (
+        <Modal
+          title="Record cash received"
+          subtitle="Record cash received for a completed booking. Admin verification is still required before a receipt is issued."
+          onClose={() => !cashRecording && setCashEntryOpen(false)}
+          layer={60}
+        >
+          <div className="space-y-4">
+            <label className="block text-sm font-medium text-slate-700" htmlFor="cashBookingId">
+              Booking ID
+            </label>
+            <input
+              id="cashBookingId"
+              type="number"
+              min="1"
+              step="1"
+              value={cashBookingId}
+              onChange={(event) => setCashBookingId(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-teal-500"
+              placeholder="Database booking ID"
+            />
+            <label className="block text-sm font-medium text-slate-700" htmlFor="cashAmount">
+              Cash received (RM)
+            </label>
+            <input
+              id="cashAmount"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={cashAmount}
+              onChange={(event) => setCashAmount(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-teal-500"
+              placeholder="0.00"
+            />
+            <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button
+                disabled={cashRecording}
+                onClick={() => setCashEntryOpen(false)}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 font-medium text-slate-600 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={cashRecording}
+                onClick={recordCashPayment}
+                className="rounded-xl bg-slate-900 px-4 py-2.5 font-medium text-white disabled:opacity-50"
+              >
+              {cashRecording ? "Saving…" : "Record for review"}
+              </button>
+            {cashError && <p role="alert" className="text-sm text-red-700">{cashError}</p>}
             </div>
           </div>
         </Modal>

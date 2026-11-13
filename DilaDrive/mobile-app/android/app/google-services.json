@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1089648634453",
+    "project_id": "diladrive-c2808",
+    "storage_bucket": "diladrive-c2808.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1089648634453:android:21fb41a94ccaef2e88c2dc",
+        "android_client_info": {
+          "package_name": "com.example.diladrive_customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA2qwbFYJXK0K6aYdbsMN0XZZiXh3mgNtI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1089648634453:android:8daae21194b996db88c2dc",
+        "android_client_info": {
+          "package_name": "com.example.diladrive_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA2qwbFYJXK0K6aYdbsMN0XZZiXh3mgNtI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

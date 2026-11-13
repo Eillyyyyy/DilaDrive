@@ -1,151 +1,134 @@
 import 'package:flutter/material.dart';
 
-class DriverViewAccountPage extends StatelessWidget {
+import '../../models/driver_profile.dart';
+import '../../services/driver_profile_service.dart';
+import '../../theme/app_theme.dart';
+import '../auth/login.dart';
+
+class DriverViewAccountPage extends StatefulWidget {
   const DriverViewAccountPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF701A35);
+  State<DriverViewAccountPage> createState() => _DriverViewAccountPageState();
+}
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+class _DriverViewAccountPageState extends State<DriverViewAccountPage> {
+  final DriverProfileService _service = DriverProfileService();
+  late Future<DriverProfile> _profile;
 
-      appBar: AppBar(
-        title: const Text("Driver Account"),
-        backgroundColor: Colors.white,
-        elevation: 0,
-      ),
+  @override
+  void initState() {
+    super.initState();
+    _profile = _service.getProfile();
+  }
 
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(25),
-              decoration: BoxDecoration(
-                color: primaryColor,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Column(
-                children: [
-                  CircleAvatar(
-                    radius: 45,
-                    backgroundColor: Colors.white,
-                    child: Icon(
-                      Icons.person,
-                      size: 50,
-                      color: primaryColor,
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
+
+  void _retryOrSignIn(Object? error) {
+    final requiresLogin =
+        error is DriverProfileException && error.requiresLogin;
+    if (requiresLogin) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const LoginPage()),
+        (_) => false,
+      );
+    } else {
+      setState(() {
+        _profile = _service.getProfile();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: AppTheme.lightBlueBackground,
+        appBar: AppBar(title: const Text('Driver Account')),
+        body: FutureBuilder<DriverProfile>(
+          future: _profile,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(snapshot.error.toString(),
+                        textAlign: TextAlign.center),
+                    TextButton.icon(
+                      onPressed: () => _retryOrSignIn(snapshot.error),
+                      icon: const Icon(Icons.refresh),
+                      label: Text(snapshot.error is DriverProfileException &&
+                              (snapshot.error as DriverProfileException)
+                                  .requiresLogin
+                          ? 'Sign in'
+                          : 'Retry'),
                     ),
+                  ]),
+                ),
+              );
+            }
+            final profile = snapshot.data!;
+            final items = <String, String>{
+              'Driver ID': profile.id.toString(),
+              'Full name': profile.name,
+              'Email': profile.email,
+              'Phone': profile.phone ?? 'Not provided',
+              if (profile.licenseNumber != null)
+                'Driving license': profile.licenseNumber!,
+              if (profile.licenseExpiry != null)
+                'License expiry': profile.licenseExpiry!,
+              if (profile.driverType != null)
+                'Driver type': profile.driverType!,
+              if (profile.availability != null)
+                'Availability': profile.availability!,
+              if (profile.status != null) 'Account status': profile.status!,
+            };
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Card(
+                  color: AppTheme.primaryNavy,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(children: [
+                      const CircleAvatar(
+                        radius: 38,
+                        backgroundColor: Colors.white,
+                        child: Icon(Icons.person,
+                            size: 42, color: AppTheme.primaryNavy),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(profile.name,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 3),
+                      const Text('Driver',
+                          style: TextStyle(color: Colors.white70)),
+                    ]),
                   ),
-
-                  SizedBox(height: 15),
-
-                  Text(
-                    "Ahmad Faiz",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-
-                  SizedBox(height: 5),
-
-                  Text(
-                    "Driver",
-                    style: TextStyle(
-                      color: Colors.white70,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            buildInfoCard(
-              "Driver ID",
-              "DRV-001",
-            ),
-
-            buildInfoCard(
-              "Full Name",
-              "Ahmad Faiz",
-            ),
-
-            buildInfoCard(
-              "Email Address",
-              "driver@diladrive.com",
-            ),
-
-            buildInfoCard(
-              "Phone Number",
-              "0123456789",
-            ),
-
-            buildInfoCard(
-              "Driving License No",
-              "D123456789",
-            ),
-
-            buildInfoCard(
-              "Vehicle Type",
-              "Van",
-            ),
-
-            buildInfoCard(
-              "Vehicle Plate Number",
-              "WXY1234",
-            ),
-
-            buildInfoCard(
-              "Account Status",
-              "Active",
-              valueColor: Colors.green,
-            ),
-
-            buildInfoCard(
-              "Registration Date",
-              "01/01/2026",
-            ),
-          ],
+                ),
+                const SizedBox(height: 12),
+                ...items.entries.map((entry) => Card(
+                      child: ListTile(
+                        title: Text(entry.key,
+                            style: const TextStyle(
+                                color: AppTheme.secondaryText, fontSize: 13)),
+                        subtitle: Text(entry.value,
+                            style: const TextStyle(
+                                color: AppTheme.mainText, fontSize: 16)),
+                      ),
+                    )),
+              ],
+            );
+          },
         ),
-      ),
-    );
-  }
-
-  Widget buildInfoCard(
-    String title,
-    String value, {
-    Color valueColor = Colors.black87,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: Colors.grey,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: valueColor,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+      );
 }

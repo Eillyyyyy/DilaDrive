@@ -1,6 +1,6 @@
 
 import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
+import api from "../services/api";
 import {
   Search,
   Eye,
@@ -33,16 +33,26 @@ export default function Bookings({
   onNavigate,
 }) {
  const [bookingList, setBookingList] = useState([]);
+ const [driverList, setDriverList] = useState([]);
+ const [vehicleList, setVehicleList] = useState([]);
  useEffect(() => {
    fetchBookings();
  }, []);
 
 const fetchBookings = async () => {
   try {
-
-    const response = await axios.get(
-      "http://localhost:8080/api/bookings"
-    );
+    const [response, customersResponse, driversResponse, vehiclesResponse] =
+      await Promise.all([
+        api.get("/bookings"),
+        api.get("/customers"),
+        api.get("/drivers"),
+        api.get("/vehicles"),
+      ]);
+    const customers = customersResponse.data;
+    const drivers = driversResponse.data;
+    const vehicles = vehiclesResponse.data;
+    setDriverList(drivers);
+    setVehicleList(vehicles);
 
     const formattedBookings =
       response.data.map(booking => ({
@@ -50,7 +60,12 @@ const fetchBookings = async () => {
         id: booking.bookingId,
 
         customer:
-          "Customer #" + booking.custId,
+          booking.custName ||
+          booking.customerName ||
+          customers.find((customer) =>
+            String(customer.custId) === String(booking.custId)
+          )?.custName ||
+          "Customer",
 
         date:
           booking.bookingTripdate,
@@ -79,16 +94,29 @@ const fetchBookings = async () => {
         fare:
           booking.bookingTripfare,
 
+        type:
+          booking.bookingType,
+
+        tripType:
+          booking.bookingTriptype,
+
+        notes:
+          booking.bookingNotes,
+
         driverId: booking.driverId,
 
         vehicleId: booking.vehicleId,
 
         driver: booking.driverId
-          ? `Driver #${booking.driverId}`
+          ? drivers.find((driver) =>
+              String(driver.driverId) === String(booking.driverId)
+            )?.driverName || "Assigned"
           : "",
 
         vehicle: booking.vehicleId
-          ? `Vehicle #${booking.vehicleId}`
+          ? vehicles.find((vehicle) =>
+              String(vehicle.vehicleId) === String(booking.vehicleId)
+            )?.vehiclePlateno || "Assigned"
           : "",
 
         status: ({
@@ -114,6 +142,7 @@ const fetchBookings = async () => {
 
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [bookingToVerify, setBookingToVerify] = useState(null);
+  const [fareInput, setFareInput] = useState("");
 
   const [error, setError] = useState("");
 
@@ -140,7 +169,6 @@ const fetchBookings = async () => {
 
     return bookingList.filter((booking) => {
       const searchable = [
-        booking.id,
         booking.customer,
         booking.phone,
         booking.pickup,
@@ -190,25 +218,40 @@ const fetchBookings = async () => {
     }
 
     try {
+      let finalFare = Number(booking.fare);
+      if (!Number.isFinite(finalFare) || finalFare <= 0) {
+        finalFare = Number(fareInput);
+        if (!Number.isFinite(finalFare) || finalFare <= 0) {
+          setError("Enter a final fare greater than zero before confirming.");
+          return;
+        }
+        await api.put(`/bookings/${booking.id}/fare`, {
+          tripFare: finalFare,
+        });
+      }
+
       let verifiedBooking;
       if (onVerifyBooking) {
         verifiedBooking = await onVerifyBooking(booking.id);
       } else {
-        const response = await axios.put(
-          `http://localhost:8080/api/bookings/${booking.id}/verify`
-        );
+        const response = await api.put(`/bookings/${booking.id}/verify`);
         verifiedBooking = response.data;
       }
 
       updateBooking(booking.id, {
+        fare: finalFare,
         status: "Confirmed",
         driverId: verifiedBooking?.driverId ?? booking.driverId,
         vehicleId: verifiedBooking?.vehicleId ?? booking.vehicleId,
         driver: verifiedBooking?.driverId
-          ? `Driver #${verifiedBooking.driverId}`
+          ? driverList.find((driver) =>
+              String(driver.driverId) === String(verifiedBooking.driverId)
+            )?.driverName || "Assigned"
           : booking.driver,
         vehicle: verifiedBooking?.vehicleId
-          ? `Vehicle #${verifiedBooking.vehicleId}`
+          ? vehicleList.find((vehicle) =>
+              String(vehicle.vehicleId) === String(verifiedBooking.vehicleId)
+            )?.vehiclePlateno || "Assigned"
           : booking.vehicle,
       });
 
@@ -296,20 +339,20 @@ const fetchBookings = async () => {
   };
 
   return (
-    <div className="min-h-screen space-y-6 bg-slate-50/70 p-4 sm:p-6 lg:p-8">
+    <div className="admin-page">
 
       {/* Header */}
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <header className="admin-page-header">
         <div>
           <p className="mb-2 text-sm font-medium text-teal-700">
             DilaDrive / Operations
           </p>
 
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+          <h1 className="admin-page-title">
             Booking Management
           </h1>
 
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+          <p className="admin-page-description">
             Review customer trip requests, confirm booking
             availability, and manage driver and vehicle assignments.
           </p>
@@ -407,7 +450,7 @@ const fetchBookings = async () => {
           <table className="w-full min-w-[1050px] text-left">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-5 py-4 font-semibold">Booking</th>
+                <th className="px-5 py-4 font-semibold">No.</th>
                 <th className="px-5 py-4 font-semibold">Customer</th>
                 <th className="px-5 py-4 font-semibold">Trip Route</th>
                 <th className="px-5 py-4 font-semibold">Schedule</th>
@@ -418,7 +461,7 @@ const fetchBookings = async () => {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredBookings.map((booking) => {
+              {filteredBookings.map((booking, index) => {
                 const status =
                   booking.status || "Pending Verification";
 
@@ -430,13 +473,8 @@ const fetchBookings = async () => {
                     key={booking.id}
                     className="transition hover:bg-slate-50/80"
                   >
-                    <td className="px-5 py-4">
-                      <p className="font-semibold text-slate-900">
-                        {booking.id}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-400">
-                        {booking.passengers || 1} passenger(s)
-                      </p>
+                    <td className="px-5 py-4 text-sm font-medium text-slate-500">
+                      {index + 1}
                     </td>
 
                     <td className="px-5 py-4">
@@ -520,6 +558,12 @@ const fetchBookings = async () => {
                             type="button"
                             onClick={() => {
                               setBookingToVerify(booking);
+                              setFareInput(
+                                Number.isFinite(Number(booking.fare)) &&
+                                  Number(booking.fare) > 0
+                                  ? String(booking.fare)
+                                  : "",
+                              );
                               setError("");
                             }}
                             className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
@@ -582,10 +626,7 @@ const fetchBookings = async () => {
           <div className="space-y-5">
             <div className="rounded-xl bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Booking Reference
-              </p>
-              <p className="mt-1 text-xl font-bold text-slate-900">
-                {selectedBooking.id}
+                Booking Status
               </p>
               <span
                 className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getBookingStyle(
@@ -606,6 +647,9 @@ const fetchBookings = async () => {
             <Detail label="Passengers" value={selectedBooking.passengers} />
             <Detail label="Luggage Count" value={selectedBooking.luggageCount} />
             <Detail label="Luggage Size" value={selectedBooking.luggageSize} />
+            <Detail label="Vehicle Type" value={selectedBooking.type} />
+            <Detail label="Trip Type" value={selectedBooking.tripType} />
+            <Detail label="Additional Notes" value={selectedBooking.notes} />
             <Detail label="Trip Fare" value={money(selectedBooking.fare)} />
             <Detail label="Assigned Driver" value={selectedBooking.driver || "Not assigned"} />
             <Detail label="Assigned Vehicle" value={selectedBooking.vehicle || "Not assigned"} />
@@ -617,6 +661,12 @@ const fetchBookings = async () => {
                 type="button"
                 onClick={() => {
                   setBookingToVerify(selectedBooking);
+                  setFareInput(
+                    Number.isFinite(Number(selectedBooking.fare)) &&
+                      Number(selectedBooking.fare) > 0
+                      ? String(selectedBooking.fare)
+                      : "",
+                  );
                   setSelectedBooking(null);
                   setError("");
                 }}
@@ -663,11 +713,31 @@ const fetchBookings = async () => {
             </p>
 
             <div className="rounded-xl bg-slate-50 p-4">
-              <Detail label="Booking ID" value={bookingToVerify.id} />
+              <Detail label="Trip Date" value={formatDate(bookingToVerify.date)} />
               <Detail label="Customer" value={bookingToVerify.customer} />
               <Detail label="Route" value={`${bookingToVerify.pickup || "N/A"} → ${bookingToVerify.dropoff || "N/A"}`} />
               <Detail label="Passengers" value={bookingToVerify.passengers || 1} />
             </div>
+
+            {(!Number.isFinite(Number(bookingToVerify.fare)) ||
+              Number(bookingToVerify.fare) <= 0) && (
+              <label className="block space-y-2 text-sm font-medium text-slate-700">
+                Final fare (RM)
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={fareInput}
+                  onChange={(event) => setFareInput(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  placeholder="Enter the approved amount"
+                />
+                <span className="block text-xs font-normal text-slate-500">
+                  No configured fare estimate is available. Enter the amount approved by DilaDrive.
+                </span>
+              </label>
+            )}
 
             {error && <ErrorMessage>{error}</ErrorMessage>}
 

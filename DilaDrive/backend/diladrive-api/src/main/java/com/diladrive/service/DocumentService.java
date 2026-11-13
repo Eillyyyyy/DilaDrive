@@ -2,15 +2,19 @@ package com.diladrive.service;
 
 import com.diladrive.dto.DocumentDashboardDTO;
 import com.diladrive.dto.DocumentDTO;
-import com.diladrive.dto.DocumentRequest;
-import com.diladrive.dto.InvoiceGenerationRequest;
-import com.diladrive.dto.ReceiptGenerationRequest;
+import com.diladrive.dto.QuotationRequest;
 import com.diladrive.entity.DocumentType;
+import com.diladrive.entity.InvoiceSourceType;
+import com.diladrive.entity.Payment;
 
 import java.util.List;
 
 public interface DocumentService {
     List<DocumentDTO> getAllDocuments();
+
+    List<DocumentDTO> getCustomerDocuments(Long customerId);
+
+    DocumentDTO getCustomerDocument(Long customerId, Long documentId);
 
     DocumentDTO getDocument(Long id);
 
@@ -20,9 +24,9 @@ public interface DocumentService {
 
     DocumentDashboardDTO getDashboard();
 
-    DocumentDTO createQuotation(DocumentRequest request);
+    DocumentDTO createQuotation(QuotationRequest request);
 
-    DocumentDTO updateQuotation(Long id, DocumentRequest request);
+    DocumentDTO updateQuotation(Long id, QuotationRequest request);
 
     DocumentDTO approveQuotation(Long id);
 
@@ -30,9 +34,11 @@ public interface DocumentService {
 
     DocumentDTO generatePurchaseOrder(Long quotationId);
 
-    DocumentDTO generateInvoice(InvoiceGenerationRequest request);
+    DocumentDTO generateInvoice(Long sourceId, InvoiceSourceType sourceType);
 
-    DocumentDTO generateReceipt(Long invoiceId, ReceiptGenerationRequest request);
+    DocumentDTO markInvoicePaid(Long invoiceId);
 
-    void deleteDocument(Long id);
+    DocumentDTO generateReceipt(Long invoiceId);
+
+    DocumentDTO generateReceiptForPayment(Payment payment);
 }

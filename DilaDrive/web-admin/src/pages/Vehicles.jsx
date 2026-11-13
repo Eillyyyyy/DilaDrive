@@ -1,10 +1,9 @@
 
 import { useMemo, useState, useEffect } from "react";
-import axios from "axios";
+import api from "../services/api";
 import {
   Eye,
   Pencil,
-  Plus,
   Search,
   X,
   Truck,
@@ -18,15 +17,6 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-const EMPTY_VEHICLE = {
-  plate: "",
-  type: "",
-  capacity: "",
-  roadTaxExpiry: "",
-  serviceExpiry: "",
-  status: "Available",
-};
-
 const STATUSES = ["Available", "In Use", "Maintenance"];
 
 const inputClass =
@@ -35,58 +25,72 @@ const inputClass =
 const labelClass =
   "mb-2 block text-sm font-medium text-slate-700";
 
-export default function Vehicles({ vehicles = [] }) {
-  const [vehicleList, setVehicleList] = useState([]);
-  useEffect(() => {
-  fetchVehicles();
-}, []);
-
-const fetchVehicles = async () => {
-  try {
-
-    const response = await axios.get(
-      "http://localhost:8080/api/vehicles"
-    );
-
-    const formattedVehicles =
-      response.data.map(vehicle => ({
-
-        plate: vehicle.vehiclePlateno,
-
-        type: vehicle.vehicleType,
-
-        capacity: vehicle.vehicleCapacity,
-
-        roadTaxExpiry:
-          vehicle.vehicleRoadtaxexpiry,
-
-        serviceExpiry:
-          vehicle.vehicleServiceexpiry,
-
-        status:
-          vehicle.vehicleStatus === "AVAILABLE"
-            ? "Available"
-            : vehicle.vehicleStatus === "IN_USE"
-            ? "In Use"
-            : "Maintenance"
-
-      }));
-
-    setVehicleList(formattedVehicles);
-
-  } catch (error) {
-
-    console.error(error);
-
-  }
+const formatApiVehicle = (vehicle) => {
+  const status = String(vehicle.vehicleStatus || "").toUpperCase();
+  return {
+    vehicleId: vehicle.vehicleId,
+    plate: vehicle.vehiclePlateno || "",
+    model: vehicle.vehicleModel || "",
+    type: vehicle.vehicleType || "",
+    capacity: vehicle.vehicleCapacity ?? "",
+    luggageCapacity: vehicle.vehicleLuggageCapacity ?? "",
+    roadTaxExpiry: vehicle.vehicleRoadtaxexpiry || "",
+    serviceExpiry: vehicle.vehicleServiceexpiry || "",
+    status:
+      status === "AVAILABLE"
+        ? "Available"
+        : ["IN_USE", "UNAVAILABLE"].includes(status)
+          ? "In Use"
+          : status === "MAINTENANCE"
+            ? "Maintenance"
+            : vehicle.vehicleStatus || "Maintenance",
+  };
 };
+
+const toApiStatus = (status) =>
+  status === "Available"
+    ? "AVAILABLE"
+    : status === "In Use"
+      ? "UNAVAILABLE"
+      : "MAINTENANCE";
+
+const getErrorMessage = (error) => {
+  const response = error.response?.data;
+  return (typeof response === "string"
+    ? response
+    : response?.message || response?.detail)
+    || error.message
+    || "The vehicle request could not be completed.";
+};
+
+export default function Vehicles() {
+  const [vehicleList, setVehicleList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingVehicleId, setLoadingVehicleId] = useState(null);
+  const [savingVehicle, setSavingVehicle] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [editingVehicle, setEditingVehicle] = useState(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newVehicle, setNewVehicle] = useState({ ...EMPTY_VEHICLE });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  async function fetchVehicles() {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/vehicles");
+      setVehicleList(Array.isArray(data) ? data.map(formatApiVehicle) : []);
+      setError("");
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchVehicles();
+  }, []);
 
   const stats = useMemo(() => {
     const total = vehicleList.length;
@@ -109,6 +113,7 @@ const fetchVehicles = async () => {
     return vehicleList.filter((vehicle) => {
       const matchesSearch = [
         vehicle.plate,
+        vehicle.model,
         vehicle.type,
         vehicle.capacity,
       ].some((value) =>
@@ -163,7 +168,7 @@ const fetchVehicles = async () => {
     });
   };
 
-  const validateVehicle = (vehicle, originalPlate = "") => {
+  const validateVehicle = (vehicle, originalVehicleId = null) => {
     if (
       !vehicle.plate.trim() ||
       !vehicle.type.trim() ||
@@ -178,6 +183,12 @@ const fetchVehicles = async () => {
       return "Passenger capacity must be a whole number greater than zero.";
     }
 
+    if (vehicle.luggageCapacity !== "" &&
+        (!Number.isInteger(Number(vehicle.luggageCapacity)) ||
+          Number(vehicle.luggageCapacity) < 0)) {
+      return "Luggage capacity must be a whole number zero or greater.";
+    }
+
     const normalizedPlate = vehicle.plate
       .trim()
       .replace(/\s+/g, "")
@@ -187,99 +198,80 @@ const fetchVehicles = async () => {
       (item) =>
         item.plate.trim().replace(/\s+/g, "").toUpperCase() ===
           normalizedPlate &&
-        item.plate !== originalPlate
+        item.vehicleId !== originalVehicleId
     );
 
     if (duplicate) {
       return "This registration number already exists.";
     }
 
-    if (
-      vehicle.roadTaxExpiry &&
-      vehicle.serviceExpiry &&
-      false
-    ) {
-      return "Please check the vehicle dates.";
-    }
-
     return "";
   };
 
-  const handleCreateVehicle = (e) => {
-    e.preventDefault();
-
-    const vehicle = {
-      ...newVehicle,
-      plate: newVehicle.plate.trim().toUpperCase(),
-      type: newVehicle.type.trim(),
-      capacity: Number(newVehicle.capacity),
-    };
-
-    const validationError = validateVehicle(vehicle);
-
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    setVehicleList((prev) => [...prev, vehicle]);
-    setNewVehicle({ ...EMPTY_VEHICLE });
-    setShowCreateModal(false);
-    setError("");
-  };
-
-  const handleUpdateVehicle = (e) => {
+  const handleUpdateVehicle = async (e) => {
     e.preventDefault();
 
     if (!editingVehicle) return;
 
-    const originalPlate = editingVehicle.originalPlate;
-
     const vehicle = {
       ...editingVehicle,
       plate: editingVehicle.plate.trim().toUpperCase(),
+      model: editingVehicle.model.trim(),
       type: editingVehicle.type.trim(),
       capacity: Number(editingVehicle.capacity),
+      luggageCapacity:
+        editingVehicle.luggageCapacity === ""
+          ? null
+          : Number(editingVehicle.luggageCapacity),
     };
 
-    const validationError = validateVehicle(vehicle, originalPlate);
+    const validationError = validateVehicle(vehicle, editingVehicle.vehicleId);
 
     if (validationError) {
       setError(validationError);
       return;
     }
 
-    setVehicleList((prev) =>
-      prev.map((item) =>
-        item.plate === originalPlate
-          ? {
-              plate: vehicle.plate,
-              type: vehicle.type,
-              capacity: vehicle.capacity,
-              roadTaxExpiry: vehicle.roadTaxExpiry,
-              serviceExpiry: vehicle.serviceExpiry,
-              status: vehicle.status,
-            }
-          : item
-      )
-    );
+    if (!editingVehicle.vehicleId) {
+      setError("This vehicle is not saved in the system and cannot be updated.");
+      return;
+    }
 
-    setEditingVehicle(null);
-    setError("");
+    setSavingVehicle(true);
+    try {
+      const { data } = await api.put(
+        `/vehicles/${editingVehicle.vehicleId}`,
+        {
+          vehiclePlateno: vehicle.plate,
+          vehicleModel: vehicle.model,
+          vehicleType: vehicle.type,
+          vehicleCapacity: vehicle.capacity,
+          vehicleLuggageCapacity: vehicle.luggageCapacity,
+          vehicleRoadtaxexpiry: vehicle.roadTaxExpiry || null,
+          vehicleServiceexpiry: vehicle.serviceExpiry || null,
+          vehicleStatus: toApiStatus(vehicle.status),
+        }
+      );
+      const updatedVehicle = formatApiVehicle(data);
+      setVehicleList((prev) => prev.map((item) =>
+        item.vehicleId === updatedVehicle.vehicleId ? updatedVehicle : item
+      ));
+      setEditingVehicle(null);
+      setError("");
+      setNotice(`${updatedVehicle.plate} updated successfully.`);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setSavingVehicle(false);
+    }
   };
 
   const openEditModal = (vehicle) => {
     setEditingVehicle({
       ...vehicle,
-      originalPlate: vehicle.plate,
       capacity: String(vehicle.capacity ?? ""),
+      luggageCapacity: String(vehicle.luggageCapacity ?? ""),
     });
-    setError("");
-  };
-
-  const closeCreateModal = () => {
-    setShowCreateModal(false);
-    setNewVehicle({ ...EMPTY_VEHICLE });
     setError("");
   };
 
@@ -288,12 +280,26 @@ const fetchVehicles = async () => {
     setError("");
   };
 
-  const updateNewVehicle = (field, value) => {
-    setNewVehicle((prev) => ({ ...prev, [field]: value }));
-  };
-
   const updateEditingVehicle = (field, value) => {
     setEditingVehicle((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const viewVehicle = async (vehicle) => {
+    if (!vehicle.vehicleId) {
+      setSelectedVehicle(vehicle);
+      return;
+    }
+    setLoadingVehicleId(vehicle.vehicleId);
+    setError("");
+    setNotice("");
+    try {
+      const { data } = await api.get(`/vehicles/${vehicle.vehicleId}`);
+      setSelectedVehicle(formatApiVehicle(data));
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoadingVehicleId(null);
+    }
   };
 
   const summaryCards = [
@@ -324,9 +330,9 @@ const fetchVehicles = async () => {
   ];
 
   return (
-    <div className="min-h-screen space-y-6 bg-slate-50/70 p-4 sm:p-6 lg:p-8">
+    <div className="admin-page">
       {/* Page header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="admin-page-header">
         <div>
           <div className="mb-2 flex items-center gap-2 text-sm text-slate-500">
             <CarFront size={16} />
@@ -337,27 +343,16 @@ const fetchVehicles = async () => {
             </span>
           </div>
 
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+          <h1 className="admin-page-title">
             Vehicle Management
           </h1>
 
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">
+          <p className="admin-page-description">
             Manage registered vehicles, monitor availability and
             keep track of road tax and service expiry dates.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setError("");
-            setShowCreateModal(true);
-          }}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-500/20"
-        >
-          <Plus size={18} />
-          Add Vehicle
-        </button>
       </div>
 
       {/* Summary cards */}
@@ -470,10 +465,30 @@ const fetchVehicles = async () => {
           )}
         </div>
 
+        {error && !editingVehicle && !selectedVehicle && (
+          <div
+            role="alert"
+            className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6"
+          >
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div
+            role="status"
+            className="mx-5 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 sm:mx-6"
+          >
+            {notice}
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left">
             <thead>
               <tr className="border-b border-slate-100 bg-white">
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  No.
+                </th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Vehicle
                 </th>
@@ -496,11 +511,14 @@ const fetchVehicles = async () => {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredVehicles.map((vehicle) => (
+              {filteredVehicles.map((vehicle, index) => (
                 <tr
-                  key={vehicle.plate}
+                  key={vehicle.vehicleId ?? vehicle.plate}
                   className="transition hover:bg-slate-50/80"
                 >
+                  <td className="px-6 py-4 text-sm font-medium text-slate-500">
+                    {index + 1}
+                  </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700">
@@ -511,7 +529,9 @@ const fetchVehicles = async () => {
                           {vehicle.plate}
                         </p>
                         <p className="mt-1 text-sm text-slate-500">
-                          {vehicle.type}
+                          {vehicle.model
+                            ? `${vehicle.model} · ${vehicle.type}`
+                            : vehicle.type}
                         </p>
                       </div>
                     </div>
@@ -547,18 +567,23 @@ const fetchVehicles = async () => {
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => setSelectedVehicle(vehicle)}
+                        onClick={() => viewVehicle(vehicle)}
+                        disabled={Boolean(vehicle.vehicleId)
+                          && loadingVehicleId === vehicle.vehicleId}
                         aria-label={`View ${vehicle.plate}`}
                         title="View vehicle"
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
                       >
                         <Eye size={16} />
-                        View
+                        {vehicle.vehicleId && loadingVehicleId === vehicle.vehicleId
+                          ? "Loading..."
+                          : "View"}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => openEditModal(vehicle)}
+                        disabled={!vehicle.vehicleId}
                         aria-label={`Edit ${vehicle.plate}`}
                         title="Update vehicle"
                         className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-700"
@@ -566,14 +591,22 @@ const fetchVehicles = async () => {
                         <Pencil size={15} />
                         Edit
                       </button>
+
                     </div>
                   </td>
                 </tr>
               ))}
 
-              {filteredVehicles.length === 0 && (
+              {loading && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center">
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-500">
+                    Loading vehicle records...
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredVehicles.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-6 py-16 text-center">
                     <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                       <Truck size={26} />
                     </div>
@@ -605,25 +638,6 @@ const fetchVehicles = async () => {
         </div>
       </section>
 
-      {/* Create vehicle modal */}
-      {showCreateModal && (
-        <Modal
-          title="Add New Vehicle"
-          subtitle="Enter the details of the vehicle to register it."
-          onClose={closeCreateModal}
-          icon={<Plus size={21} />}
-        >
-          <VehicleForm
-            vehicle={newVehicle}
-            onChange={updateNewVehicle}
-            onSubmit={handleCreateVehicle}
-            onCancel={closeCreateModal}
-            submitLabel="Create Vehicle"
-            error={error}
-          />
-        </Modal>
-      )}
-
       {/* Update vehicle modal */}
       {editingVehicle && (
         <Modal
@@ -639,6 +653,7 @@ const fetchVehicles = async () => {
             onCancel={closeEditModal}
             submitLabel="Save Changes"
             error={error}
+            busy={savingVehicle}
           />
         </Modal>
       )}
@@ -679,6 +694,18 @@ const fetchVehicles = async () => {
                 icon={<Users size={17} />}
                 label="Passenger Capacity"
                 value={`${selectedVehicle.capacity} passengers`}
+              />
+              <DetailItem
+                icon={<Luggage size={17} />}
+                label="Luggage Capacity"
+                value={selectedVehicle.luggageCapacity === ""
+                  ? "Not recorded"
+                  : `${selectedVehicle.luggageCapacity} items`}
+              />
+              <DetailItem
+                icon={<Truck size={17} />}
+                label="Vehicle Model"
+                value={selectedVehicle.model}
               />
               <DetailItem
                 icon={<CalendarDays size={17} />}
@@ -732,6 +759,7 @@ function VehicleForm({
   onCancel,
   submitLabel,
   error,
+  busy = false,
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-5">
@@ -743,6 +771,18 @@ function VehicleForm({
           {error}
         </div>
       )}
+
+      <div>
+        <label className={labelClass}>Vehicle Model</label>
+        <input
+          type="text"
+          value={vehicle.model || ""}
+          onChange={(e) => onChange("model", e.target.value)}
+          placeholder="e.g. Toyota Hiace"
+          maxLength={100}
+          className={inputClass}
+        />
+      </div>
 
       <div>
         <label className={labelClass}>
@@ -767,16 +807,15 @@ function VehicleForm({
           <label className={labelClass}>
             Vehicle Type <span className="text-rose-500">*</span>
           </label>
-          <select
+          <input
+            type="text"
             value={vehicle.type}
             onChange={(e) => onChange("type", e.target.value)}
+            placeholder="e.g. Sedan, MPV, Bus"
+            maxLength={60}
             required
             className={inputClass}
-          >
-            <option value="">Select vehicle type</option>
-            <option value="Car">Car</option>
-            <option value="MPV">MPV</option>
-          </select>
+          />
         </div>
 
         <div>
@@ -794,6 +833,19 @@ function VehicleForm({
             className={inputClass}
           />
         </div>
+      </div>
+
+      <div>
+        <label className={labelClass}>Luggage Capacity (items)</label>
+        <input
+          type="number"
+          min="0"
+          step="1"
+          value={vehicle.luggageCapacity ?? ""}
+          onChange={(e) => onChange("luggageCapacity", e.target.value)}
+          placeholder="Enter actual item capacity"
+          className={inputClass}
+        />
       </div>
 
       <div>
@@ -839,6 +891,7 @@ function VehicleForm({
         <button
           type="button"
           onClick={onCancel}
+          disabled={busy}
           className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
         >
           Cancel
@@ -846,10 +899,11 @@ function VehicleForm({
 
         <button
           type="submit"
+          disabled={busy}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-500/20"
         >
           <CheckCircle2 size={16} />
-          {submitLabel}
+          {busy ? "Saving..." : submitLabel}
         </button>
       </div>
     </form>

@@ -1,3 +1,4 @@
+
 package com.diladrive.config;
 
 import org.springframework.context.annotation.Bean;
@@ -15,10 +16,22 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
 
-                registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:5173")
-                        .allowedMethods("*")
-                        .allowedHeaders("*");
+                registry.addMapping("/api/**")
+                        .allowedOriginPatterns(
+                                "http://localhost:*",
+                                "http://127.0.0.1:*"
+                        )
+                        .allowedMethods(
+                                "GET",
+                                "POST",
+                                "PUT",
+                                "PATCH",
+                                "DELETE",
+                                "OPTIONS"
+                        )
+                        .allowedHeaders("*")
+                        .allowCredentials(true)
+                        .maxAge(3600);
             }
         };
     }

@@ -6,13 +6,13 @@ import com.diladrive.dto.ChangePasswordRequest;
 import com.diladrive.dto.ProfileUpdateRequest;
 import com.diladrive.repository.AdminRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Objects;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AdminService {
@@ -20,7 +20,8 @@ public class AdminService {
     @Autowired
     private AdminRepository adminRepository;
 
-    private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    @Autowired
+    private PasswordService passwordService;
 
     public boolean login(String email, String password) {
         if (email == null || password == null) {
@@ -34,16 +35,18 @@ public class AdminService {
         if (admin == null) {
             return false;
         }
-
-        if (isPasswordHash(admin.getPassword())) {
-            return passwordEncoder.matches(password, admin.getPassword());
-        }
-        if (!Objects.equals(admin.getPassword(), password)) {
+        if (!"ACTIVE".equalsIgnoreCase(admin.getStatus())) {
             return false;
         }
 
-        admin.setPassword(passwordEncoder.encode(password));
-        adminRepository.save(admin);
+        if (!passwordService.matches(password, admin.getPassword())) {
+            return false;
+        }
+
+        if (!passwordService.isEncoded(admin.getPassword())) {
+            admin.setPassword(passwordService.encode(password));
+            adminRepository.save(admin);
+        }
         return true;
     }
 
@@ -51,11 +54,20 @@ public class AdminService {
         return new AdminProfileResponse(findAdmin(email));
     }
 
+    public AdminProfileResponse getProfile(Long adminId) {
+        return new AdminProfileResponse(findAdmin(adminId));
+    }
+
     public AdminProfileResponse updateProfile(
             String email,
             ProfileUpdateRequest request) {
-        Admin admin = findAdmin(email);
-        verifyCurrentPassword(admin, request.getCurrentPassword());
+        return updateProfile(findAdmin(email).getId(), request);
+    }
+
+    public AdminProfileResponse updateProfile(
+            Long adminId,
+            ProfileUpdateRequest request) {
+        Admin admin = findAdmin(adminId);
 
         String name = request.getName() == null ? "" : request.getName().trim();
         String updatedEmail = request.getEmail() == null
@@ -108,7 +120,11 @@ public class AdminService {
     }
 
     public void changePassword(String email, ChangePasswordRequest request) {
-        Admin admin = findAdmin(email);
+        changePassword(findAdmin(email).getId(), request);
+    }
+
+    public void changePassword(Long adminId, ChangePasswordRequest request) {
+        Admin admin = findAdmin(adminId);
         verifyCurrentPassword(admin, request.getCurrentPassword());
 
         String newPassword = request.getNewPassword();
@@ -121,7 +137,7 @@ public class AdminService {
             throw new IllegalArgumentException("The new password must be different from the current password.");
         }
 
-        admin.setPassword(passwordEncoder.encode(newPassword));
+        admin.setPassword(passwordService.encode(newPassword));
         adminRepository.save(admin);
     }
 
@@ -130,26 +146,23 @@ public class AdminService {
                 .orElseThrow(() -> new IllegalArgumentException("Admin profile was not found."));
     }
 
+    private Admin findAdmin(Long adminId) {
+        Admin admin = adminRepository.findById(adminId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED, "Admin session is no longer valid."));
+        if (!"ACTIVE".equalsIgnoreCase(admin.getStatus())) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED, "Admin session is no longer valid.");
+        }
+        return admin;
+    }
+
     private void verifyCurrentPassword(Admin admin, String currentPassword) {
-        if (!passwordMatches(admin.getPassword(), currentPassword)) {
+        if (!passwordService.matches(currentPassword, admin.getPassword())) {
             throw new IllegalArgumentException("Current password is incorrect.");
         }
-        if (!isPasswordHash(admin.getPassword())) {
-            admin.setPassword(passwordEncoder.encode(currentPassword));
+        if (!passwordService.isEncoded(admin.getPassword())) {
+            admin.setPassword(passwordService.encode(currentPassword));
         }
-    }
-
-    private boolean passwordMatches(String storedPassword, String password) {
-        if (password == null) {
-            return false;
-        }
-        return isPasswordHash(storedPassword)
-                ? passwordEncoder.matches(password, storedPassword)
-                : Objects.equals(storedPassword, password);
-    }
-
-    private boolean isPasswordHash(String value) {
-        return value != null
-                && value.matches("^\\$2[aby]\\$\\d{2}\\$[./A-Za-z0-9]{53}$");
     }
 }

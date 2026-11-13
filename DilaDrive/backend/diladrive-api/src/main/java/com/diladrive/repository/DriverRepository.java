@@ -17,6 +17,11 @@ public interface DriverRepository
 
     List<Driver> findByDriverAvailabilityIgnoreCase(String availability);
 
+    List<Driver> findByDriverAvailabilityIgnoreCaseAndDriverStatusIgnoreCase(
+            String availability, String driverStatus);
+
+    long countByDriverStatusIgnoreCase(String driverStatus);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from Driver d where d.driverId = :id")
     Optional<Driver> findByIdForUpdate(@Param("id") Long id);

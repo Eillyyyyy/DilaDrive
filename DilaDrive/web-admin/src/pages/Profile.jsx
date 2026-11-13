@@ -12,7 +12,6 @@ import {
   Camera,
   KeyRound,
   LockKeyhole,
-  Trash2,
 } from "lucide-react";
 
 export default function Profile({ user, onSave, onChangePassword }) {
@@ -30,7 +29,6 @@ export default function Profile({ user, onSave, onChangePassword }) {
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
     newPassword: "",
@@ -60,7 +58,6 @@ export default function Profile({ user, onSave, onChangePassword }) {
   function handleCancel() {
     setForm(originalForm);
     setIsEditing(false);
-    setCurrentPassword("");
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
     }
@@ -135,12 +132,6 @@ export default function Profile({ user, onSave, onChangePassword }) {
       return;
     }
 
-    if (!currentPassword) {
-      setMessage("Enter your current password to save profile changes.");
-      setMessageType("error");
-      return;
-    }
-
     if (typeof onSave !== "function") {
       setMessage("Unable to save profile. Please connect the save function.");
       setMessageType("error");
@@ -151,12 +142,10 @@ export default function Profile({ user, onSave, onChangePassword }) {
       setSaving(true);
       setMessage("");
 
-      const savedProfile = await onSave(updatedProfile, currentPassword);
-
+      const savedProfile = await onSave(updatedProfile);
       setForm(savedProfile || updatedProfile);
       setOriginalForm(savedProfile || updatedProfile);
       setIsEditing(false);
-      setCurrentPassword("");
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
@@ -226,14 +215,14 @@ export default function Profile({ user, onSave, onChangePassword }) {
     .toUpperCase();
 
   return (
-    <div className="space-y-8">
+    <div className="admin-page">
       {/* Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="admin-page-header">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">
+          <h1 className="admin-page-title">
             My Profile
-          </h2>
-          <p className="mt-1 text-sm text-gray-500">
+          </h1>
+          <p className="admin-page-description">
             View and manage your administrator information.
           </p>
         </div>
@@ -310,21 +299,6 @@ export default function Profile({ user, onSave, onChangePassword }) {
         {isEditing && (
           <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-500 sm:ml-24">
             <span>PNG, JPG or WebP (maximum 2 MB)</span>
-            {form.profileImage && (
-              <button
-                type="button"
-                  onClick={() => {
-                    setForm((prev) => ({ ...prev, profileImage: "" }));
-                    if (imageInputRef.current) {
-                      imageInputRef.current.value = "";
-                    }
-                  }}
-                className="inline-flex items-center gap-1 font-medium text-red-600 hover:text-red-700"
-              >
-                <Trash2 size={14} />
-                Remove photo
-              </button>
-            )}
           </div>
         )}
       </div>
@@ -446,24 +420,6 @@ export default function Profile({ user, onSave, onChangePassword }) {
               </p>
             </div>
 
-            {isEditing && (
-              <div className="sm:col-span-2">
-                <ProfileField
-                  label="Current Password"
-                  name="currentPassword"
-                  value={currentPassword}
-                  onChange={(e) => {
-                    setCurrentPassword(e.target.value);
-                    setMessage("");
-                  }}
-                  editing
-                  icon={LockKeyhole}
-                  type="password"
-                  placeholder="Confirm your current password"
-                  required
-                />
-              </div>
-            )}
           </div>
 
           {/* Action Buttons */}

@@ -1,1153 +1,909 @@
-
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import api from "../services/api";
 import {
-  Plus,
-  Search,
-  Eye,
-  RefreshCw,
-  Bell,
-  X,
-  CalendarDays,
-  Users,
-  Truck,
-  ClipboardCheck,
-  Clock,
-  MapPin,
-  CheckCircle2,
   AlertCircle,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  CircleX,
+  Eye,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  Search,
+  Truck,
+  UserRound,
+  Users,
+  X,
 } from "lucide-react";
 
-const API_URL = "http://localhost:8080/api";
-
-const tripStatuses = [
-  "Assigned",
+const TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED"]);
+const ASSIGNMENT_STATUSES = [
+  "ASSIGNED",
   "OTW",
-  "Waiting",
-  "Pickup",
-  "Drop",
-  "Completed",
+  "WAITING",
+  "PICKUP",
+  "DROP",
+  "COMPLETED",
+  "CANCELLED",
 ];
 
-const nextTripStatus = {
-  Assigned: "OTW",
-  OTW: "Waiting",
-  Waiting: "Pickup",
-  Pickup: "Drop",
-  Drop: "Completed",
-  Completed: null,
+const normalizeStatus = (status) => String(status || "").trim().toUpperCase();
+
+const getApiError = (error) => {
+  const body = error.response?.data;
+  return (
+    (typeof body === "string" ? body : body?.message || body?.detail) ||
+    error.message ||
+    "The request could not be completed."
+  );
 };
 
-const terminalStatuses = ["Completed", "Cancelled"];
-
-const emptyForm = {
-  bookingId: "",
-  driverId: "",
-  vehicleId: "",
-};
-
-const getApiError = (error, fallback) => {
-  const response = error.response?.data;
-  return (typeof response === "string" ? response : response?.message || response?.detail)
-    || error.message
-    || fallback;
-};
-
-const normalizeStatus = (status) => {
-  const normalized = String(status || "").trim().toUpperCase();
-  return normalized === "IN_PROGRESS" ? "OTW" : normalized;
-};
-
-const mapBooking = (booking) => ({
-  id: booking.bookingId,
-  customer: `Customer #${booking.custId}`,
-  pickup: booking.bookingPickupaddress || "",
-  destination: booking.bookingDestinationaddress || "",
-  date: booking.bookingTripdate || "",
-  time: String(booking.bookingPickuptime || "").slice(0, 5),
-  passengers: booking.bookingPassengercount || 0,
-  bookingType: booking.bookingType || "",
-  status: ({
-    CONFIRMED: "Confirmed",
-    CANCELLED: "Cancelled",
-    COMPLETED: "Completed",
-    ASSIGNED: "Assigned",
-  }[String(booking.bookingStatus || "").toUpperCase()] || "Pending Verification"),
-});
-
-const mapDriver = (driver) => ({
-  id: driver.driverId,
-  name: driver.driverName || "Unnamed driver",
-  availability: normalizeStatus(driver.driverAvailability),
-  accountStatus: normalizeStatus(driver.driverStatus),
-});
-
-const mapVehicle = (vehicle) => ({
-  id: vehicle.vehicleId,
-  plate: vehicle.vehiclePlateno || `Vehicle #${vehicle.vehicleId}`,
-  type: vehicle.vehicleType || "",
-  capacity: vehicle.vehicleCapacity || 0,
-  status: normalizeStatus(vehicle.vehicleStatus),
-});
-
-const mapAssignment = (assignment) => ({
-  id: assignment.assignmentId,
-  bookingId: assignment.bookingId,
-  customer: assignment.customer || `Booking #${assignment.bookingId}`,
-  driverId: assignment.driverId,
-  vehicleId: assignment.vehicleId,
-  date: assignment.tripDate || "",
-  time: String(assignment.pickupTime || "").slice(0, 5),
-  durationHours: 2,
-  tripStatus: ({
-    ASSIGNED: "Assigned",
-    OTW: "OTW",
-    WAITING: "Waiting",
-    PICKUP: "Pickup",
-    DROP: "Drop",
-    COMPLETED: "Completed",
-    CANCELLED: "Cancelled",
-  }[normalizeStatus(assignment.assignmentStatus)] || "Assigned"),
-  notificationSent: assignment.notificationSent,
-  pickup: assignment.pickupAddress || "",
-  destination: assignment.destinationAddress || "",
-});
-
-function formatDate(date) {
-  if (!date) return "-";
-
-  return new Date(`${date}T00:00:00`).toLocaleDateString("en-MY", {
+const formatDate = (value) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleDateString("en-MY", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
-}
+};
+
+const formatDateTime = (value) => {
+  if (!value) return "—";
+  const [datePart, timePart = "00:00:00"] = String(value).split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute, second = 0] = timePart.split(":").map(Number);
+  if (![year, month, day, hour, minute, second].every(Number.isFinite)) {
+    return "—";
+  }
+
+  // LocalDateTime from the API has no timezone; preserve its database wall-clock time.
+  const parsed = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const date = parsed.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const time = parsed.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "UTC",
+  });
+  return `${date}, ${time}`;
+};
+
+const getAssignmentDate = (assignment) =>
+  assignment.assignmentDate ?? assignment.assignedAt ?? assignment.assignment_date;
+
+const statusClass = (status) => {
+  switch (normalizeStatus(status)) {
+    case "ASSIGNED":
+      return "bg-blue-50 text-blue-700 ring-blue-200";
+    case "OTW":
+    case "WAITING":
+      return "bg-amber-50 text-amber-700 ring-amber-200";
+    case "PICKUP":
+    case "DROP":
+      return "bg-violet-50 text-violet-700 ring-violet-200";
+    case "COMPLETED":
+      return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+    case "CANCELLED":
+      return "bg-slate-100 text-slate-600 ring-slate-200";
+    default:
+      return "bg-slate-100 text-slate-600 ring-slate-200";
+  }
+};
 
 export default function Assignments() {
+  const [assignments, setAssignments] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
-  const [availableDriverIds, setAvailableDriverIds] = useState(new Set());
-  const [availableVehicleIds, setAvailableVehicleIds] = useState(new Set());
-  const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-
-  const [selectedAssignment, setSelectedAssignment] = useState(null);
-  const [showAssignModal, setShowAssignModal] = useState(false);
-  const [showReassignModal, setShowReassignModal] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState(null);
-
-  const [assignmentForm, setAssignmentForm] = useState(emptyForm);
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [modal, setModal] = useState(null);
+  const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
-    loadData().catch((error) => {
-      console.error("Unable to load assignment data:", error);
-      setFormError(getApiError(error, "Unable to load assignment data."));
-    });
-  }, []);
-
-  const loadData = async () => {
+    const controller = new AbortController();
     setLoading(true);
-    try {
-      const [
-        bookingResponse,
-        driverResponse,
-        availableDriverResponse,
-        vehicleResponse,
-        availableVehicleResponse,
-        assignmentResponse,
-      ] = await Promise.all([
-        axios.get(`${API_URL}/bookings`),
-        axios.get(`${API_URL}/drivers`),
-        axios.get(`${API_URL}/drivers/available`),
-        axios.get(`${API_URL}/vehicles`),
-        axios.get(`${API_URL}/vehicles/available`),
-        axios.get(`${API_URL}/assignments`),
-      ]);
-      setBookings(bookingResponse.data.map(mapBooking));
-      setDrivers(driverResponse.data.map(mapDriver));
-      setAvailableDriverIds(
-        new Set(availableDriverResponse.data.map((driver) => String(driver.driverId)))
-      );
-      setVehicles(vehicleResponse.data.map(mapVehicle));
-      setAvailableVehicleIds(
-        new Set(availableVehicleResponse.data.map((vehicle) => String(vehicle.vehicleId)))
-      );
-      setAssignments(assignmentResponse.data.map(mapAssignment));
-    } finally {
-      setLoading(false);
-    }
-  };
+    setError("");
 
-  const getDriver = (driverId) =>
-    drivers.find((driver) => String(driver.id) === String(driverId));
+    Promise.all([
+      api.get("/assignments", { signal: controller.signal }),
+      api.get("/bookings", { signal: controller.signal }),
+      api.get("/drivers/available", { signal: controller.signal }),
+      api.get("/vehicles/available", { signal: controller.signal }),
+    ])
+      .then(([assignmentResponse, bookingResponse, driverResponse, vehicleResponse]) => {
+        setAssignments(assignmentResponse.data);
+        setBookings(bookingResponse.data);
+        setDrivers(driverResponse.data);
+        setVehicles(vehicleResponse.data);
+      })
+      .catch((requestError) => {
+        if (!axios.isCancel(requestError)) setError(getApiError(requestError));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
 
-  const getVehicle = (vehicleId) =>
-    vehicles.find((vehicle) => String(vehicle.id) === String(vehicleId));
-
-  const getBooking = (bookingId) =>
-    bookings.find((booking) => String(booking.id) === String(bookingId));
+    return () => controller.abort();
+  }, [refreshKey]);
 
   const activeAssignments = assignments.filter(
-    (item) => !terminalStatuses.includes(item.tripStatus)
+    (assignment) => !TERMINAL_STATUSES.has(normalizeStatus(assignment.assignmentStatus))
   );
-
-  // A booking can only have one active assignment.
   const eligibleBookings = bookings.filter(
     (booking) =>
-      booking.status === "Confirmed" &&
+      normalizeStatus(booking.bookingStatus) === "CONFIRMED" &&
       !activeAssignments.some(
-        (assignment) => assignment.bookingId === booking.id
+        (assignment) => String(assignment.bookingId) === String(booking.bookingId)
       )
   );
 
-  const selectedBooking = getBooking(assignmentForm.bookingId);
-
-  const availableDrivers = drivers.filter((driver) =>
-    availableDriverIds.has(String(driver.id)) ||
-    (selectedRecord && String(selectedRecord.driverId) === String(driver.id))
-  );
-  const currentBooking = getBooking(selectedRecord?.bookingId);
-  const resourceBooking = selectedBooking || currentBooking;
-  const availableVehicles = vehicles.filter((vehicle) => {
-    const available =
-      availableVehicleIds.has(String(vehicle.id)) ||
-      (selectedRecord && String(selectedRecord.vehicleId) === String(vehicle.id));
-    const matchesType =
-      !resourceBooking?.bookingType ||
-      !vehicle.type ||
-      vehicle.type.toLowerCase() === resourceBooking.bookingType.toLowerCase();
-    const fitsCapacity =
-      !resourceBooking?.passengers ||
-      vehicle.capacity >= resourceBooking.passengers;
-    return available && matchesType && fitsCapacity;
-  });
-
   const filteredAssignments = useMemo(() => {
-    const query = search.toLowerCase().trim();
-
-    return assignments.filter((item) => {
-      const driverName = drivers.find(
-        (driver) => String(driver.id) === String(item.driverId)
-      )?.name || "";
-
-      const vehiclePlate = vehicles.find(
-        (vehicle) => String(vehicle.id) === String(item.vehicleId)
-      )?.plate || "";
-
+    const query = search.trim().toLowerCase();
+    return assignments.filter((assignment) => {
       const matchesSearch = [
-        item.id,
-        item.bookingId,
-        item.customer,
-        driverName,
-        vehiclePlate,
-      ].some((value) => String(value || "").toLowerCase().includes(query));
-
+        assignment.customer,
+        assignment.driverName,
+        assignment.vehiclePlate,
+      ].some((value) => String(value ?? "").toLowerCase().includes(query));
       const matchesStatus =
-        statusFilter === "All" || item.tripStatus === statusFilter;
-
+        statusFilter === "ALL" ||
+        normalizeStatus(assignment.assignmentStatus) === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [assignments, search, statusFilter, drivers, vehicles]);
+  }, [assignments, search, statusFilter]);
 
   const stats = [
     {
       label: "Total Assignments",
       value: assignments.length,
-      icon: ClipboardCheck,
-      color: "bg-blue-50 text-blue-700",
+      icon: ClipboardList,
+      style: "bg-blue-50 text-blue-700",
     },
     {
-      label: "Assigned",
-      value: assignments.filter((a) => a.tripStatus === "Assigned").length,
-      icon: Users,
-      color: "bg-indigo-50 text-indigo-700",
-    },
-    {
-      label: "Trips In Progress",
-      value: assignments.filter(
-        (a) => !["Assigned", "Completed", "Cancelled"].includes(a.tripStatus)
-      ).length,
-      icon: Clock,
-      color: "bg-amber-50 text-amber-700",
+      label: "Active Assignments",
+      value: activeAssignments.length,
+      icon: Clock3,
+      style: "bg-amber-50 text-amber-700",
     },
     {
       label: "Completed",
-      value: assignments.filter((a) => a.tripStatus === "Completed").length,
+      value: assignments.filter(
+        (item) => normalizeStatus(item.assignmentStatus) === "COMPLETED"
+      ).length,
       icon: CheckCircle2,
-      color: "bg-emerald-50 text-emerald-700",
+      style: "bg-emerald-50 text-emerald-700",
+    },
+    {
+      label: "Available Drivers",
+      value: drivers.length,
+      icon: Users,
+      style: "bg-violet-50 text-violet-700",
+    },
+    {
+      label: "Available Vehicles",
+      value: vehicles.length,
+      icon: Truck,
+      style: "bg-orange-50 text-orange-700",
     },
   ];
 
-  const resetForm = () => {
-    setAssignmentForm(emptyForm);
+  const openModal = (nextModal) => {
     setFormError("");
-    setSelectedRecord(null);
+    setModal(nextModal);
   };
 
-  const openAssignModal = () => {
-    resetForm();
-    setShowAssignModal(true);
-  };
-
-  const closeAssignModal = () => {
-    setShowAssignModal(false);
-    resetForm();
-  };
-
-  const handleAssign = async () => {
+  const closeModal = () => {
+    if (busy) return;
+    setModal(null);
     setFormError("");
-    setSuccessMessage("");
+  };
 
-    const booking = getBooking(assignmentForm.bookingId);
-
-    if (!booking) {
-      setFormError("Please select a booking.");
-      return;
-    }
-
-    if (booking.status !== "Confirmed") {
-      setFormError("Only confirmed bookings can be assigned.");
-      return;
-    }
-
-    if (!assignmentForm.driverId || !assignmentForm.vehicleId) {
-      setFormError("Please select both a driver and a vehicle.");
-      return;
-    }
-
-    if (!availableDriverIds.has(String(assignmentForm.driverId))) {
-      setFormError("Only available drivers can be assigned.");
-      return;
-    }
-
-    if (!availableVehicleIds.has(String(assignmentForm.vehicleId))) {
-      setFormError("Only available vehicles can be assigned.");
-      return;
-    }
-
+  const performAction = async (operation, message) => {
+    setBusy(true);
+    setFormError("");
+    setError("");
     try {
-      const response = await axios.post(`${API_URL}/assignments`, {
-        bookingId: Number(booking.id),
-        driverId: Number(assignmentForm.driverId),
-        vehicleId: Number(assignmentForm.vehicleId),
-      });
-      setAssignments((previous) => [
-        mapAssignment(response.data),
-        ...previous,
-      ]);
-      closeAssignModal();
-      await loadData();
-      setSuccessMessage(
-        "Driver and vehicle assigned successfully. The driver was notified."
-      );
-    } catch (error) {
-      console.error("Unable to create assignment:", error);
-      setFormError(getApiError(error, "Unable to create assignment."));
+      await operation();
+      setModal(null);
+      setNotice(message);
+      setRefreshKey((current) => current + 1);
+    } catch (requestError) {
+      const message = getApiError(requestError);
+      setFormError(message);
+      if (!modal) setError(message);
+    } finally {
+      setBusy(false);
     }
   };
 
-  const openReassignModal = (assignment) => {
-    if (terminalStatuses.includes(assignment.tripStatus)) {
-      setSuccessMessage("");
-      setFormError("Completed trips cannot be reassigned.");
+  const createAssignment = (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const bookingId = Number(form.get("bookingId"));
+    const driverId = Number(form.get("driverId"));
+    const vehicleId = Number(form.get("vehicleId"));
+    if (!bookingId || !driverId || !vehicleId) {
+      setFormError("Select a booking, an available driver, and an available vehicle.");
       return;
     }
 
-    setSelectedRecord(assignment);
-    setAssignmentForm({
-      bookingId: assignment.bookingId,
-      driverId: assignment.driverId,
-      vehicleId: assignment.vehicleId,
-    });
-    setFormError("");
-    setShowReassignModal(true);
+    performAction(
+      () =>
+        api.post("/assignments", {
+          bookingId,
+          driverId,
+          vehicleId,
+        }),
+      "Assignment created. The selected driver and vehicle are now unavailable."
+    );
   };
 
-  const handleReassign = async () => {
-    setFormError("");
-    setSuccessMessage("");
-
-    if (!selectedRecord) {
-      setFormError("Please select an assignment.");
+  const reassign = (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const driverValue = String(form.get("driverId") || "");
+    const vehicleValue = String(form.get("vehicleId") || "");
+    if (!driverValue && !vehicleValue) {
+      setFormError("Select a new driver or a new vehicle.");
       return;
     }
 
-    const booking = getBooking(selectedRecord.bookingId);
+    const request = {};
+    if (driverValue) request.driverId = Number(driverValue);
+    if (vehicleValue) request.vehicleId = Number(vehicleValue);
+    const assignment = modal.assignment;
 
-    if (!booking) {
-      setFormError("The original booking could not be found.");
-      return;
-    }
+    performAction(
+      () =>
+        api.put(`/assignments/${assignment.assignmentId}/reassign`, request),
+      "Assignment updated. The previous resources have been released."
+    );
+  };
 
-    if (!assignmentForm.driverId || !assignmentForm.vehicleId) {
-      setFormError("Please select both a driver and a vehicle.");
-      return;
-    }
+  const completeAssignment = (assignment) => {
+    performAction(
+      () => api.put(`/assignments/${assignment.assignmentId}/complete`),
+      "Assignment completed and resources released."
+    );
+  };
 
-    const driverChanged =
-      String(assignmentForm.driverId) !== String(selectedRecord.driverId);
-    const vehicleChanged =
-      String(assignmentForm.vehicleId) !== String(selectedRecord.vehicleId);
-    if (!driverChanged && !vehicleChanged) {
-      setFormError("Choose a different driver or vehicle to reassign.");
-      return;
-    }
-
+  const cancelAssignment = (assignment) => {
     if (
-      driverChanged &&
-      !availableDriverIds.has(String(assignmentForm.driverId))
+      !window.confirm(
+        `Cancel the assignment for ${assignment.customer || "this customer"}? Its driver and vehicle will be released.`
+      )
     ) {
-      setFormError("Only available drivers can be selected.");
       return;
     }
-    if (
-      vehicleChanged &&
-      !availableVehicleIds.has(String(assignmentForm.vehicleId))
-    ) {
-      setFormError("Only available vehicles can be selected.");
-      return;
-    }
-
-    try {
-      const response = await axios.put(
-        `${API_URL}/assignments/${selectedRecord.id}/reassign`,
-        {
-          driverId: Number(assignmentForm.driverId),
-          vehicleId: Number(assignmentForm.vehicleId),
-        }
-      );
-      const updatedAssignment = mapAssignment(response.data);
-      setAssignments((previous) =>
-        previous.map((item) =>
-          item.id === updatedAssignment.id ? updatedAssignment : item
-        )
-      );
-      setSelectedAssignment((previous) =>
-        previous?.id === updatedAssignment.id ? updatedAssignment : previous
-      );
-      setShowReassignModal(false);
-      resetForm();
-      await loadData();
-      setSuccessMessage(
-        "Assignment updated successfully. The new driver was notified."
-      );
-    } catch (error) {
-      console.error("Unable to reassign trip:", error);
-      setFormError(getApiError(error, "Unable to reassign trip."));
-    }
+    performAction(
+      () =>
+        api.patch(`/assignments/${assignment.assignmentId}/status`, {
+          status: "CANCELLED",
+        }),
+      "Assignment cancelled and resources released."
+    );
   };
-
-  const handleAdvanceTrip = async (assignment) => {
-    const nextStatus = nextTripStatus[assignment.tripStatus];
-
-    if (!nextStatus) return;
-
-    try {
-      const response = await axios.patch(
-        `${API_URL}/assignments/${assignment.id}/status`,
-        { status: nextStatus }
-      );
-      const updatedAssignment = mapAssignment(response.data);
-      setAssignments((previous) =>
-        previous.map((item) =>
-          item.id === updatedAssignment.id ? updatedAssignment : item
-        )
-      );
-      setSelectedAssignment(updatedAssignment);
-      await loadData();
-      setSuccessMessage(`Trip status updated to ${nextStatus}.`);
-    } catch (error) {
-      console.error("Unable to update trip status:", error);
-      setFormError(getApiError(error, "Unable to update trip status."));
-    }
-  };
-
-  const statusStyle = (status) => {
-    switch (status) {
-      case "Assigned":
-        return "bg-blue-100 text-blue-700";
-      case "OTW":
-      case "Waiting":
-        return "bg-amber-100 text-amber-700";
-      case "Pickup":
-      case "Drop":
-        return "bg-purple-100 text-purple-700";
-      case "Completed":
-        return "bg-emerald-100 text-emerald-700";
-      case "Cancelled":
-        return "bg-red-100 text-red-700";
-      default:
-        return "bg-slate-100 text-slate-700";
-    }
-  };
-
-  const renderDriverOptions = () => (
-    <>
-      <option value="">Select available driver</option>
-      {availableDrivers.map((driver) => (
-        <option key={driver.id} value={String(driver.id)}>
-          {driver.name}
-        </option>
-      ))}
-    </>
-  );
-
-  const renderVehicleOptions = () => (
-    <>
-      <option value="">Select available vehicle</option>
-      {availableVehicles.map((vehicle) => (
-        <option key={vehicle.id} value={String(vehicle.id)}>
-          {vehicle.plate} — {vehicle.type} (Capacity: {vehicle.capacity})
-        </option>
-      ))}
-    </>
-  );
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-teal-700">
-              Transport Operations
-            </p>
-            <h2 className="text-3xl font-bold text-slate-900">
-              Assignment Management
-            </h2>
-            <p className="mt-2 text-slate-500">
-              Assign drivers and vehicles to confirmed bookings and monitor trip progress.
-            </p>
+    <div className="admin-page">
+      <header className="admin-page-header">
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-sm text-slate-500">
+            <span>Management</span>
+            <span>/</span>
+            <span className="font-medium text-blue-600">Assignments</span>
           </div>
-
-          <button
-            onClick={openAssignModal}
-            disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-600 px-5 py-3 font-medium text-white hover:bg-teal-700"
-          >
-            <Plus size={18} />
-            Create Assignment
-          </button>
+          <h1 className="admin-page-title">
+            Assignment Management
+          </h1>
+          <p className="admin-page-description">
+            Assign and manage drivers and vehicles for confirmed bookings.
+          </p>
         </div>
-      </div>
+        <button
+          type="button"
+          onClick={() => openModal({ type: "create" })}
+          disabled={loading}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+        >
+          <Plus size={18} />
+          Create Assignment
+        </button>
+      </header>
 
-      {/* Feedback */}
-      {successMessage && (
-        <div className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-          <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
-          <p>{successMessage}</p>
+      {notice && (
+        <div
+          role="status"
+          className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle2 size={17} />
+            {notice}
+          </span>
           <button
-            onClick={() => setSuccessMessage("")}
-            className="ml-auto"
+            type="button"
             aria-label="Dismiss message"
+            onClick={() => setNotice("")}
+            className="rounded p-1 hover:bg-emerald-100"
           >
             <X size={16} />
           </button>
         </div>
       )}
 
-      {formError && !showAssignModal && !showReassignModal && (
-        <ErrorMessage message={formError} />
-      )}
+      {error && <ErrorBanner message={error} />}
 
-      {loading && (
-        <p className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
-          Loading assignments and available resources...
-        </p>
-      )}
-
-      {/* Summary */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-
-          return (
-            <div
-              key={stat.label}
-              className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-slate-500">{stat.label}</p>
-                  <p className="mt-2 text-3xl font-bold text-slate-900">
-                    {stat.value}
-                  </p>
-                </div>
-                <div className={`rounded-2xl p-3 ${stat.color}`}>
-                  <Icon size={22} />
-                </div>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {stats.map(({ label, value, icon: Icon, style }) => (
+          <article
+            key={label}
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-slate-500">{label}</p>
+                <p className="mt-2 text-2xl font-bold text-slate-900">
+                  {loading ? "…" : value}
+                </p>
+              </div>
+              <div className={`rounded-xl p-3 ${style}`}>
+                <Icon size={20} />
               </div>
             </div>
-          );
-        })}
-      </div>
+          </article>
+        ))}
+      </section>
 
-      {/* Assignment Records */}
-      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-100 p-6 lg:flex-row lg:items-center lg:justify-between">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-slate-900">
-              Assignment Records
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Review assignments, manage changes and monitor trip statuses.
+            <h2 className="font-semibold text-slate-900">Assignment Records</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Review trip assignments, resource details and current status.
             </p>
           </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <div className="relative w-full sm:w-64">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label className="relative block">
               <Search
-                size={18}
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                size={17}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
               <input
-                type="text"
-                placeholder="Search booking, driver..."
+                type="search"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 outline-none focus:border-teal-500"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search customer, driver, vehicle..."
+                className="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 sm:w-72"
               />
-            </div>
-
+            </label>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-teal-500"
+              onChange={(event) => setStatusFilter(event.target.value)}
+              aria-label="Filter by assignment status"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
             >
-              <option value="All">All statuses</option>
-              {tripStatuses.map((status) => (
+              <option value="ALL">All statuses</option>
+              {ASSIGNMENT_STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {status}
+                  {status.replaceAll("_", " ")}
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              title="Refresh assignment data"
+              onClick={() => setRefreshKey((current) => current + 1)}
+              className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2.5 text-slate-600 hover:bg-slate-50"
+            >
+              <RefreshCw size={17} />
+            </button>
           </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500">
+          <table className="w-full min-w-[900px] text-left">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                {[
-                  "Assignment",
-                  "Booking / Customer",
-                  "Driver",
-                  "Vehicle",
-                  "Schedule",
-                  "Trip Status",
-                  "Actions",
-                ].map((heading) => (
-                  <th
-                    key={heading}
-                    className="whitespace-nowrap px-6 py-4 text-left font-medium"
-                  >
-                    {heading}
-                  </th>
-                ))}
+                <th className="px-5 py-3 font-semibold">No.</th>
+                <th className="px-5 py-3 font-semibold">Customer</th>
+                <th className="px-5 py-3 font-semibold">Driver</th>
+                <th className="px-5 py-3 font-semibold">Vehicle</th>
+                <th className="px-5 py-3 font-semibold">Assigned On</th>
+                <th className="px-5 py-3 font-semibold">Status</th>
+                <th className="px-5 py-3 text-right font-semibold">Actions</th>
               </tr>
             </thead>
-
             <tbody className="divide-y divide-slate-100">
-              {filteredAssignments.map((assignment) => {
-                const driver = getDriver(assignment.driverId);
-                const vehicle = getVehicle(assignment.vehicleId);
-
-                return (
-                  <tr
-                    key={assignment.id}
-                    className="hover:bg-slate-50"
-                  >
-                    <td className="whitespace-nowrap px-6 py-5 font-semibold text-slate-900">
-                      {assignment.id}
-                    </td>
-
-                    <td className="px-6 py-5">
-                      <p className="font-medium text-slate-900">
-                        {assignment.bookingId}
-                      </p>
-                      <p className="mt-1 text-slate-500">
-                        {assignment.customer}
-                      </p>
-                    </td>
-
-                    <td className="whitespace-nowrap px-6 py-5">
-                      {driver?.name || "Driver unavailable"}
-                    </td>
-
-                    <td className="whitespace-nowrap px-6 py-5">
-                      {vehicle?.plate || "Vehicle unavailable"}
-                    </td>
-
-                    <td className="whitespace-nowrap px-6 py-5">
-                      <p>{formatDate(assignment.date)}</p>
-                      <p className="mt-1 text-slate-500">
-                        {assignment.time}
-                      </p>
-                    </td>
-
-                    <td className="whitespace-nowrap px-6 py-5">
-                      <span
-                        className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusStyle(
-                          assignment.tripStatus
-                        )}`}
-                      >
-                        {assignment.tripStatus}
-                      </span>
-                    </td>
-
-                    <td className="px-6 py-5">
-                      <div className="flex justify-center gap-2">
-                        <button
-                          onClick={() => {
-                            setSelectedAssignment(assignment);
-                            setFormError("");
-                          }}
-                          title="View assignment"
-                          aria-label={`View ${assignment.id}`}
-                          className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 hover:bg-slate-100"
-                        >
-                          <Eye size={16} />
-                        </button>
-
-                        <button
-                          onClick={() => openReassignModal(assignment)}
-                          disabled={assignment.tripStatus === "Completed"}
-                          title="Reassign driver or vehicle"
-                          aria-label={`Reassign ${assignment.id}`}
-                          className="rounded-xl bg-blue-600 p-2.5 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          <RefreshCw size={16} />
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled
-                          title={assignment.notificationSent
-                            ? "Assignment notification recorded"
-                            : "No notification record"}
-                          aria-label={`Notification status for ${assignment.id}`}
-                          className={`rounded-xl p-2.5 text-white disabled:cursor-default disabled:opacity-100 ${
-                            assignment.notificationSent ? "bg-emerald-700" : "bg-slate-300"
-                          }`}
-                        >
-                          <Bell size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {filteredAssignments.length === 0 && (
+              {loading ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-12 text-center text-slate-500"
-                  >
-                    No assignment records found.
+                  <td colSpan={7} className="px-5 py-14 text-center text-sm text-slate-500">
+                    <LoaderCircle size={22} className="mx-auto animate-spin text-blue-600" />
+                    <span className="mt-2 block">Loading assignments...</span>
                   </td>
                 </tr>
+              ) : filteredAssignments.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-14 text-center">
+                    <ClipboardList size={28} className="mx-auto text-slate-300" />
+                    <p className="mt-3 font-semibold text-slate-800">
+                      No assignments found
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Create an assignment or adjust the search and status filter.
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                filteredAssignments.map((assignment, index) => {
+                  const status = normalizeStatus(assignment.assignmentStatus);
+                  const isActive = !TERMINAL_STATUSES.has(status);
+                  return (
+                    <tr
+                      key={assignment.assignmentId}
+                      className="hover:bg-slate-50/70"
+                    >
+                      <td className="px-5 py-4 text-sm font-medium text-slate-500">
+                        {index + 1}
+                      </td>
+                      <td className="px-5 py-4 text-sm font-medium text-slate-800">
+                        {assignment.customer || "—"}
+                      </td>
+                      <td className="px-5 py-4 text-sm text-slate-700">
+                        {assignment.driverName || "—"}
+                      </td>
+                      <td className="px-5 py-4 text-sm font-medium text-slate-700">
+                        {assignment.vehiclePlate || "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
+                        {formatDateTime(getAssignmentDate(assignment))}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusClass(
+                            status
+                          )}`}
+                        >
+                          {status.replaceAll("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex justify-end gap-1">
+                          <IconButton
+                            label="View assignment details"
+                            onClick={() => openModal({ type: "view", assignment })}
+                            icon={Eye}
+                          />
+                          {isActive && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openModal({ type: "reassign", assignment })
+                                }
+                                title="Reassign driver or vehicle"
+                                aria-label="Reassign assignment"
+                                className="rounded-lg p-2 text-blue-600 hover:bg-blue-50"
+                              >
+                                <RefreshCw size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => completeAssignment(assignment)}
+                                title="Complete assignment"
+                                aria-label="Complete assignment"
+                                className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50"
+                              >
+                                <CheckCircle2 size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => cancelAssignment(assignment)}
+                                title="Cancel assignment and release resources"
+                                aria-label="Cancel assignment"
+                                className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"
+                              >
+                                <CircleX size={16} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
+        <footer className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+          {loading
+            ? " "
+            : `${filteredAssignments.length} of ${assignments.length} assignments`}
+        </footer>
+      </section>
 
-        <div className="border-t border-slate-100 px-6 py-4 text-sm text-slate-500">
-          Showing {filteredAssignments.length} of {assignments.length} assignments
-        </div>
-      </div>
-
-      {/* Create Assignment Modal */}
-      {showAssignModal && (
-        <Modal
-          title="Assign Driver & Vehicle"
-          subtitle="Select a confirmed booking, then choose available resources."
-          onClose={closeAssignModal}
-        >
-          <div className="space-y-4">
-            <Field label="Confirmed Booking">
-              <select
-                value={assignmentForm.bookingId}
-                onChange={(e) =>
-                  setAssignmentForm({
-                    bookingId: e.target.value,
-                    driverId: "",
-                    vehicleId: "",
-                  })
-                }
-                className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-teal-500"
-              >
-                <option value="">Select booking</option>
-                {eligibleBookings.map((booking) => (
-                  <option key={booking.id} value={String(booking.id)}>
-                    {booking.id} — {booking.customer}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            {eligibleBookings.length === 0 && (
-              <p className="text-sm text-amber-700">
-                There are no confirmed bookings awaiting assignment.
-              </p>
-            )}
-
-            {selectedBooking && (
-              <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
-                <Info
-                  icon={MapPin}
-                  label="Route"
-                  value={`${selectedBooking.pickup} → ${selectedBooking.destination}`}
-                />
-                <Info
-                  icon={CalendarDays}
-                  label="Pickup Schedule"
-                  value={`${formatDate(selectedBooking.date)} at ${selectedBooking.time}`}
-                />
-                <Info
-                  icon={Users}
-                  label="Passengers"
-                  value={`${selectedBooking.passengers} passenger(s)`}
-                />
-              </div>
-            )}
-
-            <Field label="Available Driver">
-              <select
-                value={assignmentForm.driverId}
-                onChange={(e) =>
-                  setAssignmentForm((prev) => ({
-                    ...prev,
-                    driverId: e.target.value,
-                  }))
-                }
-                disabled={!selectedBooking}
-                className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-teal-500 disabled:bg-slate-100"
-              >
-                <option value="">Select available driver</option>
-                {availableDrivers.map((driver) => (
-                  <option key={driver.id} value={String(driver.id)}>
-                    {driver.name}
-                  </option>
-                ))}
-              </select>
-              {selectedBooking && availableDrivers.length === 0 && (
-                <p className="mt-1 text-xs text-amber-700">
-                  No driver is available for this time slot.
-                </p>
-              )}
-            </Field>
-
-            <Field label="Available Vehicle">
-              <select
-                value={assignmentForm.vehicleId}
-                onChange={(e) =>
-                  setAssignmentForm((prev) => ({
-                    ...prev,
-                    vehicleId: e.target.value,
-                  }))
-                }
-                disabled={!selectedBooking}
-                className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-teal-500 disabled:bg-slate-100"
-              >
-                {renderVehicleOptions()}
-              </select>
-              {selectedBooking && availableVehicles.length === 0 && (
-                <p className="mt-1 text-xs text-amber-700">
-                  No suitable vehicle is available for this booking.
-                </p>
-              )}
-            </Field>
-
-            {formError && <ErrorMessage message={formError} />}
-
-            <div className="flex justify-end gap-3 pt-3">
-              <button
-                onClick={closeAssignModal}
-                className="rounded-xl border border-slate-200 px-5 py-2.5 font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAssign}
-                disabled={!selectedBooking}
-                className="rounded-xl bg-teal-600 px-5 py-2.5 font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Confirm Assignment
-              </button>
-            </div>
-          </div>
-        </Modal>
+      {modal?.type === "create" && (
+        <AssignmentFormModal
+          title="Create Assignment"
+          subtitle="Choose a confirmed booking and currently available resources."
+          bookings={eligibleBookings}
+          drivers={drivers}
+          vehicles={vehicles}
+          busy={busy}
+          error={formError}
+          onClose={closeModal}
+          onSubmit={createAssignment}
+        />
       )}
-
-      {/* View Assignment Modal */}
-      {selectedAssignment && (
-        <Modal
-          title="Assignment Details"
-          subtitle={`${selectedAssignment.id} · ${selectedAssignment.bookingId}`}
-          onClose={() => setSelectedAssignment(null)}
-        >
-          {(() => {
-            const booking = getBooking(selectedAssignment.bookingId);
-            const driver = getDriver(selectedAssignment.driverId);
-            const vehicle = getVehicle(selectedAssignment.vehicleId);
-
-            return (
-              <div className="space-y-5">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Info label="Customer" value={selectedAssignment.customer} />
-                  <Info label="Booking Status" value={booking?.status || "-"} />
-                  <Info label="Driver" value={driver?.name || "-"} />
-                  <Info label="Vehicle" value={vehicle?.plate || "-"} />
-                  <Info label="Vehicle Type" value={vehicle?.type || "-"} />
-                  <Info
-                    label="Passenger Capacity"
-                    value={
-                      vehicle
-                        ? `${booking?.passengers || 0} / ${vehicle.capacity} passengers`
-                        : "-"
-                    }
-                  />
-                  <Info
-                    label="Pickup Date & Time"
-                    value={`${formatDate(selectedAssignment.date)} · ${selectedAssignment.time}`}
-                  />
-                  <Info
-                    label="Trip Status"
-                    value={selectedAssignment.tripStatus}
-                  />
-                </div>
-
-                {booking && (
-                  <div className="rounded-2xl bg-slate-50 p-4">
-                    <Info
-                      icon={MapPin}
-                      label="Pickup Location"
-                      value={booking.pickup}
-                    />
-                    <div className="my-3 border-t border-slate-200" />
-                    <Info
-                      icon={MapPin}
-                      label="Destination"
-                      value={booking.destination}
-                    />
-                  </div>
-                )}
-
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <p className="font-semibold text-slate-900">
-                    Trip Progress
-                  </p>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {tripStatuses.map((status, index) => {
-                      const currentIndex = tripStatuses.indexOf(
-                        selectedAssignment.tripStatus
-                      );
-                      const reached = index <= currentIndex;
-
-                      return (
-                        <span
-                          key={status}
-                          className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-                            reached
-                              ? "bg-teal-100 text-teal-800"
-                              : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
-                          {status}
-                        </span>
-                      );
-                    })}
-                  </div>
-
-                  {nextTripStatus[selectedAssignment.tripStatus] && (
-                    <button
-                      onClick={() => handleAdvanceTrip(selectedAssignment)}
-                      className="mt-4 w-full rounded-xl bg-teal-600 px-4 py-3 font-medium text-white hover:bg-teal-700"
-                    >
-                      Update to {nextTripStatus[selectedAssignment.tripStatus]}
-                    </button>
-                  )}
-
-                  {selectedAssignment.tripStatus === "Completed" && (
-                    <p className="mt-4 text-sm text-emerald-700">
-                      This trip has been completed.
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <p className="font-semibold text-slate-900">
-                    Driver Notification
-                  </p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {selectedAssignment.notificationSent
-                      ? "Notification is marked as sent."
-                      : "No notification has been marked as sent."}
-                  </p>
-                </div>
-
-              </div>
-            );
-          })()}
-        </Modal>
+      {modal?.type === "reassign" && (
+        <ReassignModal
+          assignment={modal.assignment}
+          drivers={drivers}
+          vehicles={vehicles}
+          busy={busy}
+          error={formError}
+          onClose={closeModal}
+          onSubmit={reassign}
+        />
       )}
-      
-      {/* Reassign Modal */}
-      {showReassignModal && selectedRecord && (
-        <Modal
-          title="Reassign Driver & Vehicle"
-          subtitle={`Update resources for ${selectedRecord.bookingId}.`}
-          onClose={() => {
-            setShowReassignModal(false);
-            resetForm();
-          }}
-        >
-          <div className="space-y-4">
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <Info label="Customer" value={selectedRecord.customer} />
-              <Info
-                label="Current Driver"
-                value={getDriver(selectedRecord.driverId)?.name || "-"}
-              />
-              <Info
-                label="Current Vehicle"
-                value={getVehicle(selectedRecord.vehicleId)?.plate || "-"}
-              />
-              <Info
-                label="Trip Status"
-                value={selectedRecord.tripStatus}
-              />
-            </div>
-
-            <Field label="New Driver">
-              <select
-                value={assignmentForm.driverId}
-                onChange={(e) =>
-                  setAssignmentForm((prev) => ({
-                    ...prev,
-                    driverId: e.target.value,
-                  }))
-                }
-                className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-teal-500"
-              >
-                {renderDriverOptions()}
-              </select>
-            </Field>
-
-            <Field label="New Vehicle">
-              <select
-                value={assignmentForm.vehicleId}
-                onChange={(e) =>
-                  setAssignmentForm((prev) => ({
-                    ...prev,
-                    vehicleId: e.target.value,
-                  }))
-                }
-                className="w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-teal-500"
-              >
-                {renderVehicleOptions()}
-              </select>
-            </Field>
-
-            <p className="text-xs text-slate-500">
-              The system revalidates availability before saving and returns changed resources to Available.
-            </p>
-
-            {formError && <ErrorMessage message={formError} />}
-
-            <div className="flex justify-end gap-3 pt-3">
-              <button
-                onClick={() => {
-                  setShowReassignModal(false);
-                  resetForm();
-                }}
-                className="rounded-xl border border-slate-200 px-5 py-2.5 font-medium text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleReassign}
-                className="rounded-xl bg-blue-600 px-5 py-2.5 font-medium text-white hover:bg-blue-700"
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </Modal>
+      {modal?.type === "view" && (
+        <AssignmentDetailsModal
+          assignment={modal.assignment}
+          onClose={closeModal}
+        />
       )}
     </div>
+  );
+}
+
+function ErrorBanner({ message }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+    >
+      <AlertCircle size={17} className="mt-0.5 shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function IconButton({ label, onClick, icon: Icon }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+    >
+      <Icon size={16} />
+    </button>
   );
 }
 
 function Modal({ title, subtitle, onClose, children }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-xl">
-        <div className="sticky top-0 flex items-start justify-between border-b border-slate-100 bg-white p-6">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+      >
+        <header className="sticky top-0 flex items-start justify-between border-b border-slate-100 bg-white p-5">
           <div>
-            <h3 className="text-xl font-bold text-slate-900">{title}</h3>
+            <h2 className="text-lg font-bold text-slate-900">{title}</h2>
             {subtitle && (
               <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
             )}
           </div>
           <button
+            type="button"
             onClick={onClose}
             aria-label="Close modal"
-            className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
-        </div>
-        <div className="p-6">{children}</div>
-      </div>
+        </header>
+        {children}
+      </section>
     </div>
   );
 }
 
-function Field({ label, children }) {
+function FormField({ label, children }) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-medium text-slate-700">
-        {label}
-      </span>
+    <label className="block text-sm font-medium text-slate-700">
+      {label}
       {children}
     </label>
   );
 }
 
-function Info({ icon: Icon, label, value }) {
+const inputClass =
+  "mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+
+function FormError({ message }) {
+  if (!message) return null;
   return (
-    <div className="mb-3 last:mb-0">
-      <p className="flex items-center gap-2 text-sm text-slate-500">
-        {Icon && <Icon size={15} />}
-        {label}
-      </p>
-      <p className="mt-1 break-words font-medium text-slate-900">
-        {value || "-"}
-      </p>
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
+    >
+      <AlertCircle size={16} className="mt-0.5 shrink-0" />
+      <span>{message}</span>
     </div>
   );
 }
 
-function ErrorMessage({ message }) {
-  if (!message) return null;
+function FormActions({ onClose, busy, submitLabel }) {
+  return (
+    <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={busy}
+        className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      >
+        Cancel
+      </button>
+      <button
+        type="submit"
+        disabled={busy}
+        className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {busy && <LoaderCircle size={15} className="mr-2 inline animate-spin" />}
+        {submitLabel}
+      </button>
+    </div>
+  );
+}
+
+function AssignmentFormModal({
+  title,
+  subtitle,
+  bookings,
+  drivers,
+  vehicles,
+  busy,
+  error,
+  onClose,
+  onSubmit,
+}) {
+  return (
+    <Modal title={title} subtitle={subtitle} onClose={onClose}>
+      <form onSubmit={onSubmit} className="space-y-4 p-5">
+        <FormField label="Confirmed booking">
+          <select name="bookingId" required className={inputClass}>
+            <option value="">Select a booking</option>
+            {bookings.map((booking) => (
+              <option key={booking.bookingId} value={booking.bookingId}>
+                {booking.customer || "Customer"} · {formatDate(booking.bookingTripdate)}
+                {booking.bookingPickuptime ? ` · ${booking.bookingPickuptime}` : ""}
+                {booking.bookingPickupaddress
+                  ? ` · ${booking.bookingPickupaddress}`
+                  : ""}
+              </option>
+            ))}
+          </select>
+          {bookings.length === 0 && (
+            <span className="mt-1 block text-xs text-amber-700">
+              There are no confirmed bookings without an active assignment.
+            </span>
+          )}
+        </FormField>
+        <FormField label="Available driver">
+          <select name="driverId" required className={inputClass}>
+            <option value="">Select an available driver</option>
+            {drivers.map((driver) => (
+              <option key={driver.driverId} value={driver.driverId}>
+                {driver.driverName}
+              </option>
+            ))}
+          </select>
+          {drivers.length === 0 && (
+            <span className="mt-1 block text-xs text-amber-700">
+              No drivers currently have AVAILABLE status.
+            </span>
+          )}
+        </FormField>
+        <FormField label="Available vehicle">
+          <select name="vehicleId" required className={inputClass}>
+            <option value="">Select an available vehicle</option>
+            {vehicles.map((vehicle) => (
+              <option key={vehicle.vehicleId} value={vehicle.vehicleId}>
+                {vehicle.vehiclePlateno}
+                {vehicle.vehicleType ? ` · ${vehicle.vehicleType}` : ""}
+              </option>
+            ))}
+          </select>
+          {vehicles.length === 0 && (
+            <span className="mt-1 block text-xs text-amber-700">
+              No vehicles currently have AVAILABLE status.
+            </span>
+          )}
+        </FormField>
+        <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
+          Availability is checked again by the server before saving. A
+          notification is created for the selected driver in the same transaction.
+        </p>
+        <FormError message={error} />
+        <FormActions
+          onClose={onClose}
+          busy={busy}
+          submitLabel={busy ? "Creating..." : "Create Assignment"}
+        />
+      </form>
+    </Modal>
+  );
+}
+
+function ReassignModal({
+  assignment,
+  drivers,
+  vehicles,
+  busy,
+  error,
+  onClose,
+  onSubmit,
+}) {
+  return (
+    <Modal
+      title="Reassign Trip"
+      subtitle={`Booking for ${assignment.customer || "customer"}`}
+      onClose={onClose}
+    >
+      <form onSubmit={onSubmit} className="space-y-4 p-5">
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          Leave a field unchanged to keep its current resource. At least one new
+          available resource is required.
+        </p>
+        <FormField label={`Driver · current: ${assignment.driverName}`}>
+          <select name="driverId" defaultValue="" className={inputClass}>
+            <option value="">Keep current driver</option>
+            {drivers.map((driver) => (
+              <option key={driver.driverId} value={driver.driverId}>
+                {driver.driverName}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label={`Vehicle · current: ${assignment.vehiclePlate}`}>
+          <select name="vehicleId" defaultValue="" className={inputClass}>
+            <option value="">Keep current vehicle</option>
+            {vehicles.map((vehicle) => (
+              <option key={vehicle.vehicleId} value={vehicle.vehicleId}>
+                {vehicle.vehiclePlateno}
+                {vehicle.vehicleType ? ` · ${vehicle.vehicleType}` : ""}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        <FormError message={error} />
+        <FormActions
+          onClose={onClose}
+          busy={busy}
+          submitLabel={busy ? "Saving..." : "Save Reassignment"}
+        />
+      </form>
+    </Modal>
+  );
+}
+
+function AssignmentDetailsModal({ assignment, onClose }) {
+  const status = normalizeStatus(assignment.assignmentStatus);
+  const details = [
+    {
+      label: "Customer Name",
+      value: assignment.customer || "—",
+      icon: UserRound,
+    },
+    {
+      label: "Driver Name",
+      value: assignment.driverName || "—",
+      icon: UserRound,
+    },
+    {
+      label: "Vehicle Plate Number",
+      value: assignment.vehiclePlate || "—",
+      icon: Truck,
+    },
+    {
+      label: "Trip Date",
+      value: formatDate(assignment.tripDate),
+      icon: CalendarDays,
+    },
+    {
+      label: "Pickup Location",
+      value: assignment.pickupAddress || "—",
+      icon: ClipboardList,
+      wide: true,
+    },
+    {
+      label: "Destination",
+      value: assignment.destinationAddress || "—",
+      icon: ClipboardList,
+      wide: true,
+    },
+    {
+      label: "Assignment Date",
+      value: formatDateTime(getAssignmentDate(assignment)),
+      icon: Clock3,
+    },
+    {
+      label: "Assignment Status",
+      value: status.replaceAll("_", " "),
+      icon: CheckCircle2,
+      status: true,
+    },
+  ];
 
   return (
-    <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-      <AlertCircle size={18} className="mt-0.5 shrink-0" />
-      <p>{message}</p>
-    </div>
+    <Modal
+      title="Assignment Details"
+      subtitle="Trip, assigned resources and current status."
+      onClose={onClose}
+    >
+      <div className="grid gap-3 p-5 sm:grid-cols-2">
+        {details.map(({ label, value, icon: Icon, wide, status: isStatus }) => {
+          return (
+            <div
+              key={label}
+              className={`rounded-xl border border-slate-100 bg-slate-50 p-3 ${
+                wide ? "sm:col-span-2" : ""
+              }`}
+            >
+              <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <Icon size={13} />
+                {label}
+              </p>
+              {isStatus ? (
+                <span
+                  className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusClass(status)}`}
+                >
+                  {value}
+                </span>
+              ) : (
+                <p className="mt-1.5 break-words text-sm font-semibold text-slate-800">
+                  {value}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex justify-end border-t border-slate-100 p-5 pt-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+        >
+          Close
+        </button>
+      </div>
+    </Modal>
   );
 }

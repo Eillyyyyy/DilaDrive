@@ -1,204 +1,184 @@
 import 'package:flutter/material.dart';
 
+import '../../models/driver_profile.dart';
+import '../../services/driver_profile_service.dart';
+import '../../theme/app_theme.dart';
+import '../auth/login.dart';
+
 class DriverUpdateAccountPage extends StatefulWidget {
-  const DriverUpdateAccountPage({super.key});
+  const DriverUpdateAccountPage({super.key, this.profileService});
+
+  final DriverProfileService? profileService;
 
   @override
   State<DriverUpdateAccountPage> createState() =>
       _DriverUpdateAccountPageState();
 }
 
-class _DriverUpdateAccountPageState
-    extends State<DriverUpdateAccountPage> {
-
-  final nameController =
-      TextEditingController(text: "Ahmad Faiz");
-
-  final emailController =
-      TextEditingController(text: "driver@diladrive.com");
-
-  final phoneController =
-      TextEditingController(text: "0123456789");
-
-  final licenseController =
-      TextEditingController(text: "D123456789");
-
-  final vehicleTypeController =
-      TextEditingController(text: "Van");
-
-  final plateNumberController =
-      TextEditingController(text: "WXY1234");
+class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
+  late final bool _ownsService = widget.profileService == null;
+  late final DriverProfileService _service =
+      widget.profileService ?? DriverProfileService();
+  final _formKey = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _phone = TextEditingController();
+  late Future<DriverProfile> _profile;
+  bool _saving = false;
 
   @override
-  Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF701A35);
+  void initState() {
+    super.initState();
+    _profile = _loadProfile();
+  }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+  Future<DriverProfile> _loadProfile() async {
+    final profile = await _service.getProfile();
+    if (!mounted) return profile;
+    _name.text = profile.name;
+    _email.text = profile.email;
+    _phone.text = profile.phone ?? '';
+    return profile;
+  }
 
-      appBar: AppBar(
-        title: const Text("Update Account"),
-        backgroundColor: Colors.white,
-        elevation: 0,
-      ),
+  @override
+  void dispose() {
+    if (_ownsService) _service.dispose();
+    _name.dispose();
+    _email.dispose();
+    _phone.dispose();
+    super.dispose();
+  }
 
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate() || _saving) return;
+    setState(() => _saving = true);
+    try {
+      final updated = await _service.updateProfile(
+        name: _name.text,
+        email: _email.text,
+        phone: _phone.text,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile updated.')),
+        );
+        Navigator.pop(context, updated);
+      }
+    } on DriverProfileException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+        if (error.requiresLogin) _openLogin();
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: primaryColor,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Column(
+  void _openLogin() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: AppTheme.lightBlueBackground,
+        appBar: AppBar(title: const Text('Update Account')),
+        body: FutureBuilder<DriverProfile>(
+          future: _profile,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              final requiresLogin = snapshot.error is DriverProfileException &&
+                  (snapshot.error as DriverProfileException).requiresLogin;
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(snapshot.error.toString(),
+                        textAlign: TextAlign.center),
+                    TextButton.icon(
+                      onPressed: requiresLogin
+                          ? _openLogin
+                          : () => setState(() {
+                                _profile = _loadProfile();
+                              }),
+                      icon: const Icon(Icons.refresh),
+                      label: Text(requiresLogin ? 'Sign in' : 'Retry'),
+                    ),
+                  ]),
+                ),
+              );
+            }
+            return Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.all(18),
                 children: [
-                  CircleAvatar(
-                    radius: 40,
-                    backgroundColor: Colors.white,
-                    child: Icon(
-                      Icons.person,
-                      size: 45,
-                      color: primaryColor,
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(children: [
+                        _field(_name, 'Full name', Icons.person_outline),
+                        const SizedBox(height: 14),
+                        _field(_email, 'Email address', Icons.email_outlined,
+                            keyboardType: TextInputType.emailAddress),
+                        const SizedBox(height: 14),
+                        _field(_phone, 'Phone number', Icons.phone_outlined,
+                            keyboardType: TextInputType.phone),
+                      ]),
                     ),
                   ),
-
-                  SizedBox(height: 15),
-
-                  Text(
-                    "Update Driver Information",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: _saving ? null : _save,
+                      icon: _saving
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined),
+                      label: Text(_saving ? 'Saving…' : 'Save changes'),
                     ),
                   ),
                 ],
               ),
-            ),
-
-            const SizedBox(height: 20),
-
-            TextField(
-              controller: nameController,
-              decoration: inputDecoration(
-                "Full Name",
-                Icons.person_outline,
-              ),
-            ),
-
-            const SizedBox(height: 15),
-
-            TextField(
-              controller: emailController,
-              decoration: inputDecoration(
-                "Email Address",
-                Icons.email_outlined,
-              ),
-            ),
-
-            const SizedBox(height: 15),
-
-            TextField(
-              controller: phoneController,
-              decoration: inputDecoration(
-                "Phone Number",
-                Icons.phone_outlined,
-              ),
-            ),
-
-            const SizedBox(height: 15),
-
-            TextField(
-              controller: licenseController,
-              decoration: inputDecoration(
-                "Driving License Number",
-                Icons.badge_outlined,
-              ),
-            ),
-
-            const SizedBox(height: 15),
-
-            TextField(
-              controller: vehicleTypeController,
-              decoration: inputDecoration(
-                "Vehicle Type",
-                Icons.local_shipping_outlined,
-              ),
-            ),
-
-            const SizedBox(height: 15),
-
-            TextField(
-              controller: plateNumberController,
-              decoration: inputDecoration(
-                "Vehicle Plate Number",
-                Icons.directions_car_outlined,
-              ),
-            ),
-
-            const SizedBox(height: 30),
-
-            SizedBox(
-              width: double.infinity,
-              height: 55,
-              child: ElevatedButton.icon(
-                icon: const Icon(
-                  Icons.save,
-                  color: Colors.white,
-                ),
-                label: const Text(
-                  "Update Account",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryColor,
-                  shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(15),
-                  ),
-                ),
-                onPressed: () {
-
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        "Driver account updated successfully.",
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            const SizedBox(height: 20),
-          ],
+            );
+          },
         ),
-      ),
-    );
-  }
+      );
 
-  InputDecoration inputDecoration(
-    String label,
-    IconData icon,
-  ) {
-    return InputDecoration(
-      labelText: label,
-      prefixIcon: Icon(icon),
-      filled: true,
-      fillColor: Colors.white,
-      border: OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(15),
-        borderSide: BorderSide.none,
-      ),
-    );
-  }
+  Widget _field(TextEditingController controller, String label, IconData icon,
+          {TextInputType? keyboardType}) =>
+      TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        textInputAction: TextInputAction.next,
+        decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+        validator: (value) {
+          final text = value?.trim() ?? '';
+          if (text.isEmpty) return '$label is required.';
+          final maxLength = switch (label) {
+            'Full name' => 120,
+            'Email address' => 160,
+            'Phone number' => 30,
+            _ => null,
+          };
+          if (maxLength != null && text.length > maxLength) {
+            return '$label must be $maxLength characters or fewer.';
+          }
+          if (label == 'Email address' &&
+              !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(text)) {
+            return 'Enter a valid email address.';
+          }
+          return null;
+        },
+      );
 }

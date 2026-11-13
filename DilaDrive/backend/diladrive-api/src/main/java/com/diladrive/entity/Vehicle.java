@@ -24,6 +24,9 @@ public class Vehicle {
     @Column(name = "vehicle_capacity")
     private Integer vehicleCapacity;
 
+    @Column(name = "vehicle_luggagecapacity")
+    private Integer vehicleLuggageCapacity;
+
     @Column(name = "vehicle_roadtaxexpiry")
     private LocalDate vehicleRoadtaxexpiry;
 
@@ -77,6 +80,14 @@ public class Vehicle {
 
     public void setVehicleCapacity(Integer vehicleCapacity) {
         this.vehicleCapacity = vehicleCapacity;
+    }
+
+    public Integer getVehicleLuggageCapacity() {
+        return vehicleLuggageCapacity;
+    }
+
+    public void setVehicleLuggageCapacity(Integer vehicleLuggageCapacity) {
+        this.vehicleLuggageCapacity = vehicleLuggageCapacity;
     }
 
     public LocalDate getVehicleRoadtaxexpiry() {

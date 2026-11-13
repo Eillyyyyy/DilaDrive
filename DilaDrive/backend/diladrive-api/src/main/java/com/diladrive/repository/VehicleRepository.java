@@ -15,6 +15,14 @@ public interface VehicleRepository
 
     List<Vehicle> findByVehicleStatusIgnoreCase(String status);
 
+    long countByVehicleStatusIgnoreCase(String status);
+
+    boolean existsByVehiclePlatenoIgnoreCase(String vehiclePlateno);
+
+    boolean existsByVehiclePlatenoIgnoreCaseAndVehicleIdNot(
+            String vehiclePlateno,
+            Long vehicleId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select v from Vehicle v where v.vehicleId = :id")
     Optional<Vehicle> findByIdForUpdate(@Param("id") Long id);

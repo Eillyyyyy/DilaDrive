@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'theme/app_theme.dart';
 import 'screens/auth/login.dart';
 import 'screens/auth/register.dart';
 
@@ -15,6 +16,7 @@ class DilaDriveApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'DilaDrive',
+      theme: AppTheme.lightTheme,
 
       // Page pertama
       home: const LoginPage(),

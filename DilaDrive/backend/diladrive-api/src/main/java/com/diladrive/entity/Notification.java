@@ -13,29 +13,30 @@ public class Notification {
     @Column(name = "notification_id")
     private Long notificationId;
 
-    @Column(name = "recipient_role", nullable = false, length = 20)
-    private String recipientRole = "DRIVER";
+    @Column(name = "recipient_role", length = 20)
+    private String recipientRole;
 
-    @Column(name = "recipient_id", nullable = false)
+    @Column(name = "recipient_id")
     private Long recipientId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "driver_id")
     private Driver driver;
 
-    @Column(name = "title", nullable = false, length = 160)
+    @Column(name = "notification_title", nullable = false, length = 160)
     private String title;
 
-    @Column(name = "message", nullable = false)
+    @Column(name = "notification_message", nullable = false, length = 2000)
     private String message;
 
     @Column(name = "notification_type", length = 50)
     private String notificationType;
 
-    @Column(name = "is_read", nullable = false)
+    @Convert(converter = NotificationStatusConverter.class)
+    @Column(name = "notification_status", nullable = false, length = 24)
     private boolean read;
 
-    @Column(name = "sent_at", nullable = false)
+    @Column(name = "notification_createdat", nullable = false)
     private LocalDateTime sentAt;
 
     @PrePersist

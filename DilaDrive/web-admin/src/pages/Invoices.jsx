@@ -1,39 +1,15 @@
 import DataTable from "../components/DataTable";
 
-const documents = [
-  {
-    id: "INV-001",
-    customer: "Aina Logistics",
-    type: "Invoice",
-    amount: "RM 280",
-    status: "Approved",
-  },
-  {
-    id: "PO-001",
-    customer: "Maju Jaya Enterprise",
-    type: "Purchase Order",
-    amount: "RM 420",
-    status: "Pending",
-  },
-  {
-    id: "REC-001",
-    customer: "Aina Logistics",
-    type: "Receipt",
-    amount: "RM 280",
-    status: "Completed",
-  },
-];
-
 export default function Invoices() {
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
+    <div className="admin-page">
+      <div className="admin-page-header">
         <div>
-          <h2 className="text-2xl font-bold">
+          <h1 className="admin-page-title">
             Financial Documents
-          </h2>
+          </h1>
 
-          <p className="text-slate-500">
+          <p className="admin-page-description">
             Manage invoices, purchase orders and receipts.
           </p>
         </div>
@@ -54,9 +30,8 @@ export default function Invoices() {
       </div>
 
       <DataTable
-        rows={documents}
+        rows={[]}
         columns={[
-          { key: "id", label: "Document ID" },
           { key: "customer", label: "Customer" },
           { key: "type", label: "Document Type" },
           { key: "amount", label: "Amount" },

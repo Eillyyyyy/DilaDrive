@@ -35,6 +35,15 @@ public class Customer {
     @Column(name = "cust_status")
     private String custStatus;
 
+    @Column(name = "cust_companyname", length = 150)
+    private String companyName;
+
+    @Column(name = "company_registration_number", length = 30)
+    private String companyRegistrationNumber;
+
+    @Column(name = "cust_profile_image", columnDefinition = "TEXT")
+    private String profileImage;
+
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Column(name = "cust_password")
     private String custPassword;
@@ -88,6 +97,26 @@ public class Customer {
 
     public void setCustStatus(String custStatus) {
         this.custStatus = custStatus;
+    }
+
+    public String getCompanyName() {
+        return companyName;
+    }
+
+    public void setCompanyName(String companyName) {
+        this.companyName = companyName;
+    }
+
+    public String getCompanyRegistrationNumber() {
+        return companyRegistrationNumber;
+    }
+
+    public String getProfileImage() { return profileImage; }
+
+    public void setProfileImage(String profileImage) { this.profileImage = profileImage; }
+
+    public void setCompanyRegistrationNumber(String companyRegistrationNumber) {
+        this.companyRegistrationNumber = companyRegistrationNumber;
     }
 
     public String getCustPassword() {

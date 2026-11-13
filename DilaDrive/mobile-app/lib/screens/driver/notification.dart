@@ -1,125 +1,242 @@
 import 'package:flutter/material.dart';
 
-class DriverNotificationPage extends StatelessWidget {
-  const DriverNotificationPage({super.key});
+import '../../models/customer_notification.dart';
+import '../../models/mobile_user.dart';
+import '../../services/driver_notification_service.dart';
+import '../../theme/app_theme.dart';
+import '../auth/login.dart';
+
+class DriverNotificationPage extends StatefulWidget {
+  const DriverNotificationPage({super.key, required this.driver});
+  final MobileUser driver;
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+  State<DriverNotificationPage> createState() => _DriverNotificationPageState();
+}
 
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const SizedBox(height: 20),
+class _DriverNotificationPageState extends State<DriverNotificationPage> {
+  final DriverNotificationService _service = DriverNotificationService();
+  late Future<List<CustomerNotification>> _notifications;
 
-          const Text(
-            "Notifications",
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+  @override
+  void initState() {
+    super.initState();
+    _notifications = _service.getNotifications(widget.driver.id);
+  }
 
-          const SizedBox(height: 20),
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
 
-          _notificationCard(
-            icon: Icons.local_shipping,
-            iconColor: Colors.orange,
-            title: "New Trip Assigned",
-            message:
-            "Booking BK-2026-001 has been assigned to you.",
-            time: "5 minutes ago",
-          ),
+  Future<void> _refresh() async {
+    final future = _service.getNotifications(widget.driver.id);
+    setState(() {
+      _notifications = future;
+    });
+    try {
+      await future;
+    } catch (_) {
+      // The FutureBuilder displays the retryable error state.
+    }
+  }
 
-          const SizedBox(height: 12),
+  Future<void> _markRead(CustomerNotification notification) async {
+    try {
+      await _service.markAsRead(notification.id);
+      await _refresh();
+    } on DriverNotificationException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+      if (error.requiresLogin) _openLogin();
+    }
+  }
 
-          _notificationCard(
-            icon: Icons.update,
-            iconColor: Colors.blue,
-            title: "Trip Status Updated",
-            message:
-            "Booking BK-2026-002 status changed to On The Way.",
-            time: "30 minutes ago",
-          ),
-
-          const SizedBox(height: 12),
-
-          _notificationCard(
-            icon: Icons.check_circle,
-            iconColor: Colors.green,
-            title: "Trip Completed",
-            message:
-            "Booking BK-2026-003 completed successfully.",
-            time: "1 hour ago",
-          ),
-        ],
-      ),
+  void _openLogin() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginPage()),
+      (_) => false,
     );
   }
 
-  Widget _notificationCard({
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String message,
-    required String time,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            backgroundColor:
-            iconColor.withValues(alpha: 0.15),
-            child: Icon(
-              icon,
-              color: iconColor,
-            ),
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: AppTheme.lightBlueBackground,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          title: const Text('Notifications'),
+        ),
+        body: FutureBuilder<List<CustomerNotification>>(
+          future: _notifications,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              final error = snapshot.error;
+              final requiresLogin =
+                  error is DriverNotificationException && error.requiresLogin;
+              return _MessageState(
+                icon: Icons.cloud_off_outlined,
+                message: error is DriverNotificationException
+                    ? error.message
+                    : 'Please check your connection and try again.',
+                action: FilledButton.tonal(
+                  onPressed: requiresLogin ? _openLogin : _refresh,
+                  child: Text(requiresLogin ? 'Sign in' : 'Try again'),
+                ),
+              );
+            }
+
+            final notifications =
+                snapshot.data ?? const <CustomerNotification>[];
+            final unread = notifications.where((item) => !item.read).length;
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: notifications.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(24),
+                      children: const [
+                        SizedBox(height: 100),
+                        Icon(Icons.notifications_none_rounded,
+                            size: 48, color: AppTheme.secondarySkyBlue),
+                        SizedBox(height: 14),
+                        Text('No notifications yet',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.w700)),
+                        SizedBox(height: 6),
+                        Text('Trip and assignment updates will appear here.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: AppTheme.secondaryText)),
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(16),
+                      itemCount: notifications.length + 1,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(unread == 0
+                                ? 'All notifications have been read'
+                                : '$unread unread ${unread == 1 ? 'notification' : 'notifications'}'),
+                          );
+                        }
+                        final notification = notifications[index - 1];
+                        return _NotificationCard(
+                          notification: notification,
+                          onTap: notification.read
+                              ? null
+                              : () => _markRead(notification),
+                        );
+                      },
+                    ),
+            );
+          },
+        ),
+      );
+}
+
+class _NotificationCard extends StatelessWidget {
+  const _NotificationCard({required this.notification, required this.onTap});
+
+  final CustomerNotification notification;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              CircleAvatar(
+                backgroundColor: (notification.read
+                        ? AppTheme.secondaryText
+                        : AppTheme.secondarySkyBlue)
+                    .withValues(alpha: .13),
+                child: Icon(
+                  notification.read
+                      ? Icons.notifications_none
+                      : Icons.notifications_active_outlined,
+                  color: notification.read
+                      ? AppTheme.secondaryText
+                      : AppTheme.primaryNavy,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(notification.title,
+                          style: TextStyle(
+                              fontWeight: notification.read
+                                  ? FontWeight.w500
+                                  : FontWeight.w700)),
+                      const SizedBox(height: 4),
+                      Text(notification.message),
+                      if (notification.sentAt != null) ...[
+                        const SizedBox(height: 7),
+                        Text(
+                          _sentTime(context, notification.sentAt!),
+                          style: const TextStyle(
+                              color: AppTheme.secondaryText, fontSize: 12),
+                        ),
+                      ],
+                      if (!notification.read) ...[
+                        const SizedBox(height: 6),
+                        const Text('Tap to mark as read',
+                            style: TextStyle(
+                                color: AppTheme.primaryNavy, fontSize: 12)),
+                      ],
+                    ]),
+              ),
+              if (!notification.read)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8, top: 5),
+                  child: Icon(Icons.circle,
+                      size: 9, color: AppTheme.secondarySkyBlue),
+                ),
+            ]),
           ),
+        ),
+      );
+}
 
-          const SizedBox(width: 12),
+String _sentTime(BuildContext context, DateTime sentAt) {
+  final localTime = sentAt.toLocal();
+  final localizations = MaterialLocalizations.of(context);
+  return '${localizations.formatMediumDate(localTime)}, '
+      '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(localTime))}';
+}
 
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+class _MessageState extends StatelessWidget {
+  const _MessageState(
+      {required this.icon, required this.message, required this.action});
 
-                const SizedBox(height: 4),
+  final IconData icon;
+  final String message;
+  final Widget action;
 
-                Text(
-                  message,
-                  style: const TextStyle(
-                    color: Colors.black87,
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                Text(
-                  time,
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 42, color: AppTheme.secondaryText),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            action,
+          ]),
+        ),
+      );
 }

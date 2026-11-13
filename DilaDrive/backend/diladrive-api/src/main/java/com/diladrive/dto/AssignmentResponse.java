@@ -1,7 +1,7 @@
 package com.diladrive.dto;
 
-import com.diladrive.entity.Assignment;
-
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -12,34 +12,19 @@ public record AssignmentResponse(
         String customer,
         LocalDate tripDate,
         LocalTime pickupTime,
+        String tripType,
+        String flightNo,
         String pickupAddress,
         String destinationAddress,
         Integer passengerCount,
+        Integer luggageCount,
+        String luggageSize,
         Long driverId,
         String driverName,
         Long vehicleId,
         String vehiclePlate,
         String assignmentStatus,
-        LocalDateTime assignedAt,
-        boolean notificationSent) {
-
-    public static AssignmentResponse from(Assignment assignment) {
-        var booking = assignment.getBooking();
-        return new AssignmentResponse(
-                assignment.getAssignmentId(),
-                booking.getBookingId(),
-                "Customer #" + booking.getCustId(),
-                booking.getBookingTripdate(),
-                booking.getBookingPickuptime(),
-                booking.getBookingPickupaddress(),
-                booking.getBookingDestinationaddress(),
-                booking.getBookingPassengercount(),
-                assignment.getDriver().getDriverId(),
-                assignment.getDriver().getDriverName(),
-                assignment.getVehicle().getVehicleId(),
-                assignment.getVehicle().getVehiclePlateno(),
-                assignment.getAssignmentStatus(),
-                assignment.getAssignedAt(),
-                true);
-    }
+        @JsonProperty("assignmentDate")
+        @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
+        LocalDateTime assignmentDate) {
 }

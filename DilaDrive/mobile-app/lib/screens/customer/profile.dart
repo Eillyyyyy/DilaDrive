@@ -1,232 +1,343 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'dart:typed_data';
 
+import '../../models/customer_profile.dart';
+import '../../models/mobile_user.dart';
+import '../../services/auth_service.dart' show AuthService;
+import '../../services/customer_profile_service.dart';
+import '../../theme/app_theme.dart';
 import '../auth/login.dart';
+import 'bookings.dart';
+import 'business_documents.dart';
 import 'update_account.dart';
 import 'view_account.dart';
 
-class ProfilePage extends StatelessWidget {
-  const ProfilePage({super.key});
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({
+    super.key,
+    required this.customer,
+    this.onCustomerUpdated,
+  });
+
+  final MobileUser customer;
+  final ValueChanged<MobileUser>? onCustomerUpdated;
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  final CustomerProfileService _service = CustomerProfileService();
+  late Future<CustomerProfile> _profileFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _profileFuture = _service.getMyProfile();
+  }
+
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reload() async {
+    final future = _service.getMyProfile();
+    setState(() {
+      _profileFuture = future;
+    });
+    try {
+      await future;
+    } catch (_) {
+      // The FutureBuilder provides the retryable state.
+    }
+  }
+
+  Future<void> _editProfile(CustomerProfile profile) async {
+    final updated = await Navigator.push<CustomerProfile>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UpdateAccountPage(profile: profile),
+      ),
+    );
+    if (updated != null && mounted) {
+      widget.onCustomerUpdated?.call(
+        MobileUser(
+          id: updated.id,
+          name: updated.name,
+          email: updated.email,
+          phone: updated.phone,
+          status: updated.status,
+          role: widget.customer.role,
+        ),
+      );
+      setState(() {
+        _profileFuture = Future.value(updated);
+      });
+    }
+  }
+
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+            'You will need to sign in again to access your account.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Stay'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    final authService = AuthService();
+    await authService.logout();
+    authService.dispose();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF701A35);
-
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
-
+      backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          "Profile",
-          style: TextStyle(
-            color: Colors.black87,
-            fontWeight: FontWeight.bold,
+        title: const Text('Profile'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh profile',
+            onPressed: _reload,
+            icon: const Icon(Icons.refresh_rounded),
           ),
-        ),
+        ],
       ),
+      body: FutureBuilder<CustomerProfile>(
+        future: _profileFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError || !snapshot.hasData) {
+            final error = snapshot.error;
+            final needsLogin =
+                error is CustomerProfileException && error.requiresLogin;
+            return _ProfileMessage(
+              message: error is CustomerProfileException
+                  ? error.message
+                  : 'Your account details could not be loaded.',
+              action: needsLogin ? 'Sign in' : 'Retry',
+              onPressed: needsLogin
+                  ? () => Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute<void>(
+                            builder: (_) => const LoginPage()),
+                        (_) => false,
+                      )
+                  : _reload,
+            );
+          }
 
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.only(
-                top: 30,
-                bottom: 30,
-              ),
-              decoration: const BoxDecoration(
-                color: primaryColor,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(30),
-                  bottomRight: Radius.circular(30),
+          final profile = snapshot.data!;
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+            children: [
+              _ProfileHeader(profile: profile),
+              const SizedBox(height: 20),
+              _MenuItem(
+                icon: Icons.person_outline,
+                title: 'View account',
+                onTap: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ViewAccountPage(profile: profile),
+                  ),
                 ),
               ),
-              child: const Column(
-                children: [
-                  CircleAvatar(
-                    radius: 45,
-                    backgroundColor: Colors.white,
-                    child: Icon(
-                      Icons.person,
-                      size: 50,
-                      color: primaryColor,
-                    ),
-                  ),
-
-                  SizedBox(height: 15),
-
-                  Text(
-                    "Nur Ayla Izaty",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-
-                  SizedBox(height: 5),
-
-                  Text(
-                    "Corporate Customer",
-                    style: TextStyle(
-                      color: Colors.white70,
-                    ),
-                  ),
-
-                  SizedBox(height: 5),
-
-                  Text(
-                    "customer@email.com",
-                    style: TextStyle(
-                      color: Colors.white70,
-                    ),
-                  ),
-                ],
+              _MenuItem(
+                icon: Icons.edit_outlined,
+                title: 'Update account',
+                onTap: () => _editProfile(profile),
               ),
+              _MenuItem(
+                icon: Icons.history_rounded,
+                title: 'Booking history',
+                onTap: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MyBookingsPage(customer: widget.customer),
+                  ),
+                ),
+              ),
+              if (profile.type?.toUpperCase() == 'COMPANY')
+                _MenuItem(
+                  icon: Icons.description_outlined,
+                  title: 'Business documents',
+                  onTap: () => Navigator.push<void>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const BusinessDocumentsPage(),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 5),
+              const SizedBox(height: 7),
+              _MenuItem(
+                icon: Icons.logout,
+                title: 'Sign out',
+                destructive: true,
+                onTap: _logout,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader({required this.profile});
+
+  final CustomerProfile profile;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [AppTheme.primaryNavy, AppTheme.navyGradientEnd],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 34,
+              backgroundImage: profile.profileImage == null ? null : MemoryImage(_profileImageBytes(profile.profileImage!)),
+              backgroundColor: Colors.white,
+              child: profile.profileImage == null ? const Icon(Icons.person, size: 38, color: AppTheme.primaryNavy) : null,
             ),
-
-            const SizedBox(height: 20),
-
-            Padding(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 20),
+            const SizedBox(width: 15),
+            Expanded(
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _menuCard(
-                    context,
-                    icon: Icons.person_outline,
-                    title: "View Account",
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                          const ViewAccountPage(),
-                        ),
-                      );
-                    },
-                  ),
-
-                  _menuCard(
-                    context,
-                    icon: Icons.edit_outlined,
-                    title: "Update Account",
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                          const UpdateAccountPage(),
-                        ),
-                      );
-                    },
-                  ),
-
-                  _menuCard(
-                    context,
-                    icon: Icons.lock_outline,
-                    title: "Change Password",
-                    onTap: () {},
-                  ),
-
-                  _menuCard(
-                    context,
-                    icon: Icons.history,
-                    title: "Booking History",
-                    onTap: () {},
-                  ),
-
-                  _menuCard(
-                    context,
-                    icon: Icons.help_outline,
-                    title: "Help & Support",
-                    onTap: () {},
-                  ),
-
-                  _menuCard(
-                    context,
-                    icon: Icons.info_outline,
-                    title: "About DilaDrive",
-                    onTap: () {},
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius:
-                      BorderRadius.circular(18),
-                    ),
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.logout,
-                        color: Colors.red,
-                      ),
-                      title: const Text(
-                        "Logout",
-                        style: TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      trailing: const Icon(
-                        Icons.arrow_forward_ios,
-                        size: 16,
-                        color: Colors.red,
-                      ),
-                      onTap: () {
-                        Navigator.pushAndRemoveUntil(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                            const LoginPage(),
-                          ),
-                              (route) => false,
-                        );
-                      },
+                  Text(
+                    profile.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 4),
+                  Text(
+                    _customerTypeLabel(profile.type),
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    profile.email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
                 ],
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
+      );
+}
 
-  static Widget _menuCard(
-      BuildContext context, {
-        required IconData icon,
-        required String title,
-        required VoidCallback onTap,
-      }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: const Color(0xFFF3E8ED),
-          child: Icon(
-            icon,
-            color: const Color(0xFF701A35),
+Uint8List _profileImageBytes(String value) => base64Decode(value.substring(value.indexOf(',') + 1));
+
+String _customerTypeLabel(String? type) => switch (type?.toUpperCase()) {
+      'NORMAL' => 'Individual customer',
+      'COMPANY' => 'Corporate customer',
+      _ => type == null || type.trim().isEmpty ? 'Customer' : type,
+    };
+
+class _MenuItem extends StatelessWidget {
+  const _MenuItem({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        margin: const EdgeInsets.only(bottom: 10),
+        child: ListTile(
+          leading: CircleAvatar(
+            backgroundColor:
+                destructive ? Colors.red.shade50 : AppTheme.paleBlue,
+            child: Icon(
+              icon,
+              color: destructive ? Colors.red : AppTheme.primaryNavy,
+            ),
+          ),
+          title: Text(
+            title,
+            style: TextStyle(
+              color: destructive ? Colors.red : AppTheme.mainText,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: onTap,
+        ),
+      );
+}
+
+class _ProfileMessage extends StatelessWidget {
+  const _ProfileMessage({
+    required this.message,
+    required this.action,
+    required this.onPressed,
+  });
+
+  final String message;
+  final String action;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.person_off_outlined,
+                  size: 42, color: AppTheme.secondaryText),
+              const SizedBox(height: 12),
+              Text(message, textAlign: TextAlign.center),
+              const SizedBox(height: 14),
+              FilledButton.tonal(onPressed: onPressed, child: Text(action)),
+            ],
           ),
         ),
-        title: Text(title),
-        trailing: const Icon(
-          Icons.arrow_forward_ios,
-          size: 16,
-        ),
-        onTap: onTap,
-      ),
-    );
-  }
+      );
 }

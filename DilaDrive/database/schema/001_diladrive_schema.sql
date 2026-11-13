@@ -6,7 +6,11 @@ CREATE TABLE IF NOT EXISTS admin (
   full_name VARCHAR(120) NOT NULL,
   email VARCHAR(160) UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  admin_role VARCHAR(20) NOT NULL DEFAULT 'ADMIN',
+  admin_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  admin_createdat TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  admin_updatedat TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS customer (
@@ -34,8 +38,15 @@ CREATE TABLE IF NOT EXISTS vehicle (
   registration_no VARCHAR(30) UNIQUE NOT NULL,
   vehicle_type VARCHAR(60) NOT NULL,
   capacity_kg NUMERIC(10,2),
-  vehicle_status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE'
+  vehicle_status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE',
+  driver_id BIGINT,
+  CONSTRAINT fk_vehicle_driver
+    FOREIGN KEY (driver_id)
+    REFERENCES driver(driver_id)
+    ON DELETE SET NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_driver ON vehicle(driver_id);
 
 CREATE TABLE IF NOT EXISTS booking (
   booking_id BIGSERIAL PRIMARY KEY,
@@ -54,7 +65,7 @@ CREATE TABLE IF NOT EXISTS driver_assignment (
   booking_id BIGINT NOT NULL REFERENCES booking(booking_id),
   driver_id BIGINT NOT NULL REFERENCES driver(driver_id),
   vehicle_id BIGINT NOT NULL REFERENCES vehicle(vehicle_id),
-  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  assignment_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   assignment_status VARCHAR(24) NOT NULL DEFAULT 'ASSIGNED'
 );
 
@@ -66,7 +77,7 @@ CREATE TABLE IF NOT EXISTS trip_status (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS verification_photo (
+CREATE TABLE IF NOT EXISTS assignment_verification_photo (
   photo_id BIGSERIAL PRIMARY KEY,
   assignment_id BIGINT NOT NULL REFERENCES driver_assignment(assignment_id),
   photo_type VARCHAR(20) NOT NULL CHECK (photo_type IN ('PICKUP','DROP')),
@@ -121,13 +132,14 @@ CREATE TABLE IF NOT EXISTS receipt (
 
 CREATE TABLE IF NOT EXISTS notification (
   notification_id BIGSERIAL PRIMARY KEY,
-  recipient_role VARCHAR(20) NOT NULL,
-  recipient_id BIGINT NOT NULL,
-  title VARCHAR(160) NOT NULL,
-  message TEXT NOT NULL,
+  recipient_role VARCHAR(20),
+  recipient_id BIGINT,
+  driver_id BIGINT REFERENCES driver(driver_id),
+  notification_title VARCHAR(160) NOT NULL,
+  notification_message TEXT NOT NULL,
   notification_type VARCHAR(50),
-  is_read BOOLEAN NOT NULL DEFAULT FALSE,
-  sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  notification_status VARCHAR(24) NOT NULL DEFAULT 'UNREAD',
+  notification_createdat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_booking_customer ON booking(customer_id);

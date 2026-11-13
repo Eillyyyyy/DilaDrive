@@ -25,16 +25,16 @@ public class Assignment {
     @JoinColumn(name = "vehicle_id", nullable = false)
     private Vehicle vehicle;
 
-    @Column(name = "assigned_at", nullable = false)
-    private LocalDateTime assignedAt;
+    @Column(name = "assignment_date", nullable = false)
+private LocalDateTime assignmentDate;
 
     @Column(name = "assignment_status", nullable = false, length = 24)
     private String assignmentStatus;
 
     @PrePersist
     void setDefaults() {
-        if (assignedAt == null) {
-            assignedAt = LocalDateTime.now();
+        if (assignmentDate == null) {
+            assignmentDate = LocalDateTime.now();
         }
         if (assignmentStatus == null) {
             assignmentStatus = "ASSIGNED";
@@ -73,12 +73,12 @@ public class Assignment {
         this.vehicle = vehicle;
     }
 
-    public LocalDateTime getAssignedAt() {
-        return assignedAt;
+    public LocalDateTime getAssignmentDate() {
+        return assignmentDate;
     }
 
-    public void setAssignedAt(LocalDateTime assignedAt) {
-        this.assignedAt = assignedAt;
+    public void setAssignmentDate(LocalDateTime assignmentDate) {
+        this.assignmentDate = assignmentDate;
     }
 
     public String getAssignmentStatus() {

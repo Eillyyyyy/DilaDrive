@@ -18,3 +18,4 @@ mobile/.flutter-plugins*
 .env
 *.env.local
 backend/uploads/
+backend/diladrive-api/uploads/

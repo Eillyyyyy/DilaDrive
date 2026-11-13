@@ -4,9 +4,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../models/mobile_user.dart';
+import 'api_http_client.dart';
+import 'auth_exception.dart';
+import 'mobile_session.dart';
+
+export '../models/mobile_user.dart';
+export 'auth_exception.dart';
 
 class AuthService {
-  AuthService({http.Client? client}) : _client = client ?? http.Client();
+  AuthService({http.Client? client}) : _client = client ?? createApiHttpClient();
 
   final http.Client _client;
 
@@ -14,7 +21,24 @@ class AuthService {
     _client.close();
   }
 
-  Future<AuthenticatedUser> login({
+  Future<void> logout() async {
+    try {
+      if (MobileSession.isAuthenticated) {
+        await _client
+            .post(
+              Uri.parse('${AppConfig.apiBaseUrl}/api/auth/logout'),
+              headers: MobileSession.headers,
+            )
+            .timeout(const Duration(seconds: 5));
+      }
+    } catch (_) {
+      // Always end the local session, even if the server cannot be reached.
+    } finally {
+      MobileSession.clear();
+    }
+  }
+
+  Future<MobileUser> login({
     required String email,
     required String password,
     required String role,
@@ -23,7 +47,7 @@ class AuthService {
     try {
       response = await _client
           .post(
-            Uri.parse('${AppConfig.apiBaseUrl}/auth/mobile/login'),
+            Uri.parse('${AppConfig.apiBaseUrl}/api/auth/mobile/login'),
             headers: const {'Content-Type': 'application/json'},
             body: jsonEncode({
               'email': email.trim(),
@@ -43,11 +67,14 @@ class AuthService {
     }
 
     if (response.statusCode == 401) {
-      throw const AuthException('Invalid email or password.');
+      MobileSession.clear();
+      throw const AuthException('Invalid email or password');
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw AuthException(_serverErrorMessage(response));
     }
+
+    MobileSession.storeResponseCookies(response.headers);
 
     final Object? payload;
     try {
@@ -59,23 +86,52 @@ class AuthService {
       throw const AuthException('The server returned an invalid response.');
     }
 
-    final userId = payload['id'];
-    final name = payload['name'];
-    final responseEmail = payload['email'];
-    final responseRole = payload['role'];
-    if (userId == null ||
-        name is! String ||
-        responseEmail is! String ||
-        responseRole is! String) {
-      throw const AuthException('The server returned incomplete account data.');
+    try {
+      return MobileUser.fromJson(payload);
+    } on FormatException catch (exception) {
+      throw AuthException(exception.message);
+    }
+  }
+
+  Future<void> registerCustomer({
+    required String name,
+    required String email,
+    required String phone,
+    required String type,
+    String? companyName,
+    String? companyRegistrationNumber,
+    required String password,
+  }) async {
+    late final http.Response response;
+    try {
+      response = await _client
+          .post(
+            Uri.parse('${AppConfig.apiBaseUrl}/api/auth/mobile/register'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'name': name.trim(),
+              'email': email.trim(),
+              'phone': phone.trim().isEmpty ? null : phone.trim(),
+              'type': type,
+              'companyName': companyName?.trim(),
+              'companyRegistrationNumber': companyRegistrationNumber?.trim(),
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw const AuthException(
+        'The server took too long to respond. Please try again.',
+      );
+    } on http.ClientException {
+      throw const AuthException(
+        'Cannot connect to DilaDrive. Check that the API and database are running and verify the API URL.',
+      );
     }
 
-    return AuthenticatedUser(
-      id: userId.toString(),
-      name: name,
-      email: responseEmail,
-      role: responseRole,
-    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AuthException(_serverErrorMessage(response));
+    }
   }
 
   String _serverErrorMessage(http.Response response) {
@@ -85,37 +141,16 @@ class AuthService {
         return payload;
       }
       if (payload is Map<String, dynamic>) {
-        final message = payload['message'] ?? payload['error'];
+        final message =
+            payload['message'] ?? payload['error'] ?? payload['detail'];
         if (message is String && message.isNotEmpty) {
           return message;
         }
       }
     } on FormatException {
-      // Use a safe generic message for non-JSON server errors.
+      final text = response.body.trim();
+      if (text.isNotEmpty) return text;
     }
     return 'Login failed (${response.statusCode}). Please try again later.';
   }
-}
-
-class AuthenticatedUser {
-  const AuthenticatedUser({
-    required this.id,
-    required this.name,
-    required this.email,
-    required this.role,
-  });
-
-  final String id;
-  final String name;
-  final String email;
-  final String role;
-}
-
-class AuthException implements Exception {
-  const AuthException(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
 }
