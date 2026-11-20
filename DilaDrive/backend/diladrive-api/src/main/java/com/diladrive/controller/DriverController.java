@@ -1,6 +1,10 @@
 package com.diladrive.controller;
 
+import com.diladrive.security.AdminSession;
+
 import com.diladrive.dto.DriverCreateRequest;
+import com.diladrive.dto.DriverDetailsResponse;
+import com.diladrive.dto.DriverUpdateRequest;
 import com.diladrive.dto.DriverProfileResponse;
 import com.diladrive.dto.DriverProfileUpdateRequest;
 import com.diladrive.entity.Driver;
@@ -38,6 +42,18 @@ public class DriverController {
         return driverService.updateProfile(requireDriverId(request), profile);
     }
 
+    @PostMapping("/me/password")
+    public ResponseEntity<?> changeMyPassword(@RequestBody com.diladrive.dto.ChangePasswordRequest body,
+            HttpServletRequest request) {
+        Long id = requireDriverId(request);
+        try {
+            driverService.changeDriverPassword(id, body);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("message", exception.getMessage()));
+        }
+    }
+
     @GetMapping
     public List<Driver> getAllDrivers(HttpServletRequest request) {
         requireAdminId(request);
@@ -66,30 +82,49 @@ public class DriverController {
         }
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<?> updateDriver(
-            @PathVariable Long id,
-            @RequestBody Driver driver,
-            HttpServletRequest request) {
+    // Form choices are API metadata, separate from persisted driver/vehicle records.
+    @GetMapping("/options")
+    public java.util.Map<String, List<String>> getFormOptions(HttpServletRequest request) {
+        requireAdminId(request);
+        return java.util.Map.of(
+                "driverTypes", List.of("Company Driver", "Associate Driver"),
+                "createAvailability", List.of("Available", "Busy", "Unavailable"),
+                "availability", List.of("Available", "Busy", "Unavailable"),
+                "accountStatuses", List.of("Active", "Disabled"),
+                "vehicleStatuses", List.of("Available", "Maintenance", "Inactive"));
+    }
+
+    @PostMapping("/{id}/vehicle")
+    public ResponseEntity<?> registerMissingVehicle(@PathVariable Long id,
+            @Valid @RequestBody com.diladrive.dto.VehicleCreateRequest vehicle, HttpServletRequest request) {
         requireAdminId(request);
         try {
-            return ResponseEntity.ok(driverService.updateDriver(id, driver));
-        } catch (IllegalArgumentException exception) {
-            return ResponseEntity.badRequest().body(exception.getMessage());
+            return ResponseEntity.status(HttpStatus.CREATED).body(driverService.registerMissingVehicle(id, vehicle));
+        } catch (DataIntegrityViolationException exception) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body("Vehicle plate or driver relationship already exists.");
         }
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteDriver(
+    @GetMapping("/{id}")
+    public DriverDetailsResponse getDriver(@PathVariable Long id, HttpServletRequest request) {
+        requireAdminId(request);
+        return driverService.getDriver(id);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateDriver(
             @PathVariable Long id,
+            @Valid @RequestBody DriverUpdateRequest driver,
             HttpServletRequest request) {
         requireAdminId(request);
         try {
-            driverService.deleteDriver(id);
-            return ResponseEntity.noContent().build();
+            return ResponseEntity.ok(driverService.updateDriverDetails(id, driver));
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.badRequest().body(exception.getMessage());
         } catch (DataIntegrityViolationException exception) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body("Driver cannot be deleted while referenced by bookings or assignments.");
+                    .body("Driver email or vehicle registration number already exists.");
         }
     }
 
@@ -109,12 +144,6 @@ public class DriverController {
     }
 
     private static Long requireAdminId(HttpServletRequest request) {
-        var session = request.getSession(false);
-        Object adminId = session == null ? null : session.getAttribute("adminId");
-        if (adminId instanceof Long id) {
-            return id;
-        }
-        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
-                "Please sign in as an admin.");
+        return AdminSession.requireAdminId(request);
     }
 }

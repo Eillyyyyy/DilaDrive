@@ -153,6 +153,11 @@ class _DriverTripDetailsPageState extends State<DriverTripDetailsPage> {
             if (trip.flightNo?.trim().isNotEmpty == true)
               'Flight number': trip.flightNo!.trim(),
             'Passengers': trip.passengerCount?.toString() ?? 'Not provided',
+            if (trip.luggageUnits != null)
+              'Luggage points': '${trip.luggageUnits}',
+            if (trip.smallCount != null)
+              'Small / medium / large':
+                  '${trip.smallCount} / ${trip.mediumCount ?? 0} / ${trip.largeCount ?? 0}',
             if (trip.luggageCount != null)
               'Luggage': [
                 '${trip.luggageCount}',

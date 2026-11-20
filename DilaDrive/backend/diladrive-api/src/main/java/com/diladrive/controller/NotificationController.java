@@ -63,13 +63,6 @@ public class NotificationController {
         return notificationService.markAsReadByOwner(id, role, recipientId);
     }
 
-    @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteNotification(@PathVariable Long id, HttpServletRequest request) {
-        requireAdmin(request);
-        notificationService.deleteNotification(id);
-    }
-
     private static Long requireAdmin(HttpServletRequest request) {
         var session = request.getSession(false);
         Object adminId = session == null ? null : session.getAttribute("adminId");

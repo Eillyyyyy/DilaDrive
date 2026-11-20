@@ -7,7 +7,7 @@ class AppConfig {
 
   static String get apiBaseUrl {
     final configured = _configuredApiBaseUrl.trim();
-    final defaultUrl = defaultTargetPlatform == TargetPlatform.android
+    final defaultUrl = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
         ? 'http://10.0.2.2:8080'
         : 'http://localhost:8080';
 

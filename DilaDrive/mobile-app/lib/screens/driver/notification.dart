@@ -7,15 +7,24 @@ import '../../theme/app_theme.dart';
 import '../auth/login.dart';
 
 class DriverNotificationPage extends StatefulWidget {
-  const DriverNotificationPage({super.key, required this.driver});
+  const DriverNotificationPage({
+    super.key,
+    required this.driver,
+    this.notificationService,
+    this.onInboxChanged,
+  });
   final MobileUser driver;
+  final DriverNotificationService? notificationService;
+  final VoidCallback? onInboxChanged;
 
   @override
   State<DriverNotificationPage> createState() => _DriverNotificationPageState();
 }
 
 class _DriverNotificationPageState extends State<DriverNotificationPage> {
-  final DriverNotificationService _service = DriverNotificationService();
+  late final _ownsService = widget.notificationService == null;
+  late final _service =
+      widget.notificationService ?? DriverNotificationService();
   late Future<List<CustomerNotification>> _notifications;
 
   @override
@@ -26,7 +35,7 @@ class _DriverNotificationPageState extends State<DriverNotificationPage> {
 
   @override
   void dispose() {
-    _service.dispose();
+    if (_ownsService) _service.dispose();
     super.dispose();
   }
 
@@ -37,6 +46,7 @@ class _DriverNotificationPageState extends State<DriverNotificationPage> {
     });
     try {
       await future;
+      if (mounted) widget.onInboxChanged?.call();
     } catch (_) {
       // The FutureBuilder displays the retryable error state.
     }
@@ -45,6 +55,7 @@ class _DriverNotificationPageState extends State<DriverNotificationPage> {
   Future<void> _markRead(CustomerNotification notification) async {
     try {
       await _service.markAsRead(notification.id);
+      if (!mounted) return;
       await _refresh();
     } on DriverNotificationException catch (error) {
       if (!mounted) return;

@@ -31,6 +31,12 @@ private LocalDateTime assignmentDate;
     @Column(name = "assignment_status", nullable = false, length = 24)
     private String assignmentStatus;
 
+    @Column(name = "scheduled_end_at")
+    private LocalDateTime scheduledEndAt;
+
+    public LocalDateTime getScheduledEndAt() { return scheduledEndAt; }
+    public void setScheduledEndAt(LocalDateTime value) { scheduledEndAt = value; }
+
     @PrePersist
     void setDefaults() {
         if (assignmentDate == null) {

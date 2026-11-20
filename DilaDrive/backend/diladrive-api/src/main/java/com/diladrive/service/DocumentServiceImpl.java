@@ -24,6 +24,8 @@ import java.util.UUID;
 
 @Service
 public class DocumentServiceImpl implements DocumentService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private TripFinanceService tripFinance;
 
     private final DocumentRepository documentRepository;
     private final BookingRepository bookingRepository;
@@ -134,6 +136,7 @@ public class DocumentServiceImpl implements DocumentService {
         quotation.setBookingId(booking.getBookingId());
         quotation.setStatus("DRAFT");
         applyCustomerAndRequest(quotation, customer, request);
+        quotation.setAmount(quotationAmount(booking,request));
         return saveWithGeneratedNumber(quotation);
     }
 
@@ -152,6 +155,7 @@ public class DocumentServiceImpl implements DocumentService {
         quotation.setBookingId(booking.getBookingId());
         quotation.setStatus("DRAFT");
         applyCustomerAndRequest(quotation, customer, request);
+        quotation.setAmount(quotationAmount(booking,request));
         return DocumentDTO.from(documentRepository.save(quotation));
     }
 
@@ -229,20 +233,27 @@ public class DocumentServiceImpl implements DocumentService {
                 throw conflict("An invoice already exists for this booking.");
             }
             if (booking.getBookingTripfare() == null
-                    || booking.getBookingTripfare().signum() <= 0) {
+                    || booking.getBookingTripfare().signum() < 0
+                    || (booking.getBookingTripfare().signum()==0 && booking.getFareSnapshot()==null)) {
                 throw conflict("The completed booking does not have a valid trip fare.");
             }
             customer = findCustomer(booking.getCustId());
         }
 
         Document invoice = new Document();
+        var baseFare = booking.getBookingTripfare();
+        var finalFare = tripFinance == null ? baseFare : tripFinance.finalFare(booking);
+        boolean hasActualCharges = finalFare != null && baseFare != null && finalFare.compareTo(baseFare) != 0;
+        if(sourceDocument!=null && finalFare != null && (booking.getFareSnapshot()!=null || hasActualCharges)
+                && sourceDocument.getAmount().compareTo(finalFare)!=0)
+            throw conflict("The purchase order uses a previous accepted fare. Create an updated quotation and purchase order before invoicing.");
         invoice.setDocumentType(DocumentType.INVOICE);
         invoice.setBookingId(booking.getBookingId());
         invoice.setSourceDocumentId(
                 sourceDocument == null ? null : sourceDocument.getDocumentId());
         invoice.setStatus("ISSUED");
         invoice.setAmount(sourceDocument == null
-                ? booking.getBookingTripfare()
+                ? finalFare
                 : sourceDocument.getAmount());
         applyCustomerSnapshot(invoice, customer);
         invoice.setRemarks(sourceDocument == null
@@ -339,6 +350,15 @@ public class DocumentServiceImpl implements DocumentService {
         applyCustomerSnapshot(document, customer);
         document.setAmount(request.amount());
         document.setRemarks(normalizeRemarks(request.remarks()));
+    }
+
+    private java.math.BigDecimal quotationAmount(Booking booking,QuotationRequest request) {
+        var baseFare = booking.getBookingTripfare();
+        var finalFare = tripFinance == null ? baseFare : tripFinance.finalFare(booking);
+        if (booking.getFareSnapshot()!=null
+                || (finalFare != null && baseFare != null && finalFare.compareTo(baseFare) != 0)) return finalFare;
+        if(request.amount()==null || request.amount().signum()<=0) throw badRequest("Enter a quotation amount greater than zero.");
+        return request.amount();
     }
 
     private void applyCustomerSnapshot(Document document, Customer customer) {

@@ -131,6 +131,9 @@ public class MobileAuthService {
     }
 
     private boolean authenticateDriver(Driver driver, String password) {
+        if (!"ACTIVE".equalsIgnoreCase(driver.getDriverStatus())) {
+            return false;
+        }
         String storedPassword = driver.getDriverPassword();
         if (!passwordService.matches(password, storedPassword)) {
             return false;

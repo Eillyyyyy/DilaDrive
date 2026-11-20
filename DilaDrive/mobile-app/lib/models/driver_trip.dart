@@ -15,6 +15,10 @@ class DriverTrip {
     this.luggageSize,
     this.vehiclePlate,
     this.assignmentDate,
+    this.smallCount,
+    this.mediumCount,
+    this.largeCount,
+    this.luggageUnits,
   });
 
   final int assignmentId;
@@ -32,6 +36,10 @@ class DriverTrip {
   final String? luggageSize;
   final String? vehiclePlate;
   final DateTime? assignmentDate;
+  final int? smallCount;
+  final int? mediumCount;
+  final int? largeCount;
+  final int? luggageUnits;
 
   String get bookingReference => 'BK-${bookingId.toString().padLeft(6, '0')}';
 
@@ -104,6 +112,10 @@ class DriverTrip {
       destinationAddress: _stringValue(json['destinationAddress']),
       passengerCount: _intValue(json['passengerCount']),
       luggageCount: _intValue(json['luggageCount']),
+      smallCount: _intValue(json['smallCount']),
+      mediumCount: _intValue(json['mediumCount']),
+      largeCount: _intValue(json['largeCount']),
+      luggageUnits: _intValue(json['luggageUnits']),
       luggageSize: _stringValue(json['luggageSize']),
       vehiclePlate: _stringValue(json['vehiclePlate']),
       assignmentDate: _dateValue(json['assignmentDate']),

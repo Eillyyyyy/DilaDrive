@@ -4,6 +4,7 @@ import api from "../services/api";
 import {
   Eye,
   Pencil,
+  Luggage,
   Search,
   X,
   Truck,
@@ -17,42 +18,35 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-const STATUSES = ["Available", "In Use", "Maintenance"];
-
-const inputClass =
-  "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-teal-500 focus:ring-4 focus:ring-teal-500/10";
-
-const labelClass =
-  "mb-2 block text-sm font-medium text-slate-700";
-
-const formatApiVehicle = (vehicle) => {
+const formatApiVehicle = (vehicle, drivers = []) => {
   const status = String(vehicle.vehicleStatus || "").toUpperCase();
+  const driver = vehicle.driverId == null ? null : drivers.find(item => String(item.driverId) === String(vehicle.driverId));
   return {
     vehicleId: vehicle.vehicleId,
+    driverName: driver?.driverName || "",
+    assignedDriver: driver ? {
+      name: driver.driverName, email: driver.driverEmail, phone: driver.driverPhoneno,
+      type: driver.driverType, status: driver.driverStatus,
+    } : null,
     plate: vehicle.vehiclePlateno || "",
     model: vehicle.vehicleModel || "",
     type: vehicle.vehicleType || "",
     capacity: vehicle.vehicleCapacity ?? "",
     luggageCapacity: vehicle.vehicleLuggageCapacity ?? "",
+    maxLargeLuggage: vehicle.maxLargeLuggage ?? "",
+    maxBackpacks: vehicle.maxBackpacks ?? "",
     roadTaxExpiry: vehicle.vehicleRoadtaxexpiry || "",
     serviceExpiry: vehicle.vehicleServiceexpiry || "",
     status:
       status === "AVAILABLE"
         ? "Available"
         : ["IN_USE", "UNAVAILABLE"].includes(status)
-          ? "In Use"
+          ? "Inactive"
           : status === "MAINTENANCE"
             ? "Maintenance"
-            : vehicle.vehicleStatus || "Maintenance",
+            : status === "INACTIVE" ? "Inactive" : vehicle.vehicleStatus || "Not recorded",
   };
 };
-
-const toApiStatus = (status) =>
-  status === "Available"
-    ? "AVAILABLE"
-    : status === "In Use"
-      ? "UNAVAILABLE"
-      : "MAINTENANCE";
 
 const getErrorMessage = (error) => {
   const response = error.response?.data;
@@ -67,19 +61,21 @@ export default function Vehicles() {
   const [vehicleList, setVehicleList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingVehicleId, setLoadingVehicleId] = useState(null);
-  const [savingVehicle, setSavingVehicle] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selectedVehicle, setSelectedVehicle] = useState(null);
-  const [editingVehicle, setEditingVehicle] = useState(null);
   const [error, setError] = useState("");
+  const [drivers, setDrivers] = useState([]);
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  const [savingVehicle, setSavingVehicle] = useState(false);
   const [notice, setNotice] = useState("");
 
   async function fetchVehicles() {
     setLoading(true);
     try {
-      const { data } = await api.get("/vehicles");
-      setVehicleList(Array.isArray(data) ? data.map(formatApiVehicle) : []);
+      const [vehicles, driverResponse] = await Promise.all([api.get("/vehicles"), api.get("/drivers")]);
+      setDrivers(driverResponse.data);
+      setVehicleList(vehicles.data.map(vehicle => formatApiVehicle(vehicle, driverResponse.data)));
       setError("");
     } catch (requestError) {
       setError(getErrorMessage(requestError));
@@ -92,19 +88,21 @@ export default function Vehicles() {
     fetchVehicles();
   }, []);
 
+  const statuses = [...new Set(vehicleList.map(vehicle => vehicle.status))].sort();
+
   const stats = useMemo(() => {
     const total = vehicleList.length;
     const available = vehicleList.filter(
       (v) => v.status === "Available"
     ).length;
-    const inUse = vehicleList.filter(
-      (v) => v.status === "In Use"
+    const inactive = vehicleList.filter(
+      (v) => v.status === "Inactive"
     ).length;
     const maintenance = vehicleList.filter(
       (v) => v.status === "Maintenance"
     ).length;
 
-    return { total, available, inUse, maintenance };
+    return { total, available, inactive, maintenance };
   }, [vehicleList]);
 
   const filteredVehicles = useMemo(() => {
@@ -116,6 +114,7 @@ export default function Vehicles() {
         vehicle.model,
         vehicle.type,
         vehicle.capacity,
+        vehicle.driverName,
       ].some((value) =>
         String(value ?? "").toLowerCase().includes(query)
       );
@@ -132,7 +131,7 @@ export default function Vehicles() {
     switch (status) {
       case "Available":
         return "bg-emerald-50 text-emerald-700 ring-emerald-600/20";
-      case "In Use":
+      case "Inactive":
         return "bg-amber-50 text-amber-700 ring-amber-600/20";
       case "Maintenance":
         return "bg-rose-50 text-rose-700 ring-rose-600/20";
@@ -145,7 +144,7 @@ export default function Vehicles() {
     switch (status) {
       case "Available":
         return <CheckCircle2 size={14} />;
-      case "In Use":
+      case "Inactive":
         return <Activity size={14} />;
       case "Maintenance":
         return <Wrench size={14} />;
@@ -168,122 +167,6 @@ export default function Vehicles() {
     });
   };
 
-  const validateVehicle = (vehicle, originalVehicleId = null) => {
-    if (
-      !vehicle.plate.trim() ||
-      !vehicle.type.trim() ||
-      vehicle.capacity === ""
-    ) {
-      return "Please fill in the registration number, vehicle type and capacity.";
-    }
-
-    const capacity = Number(vehicle.capacity);
-
-    if (!Number.isInteger(capacity) || capacity < 1) {
-      return "Passenger capacity must be a whole number greater than zero.";
-    }
-
-    if (vehicle.luggageCapacity !== "" &&
-        (!Number.isInteger(Number(vehicle.luggageCapacity)) ||
-          Number(vehicle.luggageCapacity) < 0)) {
-      return "Luggage capacity must be a whole number zero or greater.";
-    }
-
-    const normalizedPlate = vehicle.plate
-      .trim()
-      .replace(/\s+/g, "")
-      .toUpperCase();
-
-    const duplicate = vehicleList.some(
-      (item) =>
-        item.plate.trim().replace(/\s+/g, "").toUpperCase() ===
-          normalizedPlate &&
-        item.vehicleId !== originalVehicleId
-    );
-
-    if (duplicate) {
-      return "This registration number already exists.";
-    }
-
-    return "";
-  };
-
-  const handleUpdateVehicle = async (e) => {
-    e.preventDefault();
-
-    if (!editingVehicle) return;
-
-    const vehicle = {
-      ...editingVehicle,
-      plate: editingVehicle.plate.trim().toUpperCase(),
-      model: editingVehicle.model.trim(),
-      type: editingVehicle.type.trim(),
-      capacity: Number(editingVehicle.capacity),
-      luggageCapacity:
-        editingVehicle.luggageCapacity === ""
-          ? null
-          : Number(editingVehicle.luggageCapacity),
-    };
-
-    const validationError = validateVehicle(vehicle, editingVehicle.vehicleId);
-
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    if (!editingVehicle.vehicleId) {
-      setError("This vehicle is not saved in the system and cannot be updated.");
-      return;
-    }
-
-    setSavingVehicle(true);
-    try {
-      const { data } = await api.put(
-        `/vehicles/${editingVehicle.vehicleId}`,
-        {
-          vehiclePlateno: vehicle.plate,
-          vehicleModel: vehicle.model,
-          vehicleType: vehicle.type,
-          vehicleCapacity: vehicle.capacity,
-          vehicleLuggageCapacity: vehicle.luggageCapacity,
-          vehicleRoadtaxexpiry: vehicle.roadTaxExpiry || null,
-          vehicleServiceexpiry: vehicle.serviceExpiry || null,
-          vehicleStatus: toApiStatus(vehicle.status),
-        }
-      );
-      const updatedVehicle = formatApiVehicle(data);
-      setVehicleList((prev) => prev.map((item) =>
-        item.vehicleId === updatedVehicle.vehicleId ? updatedVehicle : item
-      ));
-      setEditingVehicle(null);
-      setError("");
-      setNotice(`${updatedVehicle.plate} updated successfully.`);
-    } catch (requestError) {
-      setError(getErrorMessage(requestError));
-    } finally {
-      setSavingVehicle(false);
-    }
-  };
-
-  const openEditModal = (vehicle) => {
-    setEditingVehicle({
-      ...vehicle,
-      capacity: String(vehicle.capacity ?? ""),
-      luggageCapacity: String(vehicle.luggageCapacity ?? ""),
-    });
-    setError("");
-  };
-
-  const closeEditModal = () => {
-    setEditingVehicle(null);
-    setError("");
-  };
-
-  const updateEditingVehicle = (field, value) => {
-    setEditingVehicle((prev) => ({ ...prev, [field]: value }));
-  };
-
   const viewVehicle = async (vehicle) => {
     if (!vehicle.vehicleId) {
       setSelectedVehicle(vehicle);
@@ -291,15 +174,36 @@ export default function Vehicles() {
     }
     setLoadingVehicleId(vehicle.vehicleId);
     setError("");
-    setNotice("");
     try {
       const { data } = await api.get(`/vehicles/${vehicle.vehicleId}`);
-      setSelectedVehicle(formatApiVehicle(data));
+      setSelectedVehicle(formatApiVehicle(data, drivers));
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
       setLoadingVehicleId(null);
     }
+  };
+
+  const saveVehicle = async event => {
+    event.preventDefault();
+    setSavingVehicle(true);
+    setError("");
+    setNotice("");
+    try {
+      const v = editingVehicle;
+      await api.put(`/vehicles/${v.vehicleId}`, {
+        vehicleModel: v.model.trim(), vehiclePlateno: v.plate.trim().toUpperCase(), vehicleType: v.type.trim(),
+        vehicleCapacity: Number(v.capacity), vehicleLuggageCapacity: Number(v.luggageCapacity),
+        maxLargeLuggage: v.maxLargeLuggage === "" ? null : Number(v.maxLargeLuggage),
+        maxBackpacks: v.maxBackpacks === "" ? null : Number(v.maxBackpacks),
+        vehicleRoadtaxexpiry: v.roadTaxExpiry || null, vehicleServiceexpiry: v.serviceExpiry || null,
+        vehicleStatus: v.status.toUpperCase(),
+      });
+      setEditingVehicle(null);
+      setNotice("Vehicle updated successfully.");
+      await fetchVehicles();
+    } catch (requestError) { setError(getErrorMessage(requestError)); }
+    finally { setSavingVehicle(false); }
   };
 
   const summaryCards = [
@@ -316,8 +220,8 @@ export default function Vehicles() {
       color: "bg-emerald-50 text-emerald-600",
     },
     {
-      label: "In Use",
-      value: stats.inUse,
+      label: "Inactive",
+      value: stats.inactive,
       icon: Activity,
       color: "bg-amber-50 text-amber-600",
     },
@@ -348,8 +252,7 @@ export default function Vehicles() {
           </h1>
 
           <p className="admin-page-description">
-            Manage registered vehicles, monitor availability and
-            keep track of road tax and service expiry dates.
+            Monitor registered vehicles, assigned drivers, availability, road tax and service dates. Edit vehicle information while preserving its linked driver.
           </p>
         </div>
 
@@ -395,7 +298,7 @@ export default function Vehicles() {
               Vehicle Records
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              View and update vehicle information.
+              View vehicle information and driver assignments.
             </p>
           </div>
 
@@ -409,7 +312,7 @@ export default function Vehicles() {
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search plate, type, capacity..."
+                placeholder="Search plate, model, type, driver..."
                 aria-label="Search vehicles"
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/10"
               />
@@ -423,7 +326,7 @@ export default function Vehicles() {
                 className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-2.5 pl-4 pr-10 text-sm text-slate-700 outline-none focus:border-teal-500 focus:ring-4 focus:ring-teal-500/10 sm:min-w-40"
               >
                 <option value="All">All Statuses</option>
-                {STATUSES.map((status) => (
+                {statuses.map((status) => (
                   <option key={status} value={status}>
                     {status}
                   </option>
@@ -465,7 +368,8 @@ export default function Vehicles() {
           )}
         </div>
 
-        {error && !editingVehicle && !selectedVehicle && (
+        {notice && <p role="status" className="m-5 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{notice}</p>}
+        {error && !editingVehicle && (
           <div
             role="alert"
             className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6"
@@ -473,15 +377,6 @@ export default function Vehicles() {
             {error}
           </div>
         )}
-        {notice && (
-          <div
-            role="status"
-            className="mx-5 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 sm:mx-6"
-          >
-            {notice}
-          </div>
-        )}
-
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left">
             <thead>
@@ -491,6 +386,9 @@ export default function Vehicles() {
                 </th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Vehicle
+                </th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Assigned Driver
                 </th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Capacity
@@ -537,6 +435,8 @@ export default function Vehicles() {
                     </div>
                   </td>
 
+                  <td className="px-6 py-4 text-sm text-slate-700">{vehicle.driverName || "No assigned driver"}</td>
+
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 text-sm text-slate-700">
                       <Users size={16} className="text-slate-400" />
@@ -579,18 +479,13 @@ export default function Vehicles() {
                           ? "Loading..."
                           : "View"}
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(vehicle)}
-                        disabled={!vehicle.vehicleId}
-                        aria-label={`Edit ${vehicle.plate}`}
-                        title="Update vehicle"
-                        className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-700"
-                      >
-                        <Pencil size={15} />
-                        Edit
+                      <button type="button" title="Edit vehicle" aria-label={`Edit ${vehicle.plate}`}
+                        onClick={() => {setEditingVehicle({...vehicle}); setSelectedVehicle(null); setError(""); setNotice("");}}
+                        className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-800">
+                        <Pencil size={16} /> Edit
                       </button>
+
+
 
                     </div>
                   </td>
@@ -599,14 +494,14 @@ export default function Vehicles() {
 
               {loading && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-500">
                     Loading vehicle records...
                   </td>
                 </tr>
               )}
               {!loading && filteredVehicles.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-16 text-center">
+                  <td colSpan={8} className="px-6 py-16 text-center">
                     <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                       <Truck size={26} />
                     </div>
@@ -634,29 +529,55 @@ export default function Vehicles() {
         </div>
 
         <div className="border-t border-slate-100 px-5 py-4 text-xs text-slate-400 sm:px-6">
-          Vehicle records are displayed using the data available to this page.
+          Vehicle records are loaded from the database. Vehicle updates preserve the current driver relationship.
         </div>
       </section>
 
-      {/* Update vehicle modal */}
-      {editingVehicle && (
-        <Modal
-          title="Update Vehicle"
-          subtitle="Review and update the vehicle information."
-          onClose={closeEditModal}
-          icon={<Pencil size={20} />}
-        >
-          <VehicleForm
-            vehicle={editingVehicle}
-            onChange={updateEditingVehicle}
-            onSubmit={handleUpdateVehicle}
-            onCancel={closeEditModal}
-            submitLabel="Save Changes"
-            error={error}
-            busy={savingVehicle}
-          />
-        </Modal>
-      )}
+      {editingVehicle && <Modal title="Edit Vehicle" subtitle="Update this vehicle. Its linked driver cannot be changed here."
+        icon={<Pencil size={20} />} onClose={() => {if (!savingVehicle) {setEditingVehicle(null); setError("");}}}>
+        <form onSubmit={saveVehicle} className="space-y-5">
+          <section aria-label="Assigned driver information" className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h3 className="mb-3 font-semibold text-slate-900">Assigned Driver</h3>
+            {editingVehicle.assignedDriver ? <dl className="grid gap-4 sm:grid-cols-2">
+              {[["name", "Driver Name"], ["email", "Driver Email"], ["phone", "Driver Phone Number"],
+                ["type", "Driver Type"], ["status", "Driver Status"]].map(([key, label]) => <div key={key}>
+                  <dt className="text-xs text-slate-500">{label}</dt>
+                  <dd className="mt-1 break-words text-sm font-medium text-slate-800">{editingVehicle.assignedDriver[key] || "Not provided"}</dd>
+                </div>)}
+            </dl> : <p className="text-sm text-slate-600">No assigned driver</p>}
+          </section>
+          <fieldset disabled={savingVehicle} className="grid gap-4 sm:grid-cols-2">
+            {[["model", "Vehicle Model", "text", true], ["plate", "Plate Number", "text", true],
+              ["type", "Vehicle Type", "text", true], ["capacity", "Passenger Capacity", "number", true],
+              ["luggageCapacity", "Luggage Capacity (points)", "number", true],
+              ["maxLargeLuggage", "Maximum Large Luggage", "number", false],
+              ["maxBackpacks", "Maximum Backpacks", "number", false],
+              ["roadTaxExpiry", "Road Tax Expiry Date", "date", false],
+              ["serviceExpiry", "Next Service Date", "date", false]].map(([key, label, type, required]) => <label key={key} className="block text-sm font-medium text-slate-700">
+                <span className="mb-2 block">{label}{required ? " *" : ""}</span>
+                <input type={type} required={required} min={key === "capacity" ? 1 : 0} step={type === "number" ? 1 : undefined}
+                  value={editingVehicle[key] ?? ""} onChange={event => setEditingVehicle(previous => ({...previous, [key]: event.target.value}))}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm focus:border-teal-600" />
+              </label>)}
+            <label className="block text-sm font-medium text-slate-700"><span className="mb-2 block">Vehicle Status</span>
+              <select value={editingVehicle.status} onChange={event => setEditingVehicle(previous => ({...previous, status: event.target.value}))}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
+                {["Available", "Maintenance", "Inactive"].map(status => <option key={status}>{status}</option>)}
+              </select>
+            </label>
+          </fieldset>
+          {(editingVehicle.maxLargeLuggage === "" || editingVehicle.maxBackpacks === "") && (
+            <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+              Enter both verified luggage limits for this vehicle. The combined points limit still applies.
+            </p>
+          )}
+          {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+          <div className="flex justify-end gap-3 border-t pt-4">
+            <button type="button" disabled={savingVehicle} onClick={() => {setEditingVehicle(null); setError("");}} className="rounded-xl border px-4 py-2">Cancel</button>
+            <button type="submit" disabled={savingVehicle} className="rounded-xl bg-teal-700 px-4 py-2 text-white">{savingVehicle ? "Saving..." : "Save Changes"}</button>
+          </div>
+        </form>
+      </Modal>}
 
       {/* View vehicle modal */}
       {selectedVehicle && (
@@ -690,6 +611,7 @@ export default function Vehicles() {
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <DetailItem icon={<Users size={17} />} label="Assigned Driver" value={selectedVehicle.driverName || "No assigned driver"} />
               <DetailItem
                 icon={<Users size={17} />}
                 label="Passenger Capacity"
@@ -700,8 +622,12 @@ export default function Vehicles() {
                 label="Luggage Capacity"
                 value={selectedVehicle.luggageCapacity === ""
                   ? "Not recorded"
-                  : `${selectedVehicle.luggageCapacity} items`}
+                  : `${selectedVehicle.luggageCapacity} points`}
               />
+              <DetailItem icon={<Luggage size={17} />} label="Maximum Large Luggage"
+                value={selectedVehicle.maxLargeLuggage === "" ? "Not configured" : String(selectedVehicle.maxLargeLuggage)} />
+              <DetailItem icon={<Luggage size={17} />} label="Maximum Backpacks"
+                value={selectedVehicle.maxBackpacks === "" ? "Not configured" : String(selectedVehicle.maxBackpacks)} />
               <DetailItem
                 icon={<Truck size={17} />}
                 label="Vehicle Model"
@@ -733,180 +659,11 @@ export default function Vehicles() {
                 Close
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  openEditModal(selectedVehicle);
-                  setSelectedVehicle(null);
-                }}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700"
-              >
-                <Pencil size={16} />
-                Edit Vehicle
-              </button>
             </div>
           </div>
         </Modal>
       )}
     </div>
-  );
-}
-
-function VehicleForm({
-  vehicle,
-  onChange,
-  onSubmit,
-  onCancel,
-  submitLabel,
-  error,
-  busy = false,
-}) {
-  return (
-    <form onSubmit={onSubmit} className="space-y-5">
-      {error && (
-        <div
-          role="alert"
-          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
-        >
-          {error}
-        </div>
-      )}
-
-      <div>
-        <label className={labelClass}>Vehicle Model</label>
-        <input
-          type="text"
-          value={vehicle.model || ""}
-          onChange={(e) => onChange("model", e.target.value)}
-          placeholder="e.g. Toyota Hiace"
-          maxLength={100}
-          className={inputClass}
-        />
-      </div>
-
-      <div>
-        <label className={labelClass}>
-          Registration Number <span className="text-rose-500">*</span>
-        </label>
-        <input
-          type="text"
-          value={vehicle.plate}
-          onChange={(e) =>
-            onChange("plate", e.target.value.toUpperCase())
-          }
-          placeholder="e.g. ABC 1234"
-          autoComplete="off"
-          maxLength={20}
-          required
-          className={inputClass}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
-          <label className={labelClass}>
-            Vehicle Type <span className="text-rose-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={vehicle.type}
-            onChange={(e) => onChange("type", e.target.value)}
-            placeholder="e.g. Sedan, MPV, Bus"
-            maxLength={60}
-            required
-            className={inputClass}
-          />
-        </div>
-
-        <div>
-          <label className={labelClass}>
-            Passenger Capacity <span className="text-rose-500">*</span>
-          </label>
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={vehicle.capacity}
-            onChange={(e) => onChange("capacity", e.target.value)}
-            placeholder="e.g. 7"
-            required
-            className={inputClass}
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className={labelClass}>Luggage Capacity (items)</label>
-        <input
-          type="number"
-          min="0"
-          step="1"
-          value={vehicle.luggageCapacity ?? ""}
-          onChange={(e) => onChange("luggageCapacity", e.target.value)}
-          placeholder="Enter actual item capacity"
-          className={inputClass}
-        />
-      </div>
-
-      <div>
-        <label className={labelClass}>Road Tax Expiry Date</label>
-        <input
-          type="date"
-          value={vehicle.roadTaxExpiry || ""}
-          onChange={(e) => onChange("roadTaxExpiry", e.target.value)}
-          className={inputClass}
-        />
-      </div>
-
-      <div>
-        <label className={labelClass}>Next Service Date</label>
-        <input
-          type="date"
-          value={vehicle.serviceExpiry || ""}
-          onChange={(e) => onChange("serviceExpiry", e.target.value)}
-          className={inputClass}
-        />
-      </div>
-
-      <div>
-        <label className={labelClass}>Vehicle Status</label>
-        <select
-          value={vehicle.status || "Available"}
-          onChange={(e) => onChange("status", e.target.value)}
-          className={inputClass}
-        >
-          {STATUSES.map((status) => (
-            <option key={status} value={status}>
-              {status}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <p className="text-xs text-slate-400">
-        Fields marked with * are required.
-      </p>
-
-      <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={busy}
-          className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-        >
-          Cancel
-        </button>
-
-        <button
-          type="submit"
-          disabled={busy}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-500/20"
-        >
-          <CheckCircle2 size={16} />
-          {busy ? "Saving..." : submitLabel}
-        </button>
-      </div>
-    </form>
   );
 }
 
@@ -967,7 +724,7 @@ function DetailItem({ icon, label, value }) {
         </p>
       </div>
       <p className="break-words text-sm font-semibold text-slate-800">
-        {value || "Not set"}
+        {value ?? "Not set"}
       </p>
     </div>
   );

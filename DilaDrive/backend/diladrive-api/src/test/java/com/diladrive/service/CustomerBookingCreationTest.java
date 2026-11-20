@@ -195,7 +195,7 @@ class CustomerBookingCreationTest {
     }
 
     @Test
-    void adminMustSetFinalFareBeforeConfirming() {
+    void standaloneVerificationCannotConfirmWithoutAssignment() {
         Booking booking = new Booking();
         booking.setBookingId(17L);
         booking.setBookingStatus("PENDING_VERIFICATION");
@@ -208,10 +208,11 @@ class CustomerBookingCreationTest {
         assertEquals(409, exception.getStatusCode().value());
 
         service.updateBookingFare(17L, new BigDecimal("145.00"));
-        Booking confirmed = service.verifyBooking(17L);
-
-        assertEquals("CONFIRMED", confirmed.getBookingStatus());
-        assertEquals(new BigDecimal("145.00"), confirmed.getBookingTripfare());
+        ResponseStatusException blocked = assertThrows(ResponseStatusException.class,
+                () -> service.verifyBooking(17L));
+        assertTrue(blocked.getReason().contains("Confirm & Assign"));
+        assertEquals("PENDING_VERIFICATION", booking.getBookingStatus());
+        assertEquals(new BigDecimal("145.00"), booking.getBookingTripfare());
     }
 
     @Test
@@ -222,7 +223,7 @@ class CustomerBookingCreationTest {
         booking.setBookingStatus("PENDING_VERIFICATION");
         when(bookings.findByIdForUpdate(17L)).thenReturn(Optional.of(booking));
         when(assignments.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                17L, java.util.List.of("COMPLETED", "CANCELLED")))
+                17L, java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(bookings.save(booking)).thenReturn(booking);
 
@@ -249,7 +250,7 @@ class CustomerBookingCreationTest {
         booking.setBookingTripfare(new BigDecimal("100.00"));
         when(bookings.findByIdForUpdate(17L)).thenReturn(Optional.of(booking));
         when(assignments.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                17L, java.util.List.of("COMPLETED", "CANCELLED")))
+                17L, java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(vehicles.findAll()).thenReturn(java.util.List.of(vehicle("Sedan")));
         arrangeAvailableVehicle("Sedan");
@@ -279,7 +280,7 @@ class CustomerBookingCreationTest {
         booking.setBookingStatus("PENDING_VERIFICATION");
         when(bookings.findByIdForUpdate(17L)).thenReturn(Optional.of(booking));
         when(assignments.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                17L, java.util.List.of("COMPLETED", "CANCELLED")))
+                17L, java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(vehicles.findAll()).thenReturn(java.util.List.of(vehicle("Sedan")));
         arrangeAvailableVehicle("Sedan");
@@ -344,7 +345,7 @@ class CustomerBookingCreationTest {
         booking.setBookingStatus("PENDING_VERIFICATION");
         when(bookings.findByIdForUpdate(17L)).thenReturn(Optional.of(booking));
         when(assignments.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                17L, java.util.List.of("COMPLETED", "CANCELLED")))
+                17L, java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(true);
 
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
@@ -380,7 +381,7 @@ class CustomerBookingCreationTest {
         booking.setBookingStatus("CONFIRMED");
         when(bookings.findByIdForUpdate(17L)).thenReturn(Optional.of(booking));
         when(assignments.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                17L, java.util.List.of("COMPLETED", "CANCELLED")))
+                17L, java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(true);
 
         ResponseStatusException error = assertThrows(

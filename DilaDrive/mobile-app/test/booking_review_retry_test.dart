@@ -14,6 +14,13 @@ void main() {
           ..pickupAddress = 'Kuala Lumpur'
           ..destinationAddress = 'Melaka'
           ..bookingDate = DateTime(2026, 12, 1)
+          ..fareEstimate = const FareEstimate(
+              distanceKm: 58,
+              vehicleModel: 'Sedan',
+              baseFare: 10,
+              distanceCharge: 116,
+              additionalCharges: [],
+              total: 126)
           ..recommendedVehicle = const RecommendedVehicle(
             id: 8,
             model: 'Fleet Sedan',
@@ -22,6 +29,7 @@ void main() {
             luggageCapacity: 2,
           );
 
+    draft.availabilityCheckedFor = draft.availabilityKey;
     await tester.pumpWidget(MaterialApp(
       theme: AppTheme.lightTheme,
       home: BookingReviewPage(draft: draft, bookingService: service),

@@ -8,7 +8,6 @@ import '../../services/auth_service.dart' show AuthService;
 import '../../services/customer_profile_service.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login.dart';
-import 'bookings.dart';
 import 'business_documents.dart';
 import 'update_account.dart';
 import 'view_account.dart';
@@ -169,16 +168,6 @@ class _ProfilePageState extends State<ProfilePage> {
                 icon: Icons.edit_outlined,
                 title: 'Update account',
                 onTap: () => _editProfile(profile),
-              ),
-              _MenuItem(
-                icon: Icons.history_rounded,
-                title: 'Booking history',
-                onTap: () => Navigator.push<void>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => MyBookingsPage(customer: widget.customer),
-                  ),
-                ),
               ),
               if (profile.type?.toUpperCase() == 'COMPANY')
                 _MenuItem(

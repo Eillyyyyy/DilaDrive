@@ -1,5 +1,7 @@
 package com.diladrive.controller;
 
+import com.diladrive.security.AdminSession;
+
 import com.diladrive.dto.LoginRequest;
 import com.diladrive.dto.AdminProfileResponse;
 import com.diladrive.dto.ChangePasswordRequest;
@@ -51,18 +53,14 @@ public class AuthController {
         }
         AdminProfileResponse profile = adminService.getProfile(request.getEmail());
         servletRequest.getSession(true).setAttribute("adminId", profile.getId());
-        logger.info("Admin login succeeded from source={}", servletRequest.getRemoteAddr());
+        logger.info("Admin login succeeded from source={}, adminIdType={}",
+                servletRequest.getRemoteAddr(), profile.getId() == null ? "missing" : profile.getId().getClass().getSimpleName());
         return ResponseEntity.ok(profile);
     }
 
     @GetMapping("/session")
     public ResponseEntity<AdminProfileResponse> getSession(HttpServletRequest request) {
-        var session = request.getSession(false);
-        Object adminId = session == null ? null : session.getAttribute("adminId");
-        if (!(adminId instanceof Long id)) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
-        return ResponseEntity.ok(adminService.getProfile(id));
+        return ResponseEntity.ok(adminService.getProfile(requireAdminId(request)));
     }
 
     @PostMapping("/logout")
@@ -139,12 +137,6 @@ public class AuthController {
     }
 
     private static Long requireAdminId(HttpServletRequest request) {
-        var session = request.getSession(false);
-        Object adminId = session == null ? null : session.getAttribute("adminId");
-        if (adminId instanceof Long id) {
-            return id;
-        }
-        throw new org.springframework.web.server.ResponseStatusException(
-                HttpStatus.UNAUTHORIZED, "Please sign in again.");
+        return AdminSession.requireAdminId(request);
     }
 }

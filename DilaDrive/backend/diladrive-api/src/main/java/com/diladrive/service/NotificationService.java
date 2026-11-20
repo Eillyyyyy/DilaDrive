@@ -18,6 +18,8 @@ import java.util.Locale;
 @Service
 public class NotificationService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private BookingPushService bookingPush;
     private final NotificationRepository notificationRepository;
     private final DriverRepository driverRepository;
     private final AdminRepository adminRepository;
@@ -69,6 +71,10 @@ public class NotificationService {
                 request.notificationType() == null
                         ? "GENERAL"
                         : request.notificationType().trim().toUpperCase(Locale.ROOT));
+        if (bookingPush != null) {
+            bookingPush.notifyAfterCommit("DRIVER", driver.getDriverId(),
+                    notification.getTitle(), notification.getMessage());
+        }
         return NotificationResponse.from(notificationRepository.save(notification));
     }
 
@@ -104,6 +110,7 @@ public class NotificationService {
         notification.setTitle(title);
         notification.setMessage(message);
         notification.setNotificationType(notificationType);
+        if (bookingPush != null) bookingPush.notifyAfterCommit("CUSTOMER",customerId,title,message);
         return NotificationResponse.from(notificationRepository.save(notification));
     }
 

@@ -1,6 +1,7 @@
 package com.diladrive.service;
 
 import com.diladrive.entity.Notification;
+import com.diladrive.dto.NotificationCreateRequest;
 import com.diladrive.entity.NotificationStatusConverter;
 import com.diladrive.entity.Driver;
 import com.diladrive.entity.Admin;
@@ -9,6 +10,7 @@ import com.diladrive.repository.DriverRepository;
 import com.diladrive.repository.NotificationRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 import java.util.List;
@@ -31,6 +33,23 @@ class NotificationServiceTest {
     private final AdminRepository admins = mock(AdminRepository.class);
     private final NotificationService service = new NotificationService(
             notifications, mock(DriverRepository.class), admins);
+
+    @Test
+    void adminMessagePersistsInInboxAndSchedulesPushForTheDriver() {
+        var drivers = mock(DriverRepository.class);
+        var push = mock(BookingPushService.class);
+        var service = new NotificationService(notifications, drivers, admins);
+        ReflectionTestUtils.setField(service, "bookingPush", push);
+        var driver = new Driver();
+        driver.setDriverId(7L);
+        when(drivers.findById(7L)).thenReturn(Optional.of(driver));
+        when(notifications.save(any(Notification.class))).thenAnswer(call -> call.getArgument(0));
+
+        service.createNotification(new NotificationCreateRequest(7L, "Trip update", "Please check your inbox.", "GENERAL"));
+
+        verify(notifications).save(argThat(item -> item.getDriver().getDriverId().equals(7L)));
+        verify(push).notifyAfterCommit("DRIVER", 7L, "Trip update", "Please check your inbox.");
+    }
 
     @Test
     void newBookingCreatesNotificationForEachActiveAdmin() {

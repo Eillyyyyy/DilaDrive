@@ -27,6 +27,37 @@ public class Vehicle {
     @Column(name = "vehicle_luggagecapacity")
     private Integer vehicleLuggageCapacity;
 
+    @Column(name = "max_large_luggage")
+    private Integer maxLargeLuggage;
+
+    @Column(name = "max_backpacks")
+    private Integer maxBackpacks;
+
+    public Integer getMaxLargeLuggage() { return maxLargeLuggage; }
+    public void setMaxLargeLuggage(Integer value) { maxLargeLuggage = value; }
+    public Integer getMaxBackpacks() { return maxBackpacks; }
+    public void setMaxBackpacks(Integer value) { maxBackpacks = value; }
+
+    public boolean fitsSeparateLuggage(int largeLuggage, int backpacks) {
+        return (maxLargeLuggage == null || largeLuggage <= maxLargeLuggage)
+                && (maxBackpacks == null || backpacks <= maxBackpacks);
+    }
+
+    public int passengerLimit() {
+        int recordedCapacity = vehicleCapacity == null ? 0 : vehicleCapacity;
+        String category = vehicleType == null ? "" : vehicleType.toUpperCase(java.util.Locale.ROOT)
+                .replaceAll("[^A-Z0-9]", "");
+        int categoryLimit = switch (category) {
+            case "SEDAN" -> 3;
+            case "MPV" -> 5;
+            case "10SEATERVAN", "10SEATER", "VAN10" -> 8;
+            case "14SEATERVAN", "14SEATER", "VAN14" -> 11;
+            case "18SEATERVAN", "18SEATER", "VAN18" -> 15;
+            default -> recordedCapacity;
+        };
+        return Math.min(recordedCapacity, categoryLimit);
+    }
+
     @Column(name = "vehicle_roadtaxexpiry")
     private LocalDate vehicleRoadtaxexpiry;
 
@@ -36,8 +67,13 @@ public class Vehicle {
     @Column(name = "vehicle_status")
     private String vehicleStatus;
 
-    @Column(name = "driver_id")
+    @Column(name = "driver_id", nullable = false, unique = true)
     private Long driverId;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "driver_id", insertable = false, updatable = false)
+    private Driver driver;
 
     public Vehicle() {
     }

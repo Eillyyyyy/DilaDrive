@@ -7,6 +7,7 @@ import com.diladrive.dto.VerificationPhotoResponse;
 import com.diladrive.service.AssignmentService;
 import com.diladrive.service.VerificationPhotoService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.CacheControl;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -83,14 +84,6 @@ public class AssignmentController {
         return assignmentService.completeAssignment(id);
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteAssignment(
-            @PathVariable Long id, HttpServletRequest request) {
-        requireAdminId(request);
-        assignmentService.deleteAssignment(id);
-        return ResponseEntity.noContent().build();
-    }
-
     @PatchMapping("/{id}/status")
     public AssignmentResponse updateStatus(
             @PathVariable Long id,
@@ -107,6 +100,9 @@ public class AssignmentController {
     @GetMapping("/{id}/photos")
     public List<VerificationPhotoResponse> getPhotos(
             @PathVariable Long id, HttpServletRequest request) {
+        if (isAdmin(request)) {
+            return verificationPhotoService.listForAdmin(id);
+        }
         return verificationPhotoService.list(id, requireDriverId(request));
     }
 
@@ -123,10 +119,18 @@ public class AssignmentController {
     @GetMapping("/{id}/photos/{photoId}/content")
     public ResponseEntity<ByteArrayResource> getPhotoContent(
             @PathVariable Long id, @PathVariable Long photoId, HttpServletRequest request) {
-        var photo = verificationPhotoService.read(id, photoId, requireDriverId(request));
+        var photo = isAdmin(request)
+                ? verificationPhotoService.readForAdmin(id, photoId)
+                : verificationPhotoService.read(id, photoId, requireDriverId(request));
         return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
                 .contentType(MediaType.parseMediaType(photo.contentType()))
                 .body(new ByteArrayResource(photo.bytes()));
+    }
+
+    private static boolean isAdmin(HttpServletRequest request) {
+        var session = request.getSession(false);
+        return session != null && session.getAttribute("adminId") instanceof Long;
     }
 
     private static Long requireAdminId(HttpServletRequest request) {

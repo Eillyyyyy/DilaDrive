@@ -24,11 +24,20 @@ import java.util.Set;
 
 @Service
 public class AssignmentServiceImpl implements AssignmentService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private TripFinanceService tripFinance;
 
     private static final List<String> TERMINAL_STATUSES =
-            List.of("COMPLETED", "CANCELLED");
+            List.of("COMPLETED", "CANCELLED", "SUPERSEDED");
     private static final Set<String> TRIP_STATUSES =
-            Set.of("ASSIGNED", "OTW", "WAITING", "PICKUP", "DROP", "COMPLETED", "CANCELLED");
+            Set.of("ASSIGNED", "OTW", "WAITING", "PICKUP", "DROP", "COMPLETED");
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private CustomerTripService customerTrips;
+    @org.springframework.beans.factory.annotation.Autowired
+    private BookingPushService bookingPush;
+    @org.springframework.beans.factory.annotation.Autowired
+    private BookingPriceService bookingPrices;
 
     private final AssignmentRepository assignmentRepository;
     private final BookingRepository bookingRepository;
@@ -71,16 +80,36 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     @Transactional
+    public AssignmentResponse confirmAndAssign(AssignmentRequest request, java.math.BigDecimal tripFare) {
+        return saveInitialAssignment(request, true, tripFare);
+    }
+
+    @Transactional
     public AssignmentResponse createAssignment(AssignmentRequest request) {
+        return saveInitialAssignment(request, false, null);
+    }
+
+    private AssignmentResponse saveInitialAssignment(AssignmentRequest request,
+            boolean confirm, java.math.BigDecimal tripFare) {
         if (request == null
                 || request.bookingId() == null
-                || request.driverId() == null
-                || request.vehicleId() == null) {
-            throw badRequest("Booking, driver, and vehicle are required.");
+                || request.driverId() == null) {
+            throw badRequest("Booking and driver are required. The driver must have a linked vehicle.");
         }
         Booking booking = bookingRepository.findByIdForUpdate(request.bookingId())
                 .orElseThrow(() -> notFound("Booking not found."));
-        if (!"CONFIRMED".equalsIgnoreCase(booking.getBookingStatus())) {
+        String bookingStatus = String.valueOf(booking.getBookingStatus()).toUpperCase(Locale.ROOT);
+        if (booking.isRoadDistancePending()) {
+            throw conflict("Confirm the measured road distance before assigning this booking.");
+        }
+        if (confirm && !Set.of("PENDING", "PENDING_VERIFICATION").contains(bookingStatus)) {
+            throw conflict("Only a pending booking can be confirmed. Refresh its current status.");
+        }
+        java.math.BigDecimal finalFare = tripFare != null ? tripFare : booking.getBookingTripfare();
+        if (confirm && (finalFare == null || finalFare.signum() < 0 || (finalFare.signum()==0 && booking.getFareSnapshot()==null))) {
+            throw badRequest("Enter a final fare greater than zero.");
+        }
+        if (!confirm && !"CONFIRMED".equalsIgnoreCase(booking.getBookingStatus())) {
             throw conflict("Only confirmed bookings can be assigned.");
         }
         if (assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
@@ -90,31 +119,35 @@ public class AssignmentServiceImpl implements AssignmentService {
 
         Driver driver = driverRepository.findByIdForUpdate(request.driverId())
                 .orElseThrow(() -> notFound("Driver not found."));
-        Vehicle vehicle = vehicleRepository.findByIdForUpdate(request.vehicleId())
-                .orElseThrow(() -> notFound("Vehicle not found."));
-
+        Vehicle vehicle = linkedVehicle(driver, request.vehicleId());
         validateAvailableDriver(driver);
         validateAvailableVehicle(vehicle, booking);
+        if(bookingPrices!=null) bookingPrices.requireAcceptedCategory(booking,vehicle.getVehicleType(),tripFare);
+        java.time.LocalDateTime endAt = request.scheduledEndAt() != null ? request.scheduledEndAt() : booking.getReservedEndAt();
+        validateSchedule(booking, endAt, driver, vehicle, null);
 
-        driver.setDriverAvailability("UNAVAILABLE");
-        vehicle.setVehicleStatus("UNAVAILABLE");
         booking.setDriverId(driver.getDriverId());
         booking.setVehicleId(vehicle.getVehicleId());
-        booking.setBookingStatus("ASSIGNED");
+        booking.setBookingStatus("CONFIRMED");
+        if (confirm) booking.setBookingTripfare(finalFare);
 
         Assignment assignment = new Assignment();
         assignment.setBooking(booking);
         assignment.setDriver(driver);
         assignment.setVehicle(vehicle);
+        assignment.setScheduledEndAt(endAt);
         assignment.setAssignmentStatus("ASSIGNED");
         Assignment saved = assignmentRepository.save(assignment);
         createAssignmentNotification(saved, "assigned");
-        createCustomerNotification(
-                booking,
-                "Driver assigned",
-                "A driver has been assigned to booking "
-                        + bookingReference(booking.getBookingId()) + ".",
-                "DRIVER_ASSIGNED");
+        if (confirm) {
+            createCustomerNotification(booking, "Booking confirmed",
+                    "Your booking " + bookingReference(booking.getBookingId())
+                            + " has been confirmed with a driver and vehicle.", "BOOKING_APPROVED");
+        } else {
+            createCustomerNotification(booking, "Driver assigned",
+                    "A driver has been assigned to booking " + bookingReference(booking.getBookingId()) + ".",
+                    "DRIVER_ASSIGNED");
+        }
         return findResponse(saved.getAssignmentId());
     }
 
@@ -133,48 +166,39 @@ public class AssignmentServiceImpl implements AssignmentService {
                         assignment.getBooking().getBookingId())
                 .orElseThrow(() -> notFound("Booking not found."));
         Driver oldDriver = assignment.getDriver();
-        Vehicle oldVehicle = assignment.getVehicle();
 
-        Driver newDriver = request.driverId() == null
-                ? oldDriver
-                : driverRepository.findByIdForUpdate(request.driverId())
+        if (request.driverId() == null || request.driverId().equals(oldDriver.getDriverId())) {
+            throw badRequest("Select another eligible driver; their linked vehicle is selected automatically.");
+        }
+        Driver newDriver = driverRepository.findByIdForUpdate(request.driverId())
                 .orElseThrow(() -> notFound("Driver not found."));
-        Vehicle newVehicle = request.vehicleId() == null
-                ? oldVehicle
-                : vehicleRepository.findByIdForUpdate(request.vehicleId())
-                .orElseThrow(() -> notFound("Vehicle not found."));
-
-        boolean driverChanged = !oldDriver.getDriverId().equals(newDriver.getDriverId());
-        boolean vehicleChanged = !oldVehicle.getVehicleId().equals(newVehicle.getVehicleId());
-        if (!driverChanged && !vehicleChanged) {
-            throw badRequest("Choose a different driver or vehicle to reassign.");
-        }
-
-        if (driverChanged) {
-            validateAvailableDriver(newDriver);
-        }
-        if (vehicleChanged) {
-            validateAvailableVehicle(newVehicle, booking);
-        }
-
-        if (driverChanged) {
-            oldDriver = driverRepository.findByIdForUpdate(oldDriver.getDriverId())
-                    .orElseThrow(() -> notFound("Previously assigned driver not found."));
-            oldDriver.setDriverAvailability("AVAILABLE");
-            newDriver.setDriverAvailability("UNAVAILABLE");
-            assignment.setDriver(newDriver);
-        }
-        if (vehicleChanged) {
-            oldVehicle = vehicleRepository.findByIdForUpdate(oldVehicle.getVehicleId())
-                    .orElseThrow(() -> notFound("Previously assigned vehicle not found."));
-            oldVehicle.setVehicleStatus("AVAILABLE");
-            newVehicle.setVehicleStatus("UNAVAILABLE");
-            assignment.setVehicle(newVehicle);
-        }
+        Vehicle newVehicle = linkedVehicle(newDriver, request.vehicleId());
+        validateAvailableDriver(newDriver);
+        validateAvailableVehicle(newVehicle, booking);
+        if(bookingPrices!=null) bookingPrices.requireAcceptedCategory(booking,newVehicle.getVehicleType(),null);
+        java.time.LocalDateTime endAt = request.scheduledEndAt() != null ? request.scheduledEndAt() : assignment.getScheduledEndAt();
+        validateSchedule(booking, endAt, newDriver, newVehicle, assignmentId);
+        // Preserve the original driver/vehicle and times as immutable history.
+        assignment.setAssignmentStatus("SUPERSEDED");
+        assignmentRepository.saveAndFlush(assignment);
+        Assignment replacement = new Assignment();
+        replacement.setBooking(booking);
+        replacement.setDriver(newDriver);
+        replacement.setVehicle(newVehicle);
+        replacement.setScheduledEndAt(endAt);
+        replacement.setAssignmentStatus("ASSIGNED");
 
         booking.setDriverId(newDriver.getDriverId());
         booking.setVehicleId(newVehicle.getVehicleId());
-        Assignment saved = assignmentRepository.save(assignment);
+        booking.setBookingStatus("CONFIRMED");
+        Assignment saved = assignmentRepository.save(replacement);
+        Notification previousDriverNotice=new Notification();
+        previousDriverNotice.setDriver(oldDriver); previousDriverNotice.setTitle("Assignment changed");
+        previousDriverNotice.setNotificationType("ASSIGNMENT");
+        previousDriverNotice.setMessage("Your previous assignment for " + bookingReference(booking.getBookingId()) + " has been superseded.");
+        notificationRepository.save(previousDriverNotice);
+        if (bookingPush != null) bookingPush.notifyAfterCommit("DRIVER",oldDriver.getDriverId(),
+                "Assignment changed", "Your previous assignment for " + bookingReference(booking.getBookingId()) + " has been superseded.");
         createAssignmentNotification(saved, "reassigned");
         createCustomerNotification(
                 booking,
@@ -197,9 +221,6 @@ public class AssignmentServiceImpl implements AssignmentService {
     public AssignmentResponse updateDriverStatus(
             Long assignmentId, Long driverId, String requestedStatus) {
         String status = normalizeRequestedStatus(requestedStatus);
-        if ("CANCELLED".equals(status)) {
-            throw badRequest("Drivers can only advance a trip through its status steps.");
-        }
         Assignment assignment = assignmentRepository.findByIdForUpdate(assignmentId)
                 .orElseThrow(() -> notFound("Assignment not found."));
         if (assignment.getDriver() == null
@@ -223,7 +244,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         if (status.equals(currentStatus)) {
             return findResponse(assignmentId);
         }
-        if (!"CANCELLED".equals(status) && !isNextStatus(currentStatus, status)) {
+        if (!isNextStatus(currentStatus, status)) {
             throw conflict("Trip status must advance to the next step.");
         }
 
@@ -235,11 +256,15 @@ public class AssignmentServiceImpl implements AssignmentService {
             releaseResources(assignment);
             clearBookingResources(booking);
         }
-        booking.setBookingStatus(status);
+        // Progress belongs to the trip, while its booking stays CONFIRMED.
+        if (TERMINAL_STATUSES.contains(status)) booking.setBookingStatus(status);
+        if ("COMPLETED".equals(status) && tripFinance != null) {
+            tripFinance.recordCompletion(assignment, booking);
+        }
         assignmentRepository.save(assignment);
         createCustomerNotification(
                 booking,
-                status.equals("CANCELLED") ? "Trip cancelled" : "Trip status updated",
+                "Trip status updated",
                 "Your booking " + bookingReference(booking.getBookingId())
                         + " is now " + statusLabel(status) + ".",
                 "TRIP_STATUS");
@@ -265,6 +290,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         releaseResources(assignment);
         clearBookingResources(booking);
         booking.setBookingStatus("COMPLETED");
+        if (tripFinance != null) tripFinance.recordCompletion(assignment, booking);
         assignmentRepository.save(assignment);
         createCustomerNotification(
                 booking,
@@ -296,6 +322,88 @@ public class AssignmentServiceImpl implements AssignmentService {
                 "TRIP_STATUS");
     }
 
+    public record AssignmentOption(Long vehicleId, String vehicleType, String vehicleModel, String vehiclePlate,
+            Integer passengerCapacity, Integer luggagePointsCapacity, Long driverId, String driverName) { }
+
+    /** A preview only; confirmation repeats every check under resource row locks. */
+    @Transactional(readOnly=true)
+    public List<AssignmentOption> options(Long bookingId, java.time.LocalDateTime requestedEnd) {
+        Booking booking=bookingRepository.findById(bookingId).orElseThrow(() -> notFound("Booking not found."));
+        if (!Set.of("PENDING","PENDING_VERIFICATION","CONFIRMED","ASSIGNED","OTW","WAITING","PICKUP","DROP").contains(normalizeStatus(booking.getBookingStatus())))
+            throw conflict("Only pending or confirmed bookings can be scheduled.");
+        var end=requestedEnd != null ? requestedEnd : booking.getReservedEndAt();
+        if (booking.getBookingTripdate()==null || booking.getBookingPickuptime()==null || end==null
+                || !end.isAfter(booking.getBookingTripdate().atTime(booking.getBookingPickuptime())))
+            throw badRequest("Enter a valid scheduled end time to recheck availability.");
+        if (booking.getReservedEndAt()!=null && end.isBefore(booking.getReservedEndAt()))
+            throw badRequest("Scheduled end must include the road travel duration and repositioning buffer.");
+        var result=new java.util.ArrayList<AssignmentOption>();
+        for (Vehicle vehicle:vehicleRepository.findAll()) {
+            if (vehicle.getDriverId()==null) continue;
+            Driver driver=driverRepository.findById(vehicle.getDriverId()).orElse(null);
+            if (driver==null) continue;
+            if (vehicleRepository.findByDriverId(driver.getDriverId()).size()!=1) continue;
+            try {
+                validateAvailableDriver(driver);
+                validateAvailableVehicle(vehicle,booking);
+                validateSchedule(booking,end,driver,vehicle,null);
+                result.add(new AssignmentOption(vehicle.getVehicleId(),vehicle.getVehicleType(),vehicle.getVehicleModel(),
+                        vehicle.getVehiclePlateno(),vehicle.passengerLimit(),vehicle.getVehicleLuggageCapacity(),
+                        driver.getDriverId(),driver.getDriverName()));
+            } catch(ResponseStatusException unavailable) {
+                // Omit resources that fail the same rules used at confirmation.
+            }
+        }
+        result.sort(java.util.Comparator.comparing(AssignmentOption::passengerCapacity)
+                .thenComparing(AssignmentOption::luggagePointsCapacity,java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()))
+                .thenComparing(AssignmentOption::vehicleId));
+        return result;
+    }
+
+    private Vehicle linkedVehicle(Driver driver, Long requestedVehicleId) {
+        List<Vehicle> linked = vehicleRepository.findByDriverId(driver.getDriverId());
+        if (linked.size() != 1) {
+            throw conflict("Driver must have exactly one registered vehicle. Complete vehicle registration in Driver Management.");
+        }
+        Vehicle vehicle = vehicleRepository.findByIdForUpdate(linked.get(0).getVehicleId())
+                .orElseThrow(() -> notFound("Linked vehicle not found."));
+        if (!driver.getDriverId().equals(vehicle.getDriverId())) throw conflict("Vehicle relationship changed. Refresh and try again.");
+        if (requestedVehicleId != null && !requestedVehicleId.equals(vehicle.getVehicleId())) {
+            throw badRequest("The vehicle must be the selected driver's current linked vehicle.");
+        }
+        return vehicle;
+    }
+
+    private void validateSchedule(Booking booking, java.time.LocalDateTime endAt,
+            Driver driver, Vehicle vehicle, Long excludedAssignmentId) {
+        if (booking.getBookingTripdate() == null || booking.getBookingPickuptime() == null) {
+            throw badRequest("A booking pickup date and time are required for scheduling.");
+        }
+        java.time.LocalDateTime startAt = booking.getBookingTripdate().atTime(booking.getBookingPickuptime());
+        if (endAt == null || !endAt.isAfter(startAt)) {
+            throw badRequest("Enter a scheduled end time after the booking pickup time.");
+        }
+        if (booking.getReservedEndAt() != null && endAt.isBefore(booking.getReservedEndAt())) {
+            throw badRequest("Scheduled end must include the road travel duration and repositioning buffer.");
+        }
+        if (customerTrips != null && customerTrips.hasConflict(vehicle.getVehicleId(), driver.getDriverId(), startAt, endAt, booking.getBookingId())) {
+            throw conflict("This driver or vehicle is no longer available for the selected time. Choose another suitable vehicle.");
+        }
+        for (Assignment reserved : assignmentRepository.findResourceReservations(driver.getDriverId(), vehicle.getVehicleId())) {
+            if (reserved.getAssignmentId().equals(excludedAssignmentId)) continue;
+            Booking other = reserved.getBooking();
+            // Unknown legacy schedules cannot be assumed safe to overlap.
+            if (other.getBookingTripdate() == null || other.getBookingPickuptime() == null) {
+                throw conflict("A legacy active assignment has an unknown schedule. Complete or cancel it before reuse.");
+            }
+            java.time.LocalDateTime otherStart = other.getBookingTripdate().atTime(other.getBookingPickuptime());
+            java.time.LocalDateTime otherEnd = reserved.getScheduledEndAt();
+            if (startAt.isBefore(otherEnd == null ? java.time.LocalDateTime.MAX : otherEnd) && otherStart.isBefore(endAt)) {
+                throw conflict("The linked driver and vehicle have an overlapping booking assignment.");
+            }
+        }
+    }
+
     private void validateAvailableDriver(Driver driver) {
         if (!"ACTIVE".equalsIgnoreCase(driver.getDriverStatus())) {
             throw conflict("The selected driver account is not active.");
@@ -306,24 +414,24 @@ public class AssignmentServiceImpl implements AssignmentService {
     }
 
     private void validateAvailableVehicle(Vehicle vehicle, Booking booking) {
-        if (!"AVAILABLE".equalsIgnoreCase(vehicle.getVehicleStatus())) {
+        if (!Set.of("AVAILABLE", "ACTIVE").contains(
+                String.valueOf(vehicle.getVehicleStatus()).toUpperCase(Locale.ROOT))) {
             throw conflict("The selected vehicle is not available.");
         }
-        if (vehicle.getVehicleType() != null
-                && booking.getBookingType() != null
-                && !vehicle.getVehicleType().equalsIgnoreCase(booking.getBookingType())) {
-            throw conflict("The selected vehicle does not match the booking type.");
-        }
+        // bookingType is a recommendation, not a restriction on Admin alternatives.
         if (booking.getBookingPassengercount() != null
-                && (vehicle.getVehicleCapacity() == null
-                || vehicle.getVehicleCapacity() < booking.getBookingPassengercount())) {
+                && vehicle.passengerLimit() < booking.getBookingPassengercount()) {
             throw conflict("The selected vehicle does not have enough passenger capacity.");
         }
         if (booking.getBookingLuggagecount() != null
                 && booking.getBookingLuggagecount() > 0
                 && (vehicle.getVehicleLuggageCapacity() == null
-                || vehicle.getVehicleLuggageCapacity() < booking.getBookingLuggagecount())) {
+                || vehicle.getVehicleLuggageCapacity() < (booking.getLuggageUnits() != null ? booking.getLuggageUnits() : booking.getBookingLuggagecount()))) {
             throw conflict("The selected vehicle does not have enough luggage capacity.");
+        }
+        if (!vehicle.fitsSeparateLuggage(booking.getLargeCount() == null ? 0 : booking.getLargeCount(),
+                booking.getSmallCount() == null ? 0 : booking.getSmallCount())) {
+            throw conflict("The selected vehicle does not have enough large luggage or backpack capacity.");
         }
         if (booking.getBookingTripdate() != null
                 && vehicle.getVehicleRoadtaxexpiry() != null
@@ -353,6 +461,8 @@ public class AssignmentServiceImpl implements AssignmentService {
                 assignment.getVehicle().getVehiclePlateno(),
                 assignment.getBooking().getBookingTripdate()));
         notificationRepository.save(notification);
+        if (bookingPush != null) bookingPush.notifyAfterCommit("DRIVER",assignment.getDriver().getDriverId(),
+                notification.getTitle(),notification.getMessage());
     }
 
     private void createCustomerNotification(
@@ -369,6 +479,7 @@ public class AssignmentServiceImpl implements AssignmentService {
         notification.setTitle(title);
         notification.setMessage(message);
         notification.setNotificationType(type);
+        if (bookingPush != null) bookingPush.notifyAfterCommit("CUSTOMER",booking.getCustId(),title,message);
         notificationRepository.save(notification);
     }
 
@@ -395,8 +506,8 @@ public class AssignmentServiceImpl implements AssignmentService {
         Vehicle vehicle = vehicleRepository.findByIdForUpdate(
                         assignment.getVehicle().getVehicleId())
                 .orElseThrow(() -> notFound("Vehicle not found."));
-        driver.setDriverAvailability("AVAILABLE");
-        vehicle.setVehicleStatus("AVAILABLE");
+        // Reservation release leaves administrator-managed availability unchanged.
+        // Operational status is independent of booking reservations.
     }
 
     private void clearBookingResources(Booking booking) {
@@ -430,7 +541,8 @@ public class AssignmentServiceImpl implements AssignmentService {
                 summary.getVehicleId(),
                 summary.getVehiclePlate(),
                 summary.getAssignmentStatus(),
-                summary.getAssignmentDate());
+                summary.getAssignmentDate(), summary.getScheduledEndAt(),
+                summary.getSmallCount(),summary.getMediumCount(),summary.getLargeCount(),summary.getLuggageUnits());
     }
 
     private void ensureActive(Assignment assignment) {

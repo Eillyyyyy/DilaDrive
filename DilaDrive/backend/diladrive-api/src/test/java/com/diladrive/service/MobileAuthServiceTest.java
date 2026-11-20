@@ -24,6 +24,25 @@ class MobileAuthServiceTest {
             new MobileAuthService(customerRepository, driverRepository, new PasswordService());
 
     @Test
+    void disabledDriverCannotLoginEvenWithCorrectPassword() {
+        Driver driver = new Driver();
+        driver.setDriverStatus("DISABLED");
+        driver.setDriverPassword("correct-password");
+        when(driverRepository.findByDriverEmailIgnoreCase("driver@example.com")).thenReturn(Optional.of(driver));
+        assertTrue(service.login(request("driver@example.com", "correct-password", "DRIVER")).isEmpty());
+        verify(driverRepository, never()).save(any());
+    }
+
+    @Test
+    void driverSelfRegistrationRoleIsRejected() {
+        try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
+            var violations = factory.getValidator().validate(new MobileRegistrationRequest(
+                    "Driver", "driver@example.com", null, "DRIVER", null, null, "password123"));
+            assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("type")));
+        }
+    }
+
+    @Test
     void customerLoginMigratesLegacyPasswordAndReturnsSafeProfile() throws Exception {
         Customer customer = new Customer();
         customer.setCustId(7L);
@@ -49,6 +68,7 @@ class MobileAuthServiceTest {
     void driverLoginAcceptsBcryptPassword() {
         Driver driver = new Driver();
         driver.setDriverId(9L);
+        driver.setDriverStatus("ACTIVE");
         driver.setDriverName("Test Driver");
         driver.setDriverEmail("driver@example.com");
         driver.setDriverPassword(new BCryptPasswordEncoder().encode("driver-password"));

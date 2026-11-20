@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 
 public record QuotationRequest(
         @NotNull @Positive Long bookingId,
-        @NotNull @DecimalMin("0.01") @Digits(integer = 8, fraction = 2)
+        @NotNull @DecimalMin("0.00") @Digits(integer = 8, fraction = 2)
         BigDecimal amount,
         @Size(max = 5000) String remarks) {
 }

@@ -13,10 +13,12 @@ class BookingReviewPage extends StatefulWidget {
     super.key,
     required this.draft,
     this.bookingService,
+    this.requestDistanceReview = false,
   });
 
   final BookingDraft draft;
   final BookingService? bookingService;
+  final bool requestDistanceReview;
 
   @override
   State<BookingReviewPage> createState() => _BookingReviewPageState();
@@ -40,7 +42,8 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
   Future<void> _confirmBooking() async {
     if (_isSubmitting || _reference != null) return;
     final draft = widget.draft;
-    if (draft.recommendedVehicle == null) {
+    if (!widget.requestDistanceReview &&
+        (!draft.hasFreshAvailability || draft.fareEstimate == null)) {
       setState(() {
         _error = 'A live vehicle recommendation is required before submitting.';
       });
@@ -52,10 +55,10 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
       _error = null;
     });
     try {
-      final reference = await _bookingService.createBooking(
-        draft,
-        idempotencyKey: _idempotencyKey,
-      );
+      final reference = await (widget.requestDistanceReview
+          ? _bookingService.requestRoadDistanceReview(draft,
+              idempotencyKey: _idempotencyKey)
+          : _bookingService.createBooking(draft, idempotencyKey: _idempotencyKey));
       if (!mounted) return;
       setState(() => _reference = reference);
     } on BookingException catch (exception) {
@@ -65,6 +68,44 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
           MaterialPageRoute<void>(builder: (_) => const LoginPage()),
           (_) => false,
         );
+        return;
+      }
+      if (exception.code == 'FARE_REVIEW_REQUIRED' &&
+          exception.refreshedQuote != null) {
+        final quote = exception.refreshedQuote!;
+        final fare = FareEstimate.fromJson(quote);
+        final accepted = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+                  title: const Text('Review updated fare'),
+                  content: Text('The fare or pricing configuration changed.\n'
+                      'Previous: MYR ${draft.fareEstimate!.total.toStringAsFixed(2)}\n'
+                      'Updated: MYR ${fare.total.toStringAsFixed(2)}\n'
+                      'Category: ${quote['recommendedVehicleType']}\n'
+                      'Road distance: ${fare.distanceKm.toStringAsFixed(2)} km\n'
+                      'Base fare: MYR ${fare.baseFare.toStringAsFixed(2)}\n'
+                      'Rate/km: MYR ${(fare.ratePerKm ?? 0).toStringAsFixed(4)}\n'
+                      'Distance charge: MYR ${fare.distanceCharge.toStringAsFixed(2)}\n'
+                      'Review and accept before submitting.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Keep reviewing')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Accept updated fare'))
+                  ],
+                ));
+        if (!mounted) return;
+        if (accepted == true) {
+          setState(() {
+            draft.fareEstimate = fare;
+            draft.recommendedVehicle = RecommendedVehicle.fromJson(
+                quote['vehicle'] as Map<String, dynamic>);
+            _error =
+                'Updated fare accepted. Review the summary and confirm your booking.';
+          });
+        }
         return;
       }
       setState(() => _error = exception.message);
@@ -96,14 +137,16 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
       actionLabel: isSubmitted
           ? 'Finish'
           : _isSubmitting
-              ? 'Submitting booking…'
+              ? 'Submitting bookingâ€¦'
               : _error == null
                   ? 'Confirm booking'
                   : 'Try again',
       onAction: isSubmitted ? _closeFlow : _confirmBooking,
       isLoading: _isSubmitting,
-      actionEnabled:
-          isSubmitted || (!_isSubmitting && draft.recommendedVehicle != null),
+      actionEnabled: isSubmitted ||
+          (!_isSubmitting &&
+              (widget.requestDistanceReview ||
+                  (draft.hasFreshAvailability && draft.fareEstimate != null))),
       child: Column(
         children: [
           if (isSubmitted)
@@ -128,8 +171,8 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
                   Text('Booking reference: $_reference'),
                   const SizedBox(height: 8),
                   const Text(
-                    'This is not a confirmed trip. An Admin must verify the '
-                    'booking before it is confirmed.',
+                    'Your booking request has been submitted and is awaiting Admin confirmation. '
+                    'Vehicle availability is not reserved until your booking is confirmed.',
                     textAlign: TextAlign.center,
                     style: TextStyle(height: 1.4),
                   ),
@@ -166,6 +209,16 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
                   _SummaryLine(label: 'Name', value: draft.customerName),
                   _SummaryLine(label: 'Phone', value: draft.phoneNumber),
                   const Divider(height: 24),
+                  _SummaryLine(
+                      label: 'Small / medium / large bags',
+                      value:
+                          '${draft.smallCount} / ${draft.mediumCount} / ${draft.largeCount}'),
+                  _SummaryLine(
+                      label: 'Luggage points', value: '${draft.luggageUnits}'),
+                  if (!widget.requestDistanceReview) _SummaryLine(
+                      label: 'Travel duration',
+                      value:
+                          '${((draft.fareEstimate?.durationSeconds ?? 0) / 60).ceil()} minutes'),
                   const _SectionTitle(title: 'Trip'),
                   _SummaryLine(label: 'Trip type', value: draft.tripType.label),
                   _SummaryLine(
@@ -210,7 +263,7 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
                     label: 'Luggage',
                     value: draft.luggageCount == 0
                         ? 'None'
-                        : '${draft.luggageCount} • ${draft.luggageSize}',
+                        : '${draft.luggageCount} â€¢ ${draft.luggageSize}',
                     icon: Icons.luggage_outlined,
                   ),
                   if (draft.additionalNotes != null)
@@ -226,10 +279,17 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
                     value: draft.recommendedVehicle?.model ?? 'Not available',
                     icon: Icons.airport_shuttle_outlined,
                   ),
+                  if (draft.fareEstimate != null)
+                    _SummaryLine(
+                      label: 'Distance',
+                      value:
+                          '${draft.fareEstimate!.distanceKm.toStringAsFixed(1)} km',
+                      icon: Icons.route_outlined,
+                    ),
                   _SummaryLine(
-                    label: 'Fare',
+                    label: 'Estimated fare',
                     value: draft.fareEstimate == null
-                        ? 'Admin will set the final fare'
+                        ? 'Pending Admin confirmation of road distance'
                         : 'Estimate: RM '
                             '${draft.fareEstimate!.total.toStringAsFixed(2)}',
                     icon: Icons.payments_outlined,

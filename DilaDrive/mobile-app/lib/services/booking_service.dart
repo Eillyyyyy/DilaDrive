@@ -19,141 +19,220 @@ class BookingService {
   }
 
   Future<AvailabilityResult> checkAvailability(BookingDraft draft) async {
-    final scheduledAt = draft.scheduledAt;
-    if (scheduledAt == null ||
-        draft.pickupAddress.trim().isEmpty ||
-        draft.destinationAddress.trim().isEmpty ||
-        draft.passengerCount < 1 ||
-        draft.luggageCount < 0 ||
-        (draft.luggageCount > 0 && draft.luggageSize == null)) {
-      throw const BookingException(
-        'Complete the trip locations, schedule and passenger/luggage details first.',
-      );
-    }
-
-    final response = await _request(
-      () => _client.get(
-        Uri.parse(
-                '${AppConfig.apiBaseUrl}/api/bookings/availability/recommendation')
-            .replace(queryParameters: {
-          'pickupAddress': draft.pickupAddress,
-          'destinationAddress': draft.destinationAddress,
-          'scheduledAt': scheduledAt.toIso8601String(),
-          'tripType': _tripTypeValue(draft),
-          'passengerCount': '${draft.passengerCount}',
-          'luggageCount': '${draft.luggageCount}',
-          if (draft.luggageSize != null) 'luggageSize': draft.luggageSize!,
-        }),
-        headers: MobileSession.headers,
-      ),
-    );
-    final payload = _decodeObject(response);
-    final available = payload['available'];
-    if (available is! bool) {
-      throw const BookingException(
-        'The availability service returned an invalid response.',
-      );
-    }
-
-    if (!available) {
-      final message = payload['message'];
-      return AvailabilityResult.unavailable(
-        message is String && message.isNotEmpty
-            ? message
-            : 'No suitable vehicle and driver are currently available.',
-      );
-    }
-
-    final rawVehicle = payload['vehicle'];
-    if (rawVehicle is! Map<String, dynamic>) {
-      throw const BookingException(
-        'The availability service returned no recommended vehicle.',
-      );
-    }
-
+    final key = draft.availabilityKey;
+    draft.clearAvailability();
+    final version = draft.availabilityRequestVersion;
     try {
-      return AvailabilityResult.available(
-        RecommendedVehicle.fromJson(rawVehicle),
-      );
-    } on FormatException catch (exception) {
-      throw BookingException(exception.message.toString());
+      final payload = await _quote(draft, availabilityOnly: true);
+      final status = AvailabilityStatus.values
+          .where((s) => s.apiValue == payload['availabilityStatus'])
+          .firstOrNull;
+      if (status == null ||
+          (payload['available'] == true) !=
+              (status == AvailabilityStatus.available)) {
+        throw const BookingException(
+            'The availability API response is incompatible. Restart the updated backend and verify API_BASE_URL.');
+      }
+      if (version != draft.availabilityRequestVersion ||
+          key != draft.availabilityKey) {
+        return AvailabilityResult.unavailable(
+            'Trip details changed. Check availability again.',
+            status: AvailabilityStatus.serviceError);
+      }
+      final available = payload['available'];
+      if (available is! bool) {
+        throw const BookingException(
+          'The availability service returned an invalid response.',
+        );
+      }
+
+      if (!available) {
+        final message = payload['message'];
+        return AvailabilityResult.unavailable(
+          message is String && message.isNotEmpty ? message : status.message,
+          status: status,
+        );
+      }
+
+      final rawVehicle = payload['vehicle'];
+      if (rawVehicle is! Map<String, dynamic>) {
+        throw const BookingException(
+          'The availability service returned no recommended vehicle.',
+        );
+      }
+
+      try {
+        final vehicle = RecommendedVehicle.fromJson(rawVehicle);
+        draft.recommendedVehicle = vehicle;
+        draft.availabilityCheckedFor = key;
+        return AvailabilityResult.available(vehicle);
+      } on FormatException catch (exception) {
+        throw BookingException(exception.message.toString());
+      }
+    } on BookingException catch (error) {
+      if (version == draft.availabilityRequestVersion) {
+        draft.clearAvailability();
+      }
+      if (error.requiresLogin || error.code == 'ROAD_DISTANCE_REVIEW_AVAILABLE') {
+        rethrow;
+      }
+      return AvailabilityResult.unavailable(error.message,
+          status: AvailabilityStatus.serviceError);
+    } on FormatException catch (error) {
+      if (version == draft.availabilityRequestVersion) {
+        draft.clearAvailability();
+      }
+      return AvailabilityResult.unavailable(error.message.toString(),
+          status: AvailabilityStatus.serviceError);
     }
   }
 
   Future<FareEstimate> estimateFare(BookingDraft draft) async {
-    final vehicle = draft.recommendedVehicle;
-    if (vehicle == null) {
+    if (!draft.hasFreshAvailability) {
       throw const BookingException(
-        'A live vehicle recommendation is required before requesting a fare.',
-      );
+          'Check vehicle availability again before calculating fare.');
     }
-
-    final response = await _request(
-      () => _client.get(
-        Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/fare-estimate')
-            .replace(queryParameters: {
-          'pickupAddress': draft.pickupAddress,
-          'destinationAddress': draft.destinationAddress,
-          'vehicleId': '${vehicle.id}',
-          'tripType': draft.tripType.name,
-          'passengerCount': '${draft.passengerCount}',
-          'luggageCount': '${draft.luggageCount}',
-          if (draft.luggageSize != null) 'luggageSize': draft.luggageSize!,
-        }),
-        headers: MobileSession.headers,
-      ),
-    );
+    final key = draft.availabilityKey;
+    final version = draft.availabilityRequestVersion;
     try {
-      final payload = _decodeObject(response);
-      if (payload['available'] == false) {
-        final message = payload['message'];
+      final payload = await _quote(draft);
+      if (payload['available'] != true) {
         throw BookingException(
-          message is String
-              ? message
-              : 'A fare estimate is not available for this route yet.',
-        );
+            payload['message'] as String? ?? 'No vehicles available.');
       }
-      return FareEstimate.fromJson(payload);
-    } on FormatException catch (exception) {
-      throw BookingException(exception.message.toString());
+      final estimate = FareEstimate.fromJson(payload);
+      if (draft.availabilityKey != key ||
+          version != draft.availabilityRequestVersion) {
+        throw const BookingException(
+            'Trip details changed. Check availability again.');
+      }
+      draft.recommendedVehicle = RecommendedVehicle.fromJson(
+          payload['vehicle'] as Map<String, dynamic>);
+      draft.fareEstimate = estimate;
+      return estimate;
+    } on BookingException catch (error) {
+      if (version == draft.availabilityRequestVersion) {
+        draft.fareEstimate = null;
+        if (!const {'PRICING_NOT_CONFIGURED', 'INVALID_PRICING_CONFIGURATION'}
+            .contains(error.code)) {
+          draft.clearAvailability();
+        }
+      }
+      rethrow;
+    } on FormatException catch (error) {
+      if (version == draft.availabilityRequestVersion) {
+        draft.clearAvailability();
+      }
+      throw BookingException(error.message.toString());
     }
+  }
+
+  Map<String, dynamic> tripPayload(BookingDraft draft,
+      {bool routeOnly = false}) {
+    final pickup = draft.pickupCoordinates;
+    final destination = draft.destinationCoordinates;
+    if (pickup?.isValid != true || destination?.isValid != true) {
+      throw const BookingException(
+          'Choose geocoded pickup and destination locations before continuing.');
+    }
+    return {
+      'pickupAddress': draft.pickupAddress,
+      'destinationAddress': draft.destinationAddress,
+      'pickupLatitude': pickup!.latitude,
+      'pickupLongitude': pickup.longitude,
+      'destinationLatitude': destination!.latitude,
+      'destinationLongitude': destination.longitude,
+      'scheduledAt': (routeOnly
+              ? DateTime.now().add(const Duration(days: 1))
+              : draft.scheduledAt)
+          ?.toIso8601String(),
+      'passengerCount': draft.passengerCount,
+      'smallCount': draft.smallCount,
+      'mediumCount': draft.mediumCount,
+      'largeCount': draft.largeCount,
+      'tripType': _tripTypeValue(draft),
+      'flightNumber': draft.flightNumber,
+      'additionalNotes': draft.additionalNotes,
+      if (!routeOnly && draft.recommendedVehicle != null)
+        'vehicleCategory': draft.recommendedVehicle!.type,
+      if (!routeOnly && draft.fareEstimate?.quoteToken != null)
+        'acceptedQuoteToken': draft.fareEstimate!.quoteToken,
+    };
+  }
+
+  Future<Map<String, dynamic>> previewRoute(BookingDraft draft) async {
+    return _decodeObject(await _request(() => _client.post(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/route'),
+          headers: {
+            'Content-Type': 'application/json',
+            ...MobileSession.headers
+          },
+          body: jsonEncode(tripPayload(draft, routeOnly: true)),
+        )));
+  }
+
+  Future<Map<String, dynamic>> _quote(BookingDraft draft,
+      {bool availabilityOnly = false}) async {
+    final endpoint = availabilityOnly ? 'availability' : 'estimate';
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/$endpoint')
+        .replace(
+            queryParameters: draft.existingBookingId == null
+                ? null
+                : {'bookingId': '${draft.existingBookingId}'});
+    return _decodeObject(await _request(() => _client.post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            ...MobileSession.headers
+          },
+          body: jsonEncode(tripPayload(draft)),
+        )));
   }
 
   Future<String> createBooking(
     BookingDraft draft, {
     required String idempotencyKey,
   }) async {
-    if (draft.bookingDate == null || draft.recommendedVehicle == null) {
+    if (draft.bookingDate == null ||
+        !draft.hasFreshAvailability ||
+        draft.fareEstimate == null) {
       throw const BookingException(
         'Live vehicle availability is required before submission.',
       );
     }
 
-    final response = await _request(
-      () => _client.post(
-        Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/customer'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Idempotency-Key': idempotencyKey,
-          ...MobileSession.headers,
-        },
-        body: jsonEncode({
-          'bookingType': draft.recommendedVehicle!.type,
-          'tripType': _tripTypeValue(draft),
-          'bookingDate': _date(draft.bookingDate!),
-          'pickupTime': _time(draft.pickupTime),
-          'landedTime': _time(draft.landedTime),
-          'flightNumber': draft.flightNumber,
-          'pickupAddress': draft.pickupAddress,
-          'destinationAddress': draft.destinationAddress,
-          'passengerCount': draft.passengerCount,
-          'luggageCount': draft.luggageCount,
-          'luggageSize': draft.luggageSize,
-          'additionalNotes': draft.additionalNotes,
-        }),
-      ),
-    );
+    return _submitBooking(draft, idempotencyKey: idempotencyKey);
+  }
+
+  Future<String> requestRoadDistanceReview(
+    BookingDraft draft, {
+    required String idempotencyKey,
+  }) {
+    if (draft.existingBookingId != null || draft.bookingDate == null) {
+      throw const BookingException('Only a new booking can request distance review.');
+    }
+    return _submitBooking(draft, idempotencyKey: idempotencyKey, distanceReview: true);
+  }
+
+  Future<String> _submitBooking(BookingDraft draft, {
+    required String idempotencyKey,
+    bool distanceReview = false,
+  }) async {
+    final uri = Uri.parse(distanceReview
+        ? '${AppConfig.apiBaseUrl}/api/bookings/customer/road-distance-review'
+        : draft.existingBookingId == null
+        ? '${AppConfig.apiBaseUrl}/api/bookings/customer/complete'
+        : '${AppConfig.apiBaseUrl}/api/bookings/${draft.existingBookingId}/customer/complete');
+    final headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      ...MobileSession.headers
+    };
+    final body = jsonEncode(tripPayload(draft));
+    final response = await _request(() => draft.existingBookingId == null
+        ? _client.post(uri, headers: headers, body: body)
+        : _client.put(uri, headers: headers, body: body));
     final payload = _decodeObject(response);
     final reference = payload['bookingReference'];
     final status = payload['bookingStatus'] ?? payload['status'];
@@ -221,7 +300,16 @@ class BookingService {
         );
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw BookingException(_serverErrorMessage(response));
+        Map<String, dynamic>? error;
+        try {
+          final body = jsonDecode(response.body);
+          if (body is Map<String, dynamic>) error = body;
+        } on FormatException {/* Use the standard endpoint error below. */}
+        throw BookingException(_serverErrorMessage(response),
+            code: error?['code'] as String?,
+            refreshedQuote: error?['refreshedQuote'] is Map<String, dynamic>
+                ? error!['refreshedQuote'] as Map<String, dynamic>
+                : null);
       }
       return response;
     } on TimeoutException {
@@ -291,29 +379,56 @@ class BookingService {
           '${time.second.toString().padLeft(2, '0')}';
 }
 
+enum AvailabilityStatus {
+  available('AVAILABLE', 'Available when checked'),
+  capacityUnavailable('CAPACITY_UNAVAILABLE',
+      'No suitable vehicle is currently available. Please contact the administrator.'),
+  scheduleUnavailable('SCHEDULE_UNAVAILABLE',
+      'No suitable vehicle is currently available. Please contact the administrator.'),
+  fleetNotConfigured('FLEET_NOT_CONFIGURED',
+      'Vehicle availability is not configured. Please retry later or contact DilaDrive.'),
+  serviceError('SERVICE_ERROR',
+      'Unable to check vehicle availability. Please try again.');
+
+  const AvailabilityStatus(this.apiValue, this.message);
+  final String apiValue;
+  final String message;
+}
+
 class AvailabilityResult {
   const AvailabilityResult._({
     required this.isAvailable,
     this.vehicle,
     this.message,
+    required this.status,
   });
 
   factory AvailabilityResult.available(RecommendedVehicle vehicle) =>
-      AvailabilityResult._(isAvailable: true, vehicle: vehicle);
+      AvailabilityResult._(
+          isAvailable: true,
+          vehicle: vehicle,
+          status: AvailabilityStatus.available);
 
-  factory AvailabilityResult.unavailable(String message) =>
-      AvailabilityResult._(isAvailable: false, message: message);
+  factory AvailabilityResult.unavailable(String message,
+          {AvailabilityStatus status =
+              AvailabilityStatus.scheduleUnavailable}) =>
+      AvailabilityResult._(
+          isAvailable: false, message: message, status: status);
 
   final bool isAvailable;
+  final AvailabilityStatus status;
   final RecommendedVehicle? vehicle;
   final String? message;
 }
 
 class BookingException implements Exception {
-  const BookingException(this.message, {this.requiresLogin = false});
+  const BookingException(this.message,
+      {this.requiresLogin = false, this.code, this.refreshedQuote});
 
   final String message;
   final bool requiresLogin;
+  final String? code;
+  final Map<String, dynamic>? refreshedQuote;
 
   @override
   String toString() => message;

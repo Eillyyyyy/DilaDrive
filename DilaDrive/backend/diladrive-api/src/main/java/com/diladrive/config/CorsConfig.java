@@ -10,17 +10,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class CorsConfig {
 
     @Bean
-    public WebMvcConfigurer corsConfigurer() {
+    public WebMvcConfigurer corsConfigurer(
+            @org.springframework.beans.factory.annotation.Value("${app.cors.allowed-origins:http://localhost:5173}") String origins) {
         return new WebMvcConfigurer() {
 
             @Override
             public void addCorsMappings(CorsRegistry registry) {
 
                 registry.addMapping("/api/**")
-                        .allowedOriginPatterns(
-                                "http://localhost:*",
-                                "http://127.0.0.1:*"
-                        )
+                        .allowedOriginPatterns(origins.split("\\s*,\\s*"))
                         .allowedMethods(
                                 "GET",
                                 "POST",
@@ -29,7 +27,7 @@ public class CorsConfig {
                                 "DELETE",
                                 "OPTIONS"
                         )
-                        .allowedHeaders("*")
+                        .allowedHeaders("Content-Type", "Authorization", "Accept", "Idempotency-Key", "X-CSRF-TOKEN", "X-XSRF-TOKEN")
                         .allowCredentials(true)
                         .maxAge(3600);
             }

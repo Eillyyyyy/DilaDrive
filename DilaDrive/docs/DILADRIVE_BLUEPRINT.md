@@ -281,11 +281,12 @@ Login / Register → Home (upcoming booking, quick book)
 | View account | ✔ | ◐ | ◐ |
 | Update account | ✔ | ◐ | ◐ |
 | Verify customer account | ✔ | ✖ | ✖ |
-| Create / view / update vehicle | ✔ | ✖ | ✖ |
+| Create / update vehicle | ✔ | ✖ | ✖ |
+| View vehicle | ✔ | ◐ (linked vehicle) | ✖ |
 | Create booking | ✔ | ✖ | ✔ |
 | View booking | ✔ | ◐ (assigned) | ◐ |
 | Update booking | ✔ | ✖ | ◐ (before confirmed) |
-| Cancel booking | ✔ | ✖ | ◐ |
+| Cancel booking | ✖ | ✖ | ◐ (eligible bookings without an active assignment) |
 | Verify booking (→ send notification) | ✔ | ✖ | ✖ |
 | Assign driver & vehicle | ✔ | ✖ | ✖ |
 | Reassign trip | ✔ | ✖ | ✖ |
@@ -294,12 +295,14 @@ Login / Register → Home (upcoming booking, quick book)
 | Update trip status / milestones | ✔ (override) | ◐ | ✖ |
 | View trip progress | ✔ | ◐ | ◐ (read-only) |
 | Upload payment receipt | ✖ | ✖ | ◐ |
+| Record cash received | ✔ | ◐ (own completed trips) | ✖ |
 | Verify payment status | ✔ | ✖ | ✖ |
 | Generate document | ✔ | ✖ | ✖ |
 | View document | ✔ | ✖ | ◐ |
 | Update document | ✔ | ✖ | ✖ |
 | Download document | ✔ | ✖ | ◐ |
 | Dashboard / reports | ✔ | ✖ | ✖ |
+| Delete business records | ✖ | ✖ | ✖ |
 
 > Interpretation notes: Use case diagram shows Driver linked to *View Account*; Customer to *Create/View/Update Account*. Admin override on milestones and customer progress view are my additions to match thesis scope ("customers can track trip details") — confirm.
 

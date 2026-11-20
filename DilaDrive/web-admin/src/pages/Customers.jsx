@@ -72,6 +72,29 @@ export default function Customers() {
   const [customerToVerify, setCustomerToVerify] = useState(null);
   const [verifyingId, setVerifyingId] = useState(null);
   const [verificationError, setVerificationError] = useState("");
+  const [customerForm, setCustomerForm] = useState(null);
+  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  const openCustomerForm = (customer) => {
+    setSelectedCustomer(null);
+    setSaveError("");
+    setCustomerForm({
+      id: customer?.id,
+      custName: customer?.name ?? "",
+      custEmail: customer?.email ?? "",
+      custPhoneno: customer?.phone ?? "",
+      custType: customer?.custType ?? "NORMAL",
+      companyName: customer?.companyName ?? "",
+      companyRegistrationNumber: customer?.companyRegistrationNumber ?? "",
+      custPassword: "",
+    });
+  };
+
+  const changeCustomerField = (event) => {
+    const { name, value } = event.target;
+    setCustomerForm((current) => ({ ...current, [name]: value }));
+  };
 
   const fetchCustomers = useCallback(async () => {
     setCustomersLoading(true);
@@ -104,6 +127,43 @@ export default function Customers() {
   useEffect(() => {
     fetchCustomers();
   }, [fetchCustomers]);
+
+  const saveCustomer = async (event) => {
+    event.preventDefault();
+    if (savingCustomer) return;
+    setSavingCustomer(true);
+    setSaveError("");
+    const { id, custPassword, custType, companyName, companyRegistrationNumber, ...fields } = customerForm;
+    const payload = {
+      ...fields,
+      custName: fields.custName.trim(),
+      custEmail: fields.custEmail.trim(),
+      custPhoneno: fields.custPhoneno.trim() || null,
+      ...(custType === "COMPANY" && {
+        companyName: companyName.trim(),
+        companyRegistrationNumber: companyRegistrationNumber.trim(),
+      }),
+    };
+    try {
+      if (!payload.custName) {
+        setSaveError("Enter the customer name.");
+        return;
+      }
+      if (id) {
+        await api.put(`/customers/${id}`, payload);
+      } else {
+        await api.post("/customers", { ...payload, custType, custPassword });
+      }
+      setCustomerForm(null);
+      await fetchCustomers();
+    } catch (error) {
+      const response = error.response?.data;
+      setSaveError((typeof response === "string" ? response : response?.message)
+        || "Unable to save this customer.");
+    } finally {
+      setSavingCustomer(false);
+    }
+  };
 
   const verifiedCount = customerList.filter(
     (customer) => customer.status === "Verified"
@@ -194,10 +254,10 @@ export default function Customers() {
             access transportation services.
           </p>
         </div>
-        <div className="inline-flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 shadow-sm">
-          <Users size={17} className="text-teal-700" />
-          {customerList.length} total accounts
-        </div>
+        <button type="button" onClick={() => openCustomerForm()}
+          className="w-fit rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800">
+          Add customer
+        </button>
       </section>
 
       {/* Summary cards */}
@@ -518,6 +578,10 @@ export default function Customers() {
               >
                 Close
               </button>
+              <button type="button" onClick={() => openCustomerForm(selectedCustomer)}
+                className="rounded-xl border border-teal-700 px-4 py-2.5 text-sm font-semibold text-teal-700">
+                Edit customer
+              </button>
               {selectedCustomer.status !== "Verified" && (
                 <button
                   type="button"
@@ -530,6 +594,77 @@ export default function Customers() {
               )}
             </div>
           </section>
+        </div>
+      )}
+
+      {customerForm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4">
+          <form role="dialog" aria-modal="true" aria-labelledby="customer-form-title"
+            onSubmit={saveCustomer} className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 id="customer-form-title" className="text-xl font-bold text-slate-900">
+              {customerForm.id ? "Edit customer" : "Add customer"}
+            </h2>
+            <fieldset disabled={savingCustomer} className="space-y-3">
+              <label className="block text-sm font-medium">
+                Name
+                <input required name="custName" value={customerForm.custName} onChange={changeCustomerField}
+                  className="mt-1 w-full rounded-lg border px-3 py-2" />
+              </label>
+              <label className="block text-sm font-medium">
+                Email
+                <input required type="email" name="custEmail" value={customerForm.custEmail} onChange={changeCustomerField}
+                  className="mt-1 w-full rounded-lg border px-3 py-2" />
+              </label>
+              <label className="block text-sm font-medium">
+                Phone
+                <input type="tel" name="custPhoneno" value={customerForm.custPhoneno} onChange={changeCustomerField}
+                  className="mt-1 w-full rounded-lg border px-3 py-2" />
+              </label>
+              {!customerForm.id && (
+                <>
+                  <label className="block text-sm font-medium">
+                    Account type
+                    <select name="custType" value={customerForm.custType} onChange={changeCustomerField}
+                      className="mt-1 w-full rounded-lg border px-3 py-2">
+                      <option value="NORMAL">Normal</option>
+                      <option value="COMPANY">Corporate</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Password
+                    <input required type="password" autoComplete="new-password" name="custPassword"
+                      value={customerForm.custPassword} onChange={changeCustomerField}
+                      className="mt-1 w-full rounded-lg border px-3 py-2" />
+                  </label>
+                </>
+              )}
+              {customerForm.custType === "COMPANY" && (
+                <>
+                  <label className="block text-sm font-medium">
+                    Company or organization name
+                    <input required maxLength={150} name="companyName" value={customerForm.companyName}
+                      onChange={changeCustomerField} className="mt-1 w-full rounded-lg border px-3 py-2" />
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Company registration number
+                    <input required maxLength={30} name="companyRegistrationNumber" value={customerForm.companyRegistrationNumber}
+                      onChange={changeCustomerField} className="mt-1 w-full rounded-lg border px-3 py-2" />
+                  </label>
+                </>
+              )}
+            </fieldset>
+            {saveError && <p role="alert" className="text-sm text-rose-700">{saveError}</p>}
+            <div className="flex justify-end gap-3">
+              <button type="button" disabled={savingCustomer} onClick={() => setCustomerForm(null)}
+                className="rounded-xl border px-4 py-2 text-sm font-semibold">
+                Close
+              </button>
+              <button type="submit" disabled={savingCustomer}
+                className="rounded-xl bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                {savingCustomer ? "Saving…" : "Save customer"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

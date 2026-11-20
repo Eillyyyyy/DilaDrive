@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 
 import '../../models/mobile_user.dart';
+import '../../services/customer_notification_service.dart';
+import '../../services/push_notification_service.dart';
+import '../../widgets/unread_notification_badge.dart';
 import 'dashboard.dart';
 import 'bookings.dart';
 import 'notification.dart';
@@ -25,6 +28,8 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
   int currentIndex = 0;
   final List<int> _tabRefreshVersions = [0, 0, 0, 0];
   late MobileUser _customer;
+  final _notificationService = CustomerNotificationService();
+  final _inboxChanges = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -34,6 +39,13 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
 
   void _updateCustomer(MobileUser customer) {
     setState(() => _customer = customer);
+  }
+
+  @override
+  void dispose() {
+    _notificationService.dispose();
+    _inboxChanges.dispose();
+    super.dispose();
   }
 
   @override
@@ -50,6 +62,8 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
       ),
       NotificationPage(
         key: ValueKey('customer-notifications-${_tabRefreshVersions[2]}'),
+        notificationService: _notificationService,
+        onInboxChanged: () => _inboxChanges.value++,
       ),
       ProfilePage(
         key: ValueKey('customer-profile-${_tabRefreshVersions[3]}'),
@@ -133,6 +147,11 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
     int index,
   ) {
     final selected = currentIndex == index;
+    final navIcon = Icon(
+      selected ? activeIcon : icon,
+      color: selected ? AppTheme.secondarySkyBlue : AppTheme.secondaryText,
+      size: 24,
+    );
 
     return Expanded(
       child: InkWell(
@@ -146,12 +165,15 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              selected ? activeIcon : icon,
-              color:
-                  selected ? AppTheme.secondarySkyBlue : AppTheme.secondaryText,
-              size: 24,
-            ),
+            if (index == 2)
+              UnreadNotificationBadge(
+                icon: navIcon,
+                loadNotifications: _notificationService.getMyNotifications,
+                inboxChanges: _inboxChanges,
+                pushUpdates: PushNotificationService.updates,
+              )
+            else
+              navIcon,
             const SizedBox(height: 4),
             Text(
               label,

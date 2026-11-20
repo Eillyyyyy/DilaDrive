@@ -1,3 +1,4 @@
+import 'booking/booking_location_page.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/booking_draft.dart';
@@ -29,6 +30,7 @@ class _UpdateBookingPageState extends State<UpdateBookingPage> {
   DateTime? _scheduledTime;
   String? _luggageSize;
   bool _saving = false;
+  BookingDraft? _completeDraft;
 
   @override
   void initState() {
@@ -52,6 +54,33 @@ class _UpdateBookingPageState extends State<UpdateBookingPage> {
     };
     _date = booking.tripDate;
     _scheduledTime = _parseTime(booking.pickupTime);
+    if (booking.durationSeconds != null) {
+      final date = booking.tripDate!, time = _parseTime(booking.pickupTime)!;
+      final scheduled =
+          DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _completeDraft = BookingDraft(
+          customerName: booking.contactName ?? '',
+          phoneNumber: booking.contactPhone ?? '')
+        ..existingBookingId = booking.id
+        ..pickupAddress = booking.pickupAddress ?? ''
+        ..destinationAddress = booking.destinationAddress ?? ''
+        ..pickupCoordinates = BookingCoordinates(
+            latitude: booking.pickupLatitude!,
+            longitude: booking.pickupLongitude!)
+        ..destinationCoordinates = BookingCoordinates(
+            latitude: booking.destinationLatitude!,
+            longitude: booking.destinationLongitude!)
+        ..tripType = _tripType ?? BookingTripType.normalTransfer
+        ..bookingDate = date
+        ..pickupTime = scheduled
+        ..landedTime = scheduled
+        ..smallCount = booking.smallCount ?? 0
+        ..mediumCount = booking.mediumCount ?? 0
+        ..largeCount = booking.largeCount ?? 0
+        ..passengerCount = booking.passengerCount ?? 1
+        ..flightNumber = booking.flightNumber
+        ..additionalNotes = booking.notes;
+    }
     final savedLuggageSize = booking.luggageSize?.toUpperCase();
     _luggageSize = const {'SMALL', 'MEDIUM', 'LARGE'}.contains(savedLuggageSize)
         ? savedLuggageSize
@@ -202,6 +231,9 @@ class _UpdateBookingPageState extends State<UpdateBookingPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_completeDraft != null) {
+      return BookingLocationPage(draft: _completeDraft!);
+    }
     final hasLuggage = int.tryParse(_luggageController.text.trim()) != null &&
         int.parse(_luggageController.text.trim()) > 0;
     return Scaffold(
@@ -352,7 +384,7 @@ class _UpdateBookingPageState extends State<UpdateBookingPage> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.save_outlined),
-              label: Text(_saving ? 'Saving changes…' : 'Save changes'),
+              label: Text(_saving ? 'Saving changesÃ¢â‚¬Â¦' : 'Save changes'),
             ),
           ],
         ),

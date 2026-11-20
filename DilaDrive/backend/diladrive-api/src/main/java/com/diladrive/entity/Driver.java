@@ -43,6 +43,17 @@ public class Driver {
     @Column(name = "driver_availability")
     private String driverAvailability;
 
+    // Nullable only for legacy accounts awaiting explicit vehicle registration.
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @OneToOne(mappedBy = "driver", fetch = FetchType.LAZY)
+    private Vehicle vehicle;
+
+    @Column(name = "driver_profile_image", columnDefinition = "TEXT")
+    private String profileImage;
+
+    public String getProfileImage() { return profileImage; }
+    public void setProfileImage(String value) { profileImage = value; }
+
     public Driver() {
     }
 

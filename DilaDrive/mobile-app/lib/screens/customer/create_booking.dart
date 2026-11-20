@@ -27,6 +27,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
   late final CustomerProfileService _profileService =
       widget.profileService ?? CustomerProfileService();
   late Future<CustomerProfile> _profile = _profileService.getMyProfile();
+  BookingDraft? _draft;
 
   @override
   void dispose() {
@@ -86,7 +87,7 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
             }
 
             return BookingLocationPage(
-              draft: BookingDraft(
+              draft: _draft ??= BookingDraft(
                 customerName: profile.name,
                 phoneNumber: profile.phone ?? '',
               ),

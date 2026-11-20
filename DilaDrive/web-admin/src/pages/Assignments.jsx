@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import api from "../services/api";
+import AssignmentResourcePicker from "../components/AssignmentResourcePicker";
 import {
   AlertCircle,
   CalendarDays,
   CheckCircle2,
   ClipboardList,
   Clock3,
-  CircleX,
   Eye,
   LoaderCircle,
-  Plus,
   RefreshCw,
   Search,
   Truck,
@@ -19,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 
-const TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED"]);
+const TERMINAL_STATUSES = new Set(["COMPLETED", "CANCELLED", "SUPERSEDED"]);
 const ASSIGNMENT_STATUSES = [
   "ASSIGNED",
   "OTW",
@@ -28,6 +27,7 @@ const ASSIGNMENT_STATUSES = [
   "DROP",
   "COMPLETED",
   "CANCELLED",
+  "SUPERSEDED",
 ];
 
 const normalizeStatus = (status) => String(status || "").trim().toUpperCase();
@@ -100,9 +100,8 @@ const statusClass = (status) => {
   }
 };
 
-export default function Assignments() {
+export default function Assignments({ onNavigate }) {
   const [assignments, setAssignments] = useState([]);
-  const [bookings, setBookings] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -122,13 +121,11 @@ export default function Assignments() {
 
     Promise.all([
       api.get("/assignments", { signal: controller.signal }),
-      api.get("/bookings", { signal: controller.signal }),
       api.get("/drivers/available", { signal: controller.signal }),
       api.get("/vehicles/available", { signal: controller.signal }),
     ])
-      .then(([assignmentResponse, bookingResponse, driverResponse, vehicleResponse]) => {
+      .then(([assignmentResponse, driverResponse, vehicleResponse]) => {
         setAssignments(assignmentResponse.data);
-        setBookings(bookingResponse.data);
         setDrivers(driverResponse.data);
         setVehicles(vehicleResponse.data);
       })
@@ -142,17 +139,19 @@ export default function Assignments() {
     return () => controller.abort();
   }, [refreshKey]);
 
+  useEffect(() => {
+    const refresh = () => setRefreshKey(key => key + 1);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("diladrive:assignments-changed", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("diladrive:assignments-changed", refresh);
+    };
+  }, []);
+
   const activeAssignments = assignments.filter(
     (assignment) => !TERMINAL_STATUSES.has(normalizeStatus(assignment.assignmentStatus))
   );
-  const eligibleBookings = bookings.filter(
-    (booking) =>
-      normalizeStatus(booking.bookingStatus) === "CONFIRMED" &&
-      !activeAssignments.some(
-        (assignment) => String(assignment.bookingId) === String(booking.bookingId)
-      )
-  );
-
   const filteredAssignments = useMemo(() => {
     const query = search.trim().toLowerCase();
     return assignments.filter((assignment) => {
@@ -222,7 +221,7 @@ export default function Assignments() {
       await operation();
       setModal(null);
       setNotice(message);
-      setRefreshKey((current) => current + 1);
+      window.dispatchEvent(new Event("diladrive:assignments-changed"));
     } catch (requestError) {
       const message = getApiError(requestError);
       setFormError(message);
@@ -232,41 +231,16 @@ export default function Assignments() {
     }
   };
 
-  const createAssignment = (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const bookingId = Number(form.get("bookingId"));
-    const driverId = Number(form.get("driverId"));
-    const vehicleId = Number(form.get("vehicleId"));
-    if (!bookingId || !driverId || !vehicleId) {
-      setFormError("Select a booking, an available driver, and an available vehicle.");
-      return;
-    }
-
-    performAction(
-      () =>
-        api.post("/assignments", {
-          bookingId,
-          driverId,
-          vehicleId,
-        }),
-      "Assignment created. The selected driver and vehicle are now unavailable."
-    );
-  };
-
   const reassign = (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const driverValue = String(form.get("driverId") || "");
-    const vehicleValue = String(form.get("vehicleId") || "");
-    if (!driverValue && !vehicleValue) {
-      setFormError("Select a new driver or a new vehicle.");
+    const scheduledEndAt = String(form.get("scheduledEndAt") || "");
+    if (!driverValue || !scheduledEndAt) {
+      setFormError("Select a new eligible driver and a scheduled end time.");
       return;
     }
-
-    const request = {};
-    if (driverValue) request.driverId = Number(driverValue);
-    if (vehicleValue) request.vehicleId = Number(vehicleValue);
+    const request = {driverId: Number(driverValue), vehicleId: Number(form.get("vehicleId")), scheduledEndAt};
     const assignment = modal.assignment;
 
     performAction(
@@ -283,23 +257,6 @@ export default function Assignments() {
     );
   };
 
-  const cancelAssignment = (assignment) => {
-    if (
-      !window.confirm(
-        `Cancel the assignment for ${assignment.customer || "this customer"}? Its driver and vehicle will be released.`
-      )
-    ) {
-      return;
-    }
-    performAction(
-      () =>
-        api.patch(`/assignments/${assignment.assignmentId}/status`, {
-          status: "CANCELLED",
-        }),
-      "Assignment cancelled and resources released."
-    );
-  };
-
   return (
     <div className="admin-page">
       <header className="admin-page-header">
@@ -313,17 +270,17 @@ export default function Assignments() {
             Assignment Management
           </h1>
           <p className="admin-page-description">
-            Assign and manage drivers and vehicles for confirmed bookings.
+            View trips, update trip status and reassign eligible drivers.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => openModal({ type: "create" })}
+          onClick={() => onNavigate?.("Bookings")}
           disabled={loading}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
         >
-          <Plus size={18} />
-          Create Assignment
+          <ClipboardList size={18} />
+          View Bookings
         </button>
       </header>
 
@@ -511,15 +468,6 @@ export default function Assignments() {
                               >
                                 <CheckCircle2 size={16} />
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => cancelAssignment(assignment)}
-                                title="Cancel assignment and release resources"
-                                aria-label="Cancel assignment"
-                                className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"
-                              >
-                                <CircleX size={16} />
-                              </button>
                             </>
                           )}
                         </div>
@@ -538,19 +486,6 @@ export default function Assignments() {
         </footer>
       </section>
 
-      {modal?.type === "create" && (
-        <AssignmentFormModal
-          title="Create Assignment"
-          subtitle="Choose a confirmed booking and currently available resources."
-          bookings={eligibleBookings}
-          drivers={drivers}
-          vehicles={vehicles}
-          busy={busy}
-          error={formError}
-          onClose={closeModal}
-          onSubmit={createAssignment}
-        />
-      )}
       {modal?.type === "reassign" && (
         <ReassignModal
           assignment={modal.assignment}
@@ -659,7 +594,7 @@ function FormError({ message }) {
   );
 }
 
-function FormActions({ onClose, busy, submitLabel }) {
+function FormActions({ onClose, busy, submitLabel, disabled = false }) {
   return (
     <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
       <button
@@ -672,92 +607,13 @@ function FormActions({ onClose, busy, submitLabel }) {
       </button>
       <button
         type="submit"
-        disabled={busy}
+        disabled={busy || disabled}
         className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {busy && <LoaderCircle size={15} className="mr-2 inline animate-spin" />}
         {submitLabel}
       </button>
     </div>
-  );
-}
-
-function AssignmentFormModal({
-  title,
-  subtitle,
-  bookings,
-  drivers,
-  vehicles,
-  busy,
-  error,
-  onClose,
-  onSubmit,
-}) {
-  return (
-    <Modal title={title} subtitle={subtitle} onClose={onClose}>
-      <form onSubmit={onSubmit} className="space-y-4 p-5">
-        <FormField label="Confirmed booking">
-          <select name="bookingId" required className={inputClass}>
-            <option value="">Select a booking</option>
-            {bookings.map((booking) => (
-              <option key={booking.bookingId} value={booking.bookingId}>
-                {booking.customer || "Customer"} · {formatDate(booking.bookingTripdate)}
-                {booking.bookingPickuptime ? ` · ${booking.bookingPickuptime}` : ""}
-                {booking.bookingPickupaddress
-                  ? ` · ${booking.bookingPickupaddress}`
-                  : ""}
-              </option>
-            ))}
-          </select>
-          {bookings.length === 0 && (
-            <span className="mt-1 block text-xs text-amber-700">
-              There are no confirmed bookings without an active assignment.
-            </span>
-          )}
-        </FormField>
-        <FormField label="Available driver">
-          <select name="driverId" required className={inputClass}>
-            <option value="">Select an available driver</option>
-            {drivers.map((driver) => (
-              <option key={driver.driverId} value={driver.driverId}>
-                {driver.driverName}
-              </option>
-            ))}
-          </select>
-          {drivers.length === 0 && (
-            <span className="mt-1 block text-xs text-amber-700">
-              No drivers currently have AVAILABLE status.
-            </span>
-          )}
-        </FormField>
-        <FormField label="Available vehicle">
-          <select name="vehicleId" required className={inputClass}>
-            <option value="">Select an available vehicle</option>
-            {vehicles.map((vehicle) => (
-              <option key={vehicle.vehicleId} value={vehicle.vehicleId}>
-                {vehicle.vehiclePlateno}
-                {vehicle.vehicleType ? ` · ${vehicle.vehicleType}` : ""}
-              </option>
-            ))}
-          </select>
-          {vehicles.length === 0 && (
-            <span className="mt-1 block text-xs text-amber-700">
-              No vehicles currently have AVAILABLE status.
-            </span>
-          )}
-        </FormField>
-        <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
-          Availability is checked again by the server before saving. A
-          notification is created for the selected driver in the same transaction.
-        </p>
-        <FormError message={error} />
-        <FormActions
-          onClose={onClose}
-          busy={busy}
-          submitLabel={busy ? "Creating..." : "Create Assignment"}
-        />
-      </form>
-    </Modal>
   );
 }
 
@@ -770,6 +626,8 @@ function ReassignModal({
   onClose,
   onSubmit,
 }) {
+  const [selection, setSelection] = useState(null);
+  const [scheduledEndAt, setScheduledEndAt] = useState(assignment.scheduledEndAt?.slice(0,19) || "");
   return (
     <Modal
       title="Reassign Trip"
@@ -778,34 +636,19 @@ function ReassignModal({
     >
       <form onSubmit={onSubmit} className="space-y-4 p-5">
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-          Leave a field unchanged to keep its current resource. At least one new
-          available resource is required.
+          Select another suitable vehicle and its eligible driver. Previous assignment history will be preserved.
         </p>
-        <FormField label={`Driver · current: ${assignment.driverName}`}>
-          <select name="driverId" defaultValue="" className={inputClass}>
-            <option value="">Keep current driver</option>
-            {drivers.map((driver) => (
-              <option key={driver.driverId} value={driver.driverId}>
-                {driver.driverName}
-              </option>
-            ))}
-          </select>
+        <FormField label="Scheduled end time">
+          <input name="scheduledEndAt" type="datetime-local" step="1" required className={inputClass} value={scheduledEndAt} onChange={e => setScheduledEndAt(e.target.value)} />
+          <span className="mt-1 block text-xs text-slate-500">Must be after pickup. Bookings may share this pair only when their time ranges do not overlap.</span>
         </FormField>
-        <FormField label={`Vehicle · current: ${assignment.vehiclePlate}`}>
-          <select name="vehicleId" defaultValue="" className={inputClass}>
-            <option value="">Keep current vehicle</option>
-            {vehicles.map((vehicle) => (
-              <option key={vehicle.vehicleId} value={vehicle.vehicleId}>
-                {vehicle.vehiclePlateno}
-                {vehicle.vehicleType ? ` · ${vehicle.vehicleType}` : ""}
-              </option>
-            ))}
-          </select>
-        </FormField>
-        <FormError message={error} />
+        <AssignmentResourcePicker bookingId={assignment.bookingId} scheduledEndAt={scheduledEndAt}
+          excludeDriverId={assignment.driverId} onChange={setSelection} disabled={busy} />
+     <FormError message={error} />
         <FormActions
           onClose={onClose}
           busy={busy}
+          disabled={!selection}
           submitLabel={busy ? "Saving..." : "Save Reassignment"}
         />
       </form>
@@ -816,6 +659,8 @@ function ReassignModal({
 function AssignmentDetailsModal({ assignment, onClose }) {
   const status = normalizeStatus(assignment.assignmentStatus);
   const details = [
+    { label: "Luggage points", value: assignment.luggageUnits ?? "Not recorded", icon: Users },
+    { label: "Small / medium / large bags", value: assignment.smallCount == null ? "Not recorded" : `${assignment.smallCount} / ${assignment.mediumCount ?? 0} / ${assignment.largeCount ?? 0}`, icon: ClipboardList },
     {
       label: "Customer Name",
       value: assignment.customer || "—",
@@ -895,6 +740,7 @@ function AssignmentDetailsModal({ assignment, onClose }) {
           );
         })}
       </div>
+      <AssignmentPhotos key={assignment.assignmentId} assignmentId={assignment.assignmentId} />
       <div className="flex justify-end border-t border-slate-100 p-5 pt-4">
         <button
           type="button"
@@ -905,5 +751,68 @@ function AssignmentDetailsModal({ assignment, onClose }) {
         </button>
       </div>
     </Modal>
+  );
+}
+
+function AssignmentPhotos({ assignmentId }) {
+  const [photos, setPhotos] = useState(null);
+  const [listError, setListError] = useState("");
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [previewError, setPreviewError] = useState("");
+  const path = `/assignments/${assignmentId}/photos`;
+
+  useEffect(() => {
+    const request = new AbortController();
+    api.get(path, { signal: request.signal })
+      .then(({ data }) => { if (!request.signal.aborted) setPhotos(data); })
+      .catch((error) => { if (!request.signal.aborted) setListError(getApiError(error)); });
+    return () => request.abort();
+  }, [path]);
+
+  useEffect(() => {
+    if (!selectedPhoto) return;
+    const request = new AbortController();
+    let objectUrl;
+    api.get(`${path}/${selectedPhoto.photoId}/content`, {
+      responseType: "blob",
+      signal: request.signal,
+    }).then(({ data }) => {
+      if (request.signal.aborted) return;
+      objectUrl = URL.createObjectURL(data);
+      setPreview(objectUrl);
+    }).catch((error) => {
+      if (!request.signal.aborted) setPreviewError(getApiError(error));
+    });
+    return () => {
+      request.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [path, selectedPhoto]);
+
+  const showPhoto = (photo) => {
+    if (photo === selectedPhoto) return;
+    setPreview(null);
+    setPreviewError("");
+    setSelectedPhoto(photo);
+  };
+
+  return (
+    <section className="space-y-3 border-t border-slate-100 p-5" aria-label="Verification photos">
+      <h3 className="text-sm font-semibold text-slate-900">Verification photos</h3>
+      {listError && <p role="alert" className="text-sm text-rose-700">{listError}</p>}
+      {!listError && !photos && <p role="status" className="text-sm text-slate-500">Loading photos…</p>}
+      {photos?.length === 0 && <p className="text-sm text-slate-500">No verification photos uploaded.</p>}
+      {photos?.map((photo) => (
+        <button key={photo.photoId} type="button" onClick={() => showPhoto(photo)}
+          aria-pressed={selectedPhoto === photo}
+          className="mr-2 rounded-lg border px-3 py-2 text-sm font-medium text-teal-700 aria-pressed:bg-teal-50">
+          {photo.photoType.replaceAll("_", " ")} · {formatDateTime(photo.uploadedAt)}
+        </button>
+      ))}
+      {previewError && <p role="alert" className="text-sm text-rose-700">{previewError}</p>}
+      {selectedPhoto && !preview && !previewError && <p role="status" className="text-sm text-slate-500">Loading preview…</p>}
+      {preview && <img src={preview} alt={`${selectedPhoto.photoType} verification`} className="max-h-72 max-w-full rounded-lg object-contain" />}
+    </section>
   );
 }

@@ -15,10 +15,12 @@ import java.util.Locale;
 public class VehicleService {
 
     private final VehicleRepository vehicleRepository;
+    private final com.diladrive.repository.AssignmentRepository assignmentRepository;
 
     public VehicleService(
-            VehicleRepository vehicleRepository) {
+            VehicleRepository vehicleRepository, com.diladrive.repository.AssignmentRepository assignmentRepository) {
         this.vehicleRepository = vehicleRepository;
+        this.assignmentRepository = assignmentRepository;
     }
 
     public List<Vehicle> getAllVehicles() {
@@ -32,6 +34,30 @@ public class VehicleService {
                         HttpStatus.NOT_FOUND, "Vehicle not found."));
     }
 
+    @Transactional(readOnly = true)
+    public Vehicle getAssignedVehicle(Long driverId) {
+        List<Vehicle> vehicles = vehicleRepository.findByDriverId(driverId);
+        if (vehicles.size() > 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Driver has multiple assigned vehicles. Update vehicles individually.");
+        }
+        return vehicles.isEmpty() ? null : vehicles.get(0);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Vehicle updateAssignedVehicle(Long driverId, Vehicle request) {
+        Vehicle assigned = getAssignedVehicle(driverId);
+        if (assigned == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No vehicle is assigned to this driver.");
+        }
+        Vehicle locked = vehicleRepository.findByIdForUpdate(assigned.getVehicleId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Vehicle not found."));
+        if (!driverId.equals(locked.getDriverId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Vehicle assignment has changed.");
+        }
+        return updateVehicle(locked.getVehicleId(), request);
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public Vehicle createVehicleForDriver(Vehicle vehicle, Long driverId) {
         if (vehicle == null || driverId == null) {
@@ -39,6 +65,9 @@ public class VehicleService {
                     HttpStatus.BAD_REQUEST, "Vehicle and driver details are required.");
         }
 
+        if (!vehicleRepository.findByDriverId(driverId).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This driver already has a linked vehicle.");
+        }
         String plate = normalizeRequired(vehicle.getVehiclePlateno(), "Registration number");
         String model = normalizeRequired(vehicle.getVehicleModel(), "Vehicle model");
         String type = normalizeRequired(vehicle.getVehicleType(), "Vehicle type");
@@ -72,6 +101,12 @@ public class VehicleService {
         Vehicle vehicle = vehicleRepository.findByIdForUpdate(vehicleId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Vehicle not found."));
+        if (assignmentRepository.existsByVehicleVehicleIdAndAssignmentStatusNotIn(vehicleId, List.of("COMPLETED", "CANCELLED"))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Vehicle details cannot be changed while booking assignments are active.");
+        }
+        if (request.getDriverId() != null && !request.getDriverId().equals(vehicle.getDriverId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The linked driver cannot be changed here.");
+        }
         String plate = normalizeRequired(request.getVehiclePlateno(), "Registration number");
         String type = normalizeRequired(request.getVehicleType(), "Vehicle type");
         Integer capacity = request.getVehicleCapacity();
@@ -92,6 +127,18 @@ public class VehicleService {
         vehicle.setVehicleModel(normalizeOptional(request.getVehicleModel()));
         vehicle.setVehicleType(type);
         vehicle.setVehicleCapacity(capacity);
+        if ((request.getMaxLargeLuggage() != null && request.getMaxLargeLuggage() < 0)
+                || (request.getMaxBackpacks() != null && request.getMaxBackpacks() < 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Vehicle luggage limits must be zero or greater.");
+        }
+        if (request.getMaxLargeLuggage() != null) vehicle.setMaxLargeLuggage(request.getMaxLargeLuggage());
+        if (request.getMaxBackpacks() != null) vehicle.setMaxBackpacks(request.getMaxBackpacks());
+        if (request.getVehicleLuggageCapacity() != null) {
+            if (request.getVehicleLuggageCapacity() < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Luggage capacity must be zero or greater.");
+            }
+            vehicle.setVehicleLuggageCapacity(request.getVehicleLuggageCapacity());
+        }
         vehicle.setVehicleRoadtaxexpiry(request.getVehicleRoadtaxexpiry());
         vehicle.setVehicleServiceexpiry(request.getVehicleServiceexpiry());
         vehicle.setVehicleStatus(status);
@@ -99,7 +146,8 @@ public class VehicleService {
     }
 
     public List<Vehicle> getAvailableVehicles() {
-        return vehicleRepository.findByVehicleStatusIgnoreCase("AVAILABLE");
+        return vehicleRepository.findAll().stream().filter(v ->
+                java.util.Set.of("ACTIVE","AVAILABLE").contains(String.valueOf(v.getVehicleStatus()).toUpperCase(Locale.ROOT))).toList();
     }
 
     @Transactional
@@ -107,6 +155,9 @@ public class VehicleService {
         Vehicle vehicle = vehicleRepository.findByIdForUpdate(vehicleId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Vehicle not found."));
+        if (vehicle.getDriverId() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A current linked vehicle cannot be deleted.");
+        }
         vehicleRepository.delete(vehicle);
     }
 
@@ -144,7 +195,8 @@ public class VehicleService {
         }
         return switch (value.trim().toUpperCase(Locale.ROOT).replace(' ', '_')) {
             case "AVAILABLE" -> "AVAILABLE";
-            case "IN_USE", "UNAVAILABLE" -> "UNAVAILABLE";
+            case "ACTIVE" -> "ACTIVE";
+            case "IN_USE", "UNAVAILABLE", "INACTIVE" -> "INACTIVE";
             case "MAINTENANCE" -> "MAINTENANCE";
             default -> throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "Unsupported vehicle status.");

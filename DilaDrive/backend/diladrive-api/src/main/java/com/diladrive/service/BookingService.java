@@ -35,6 +35,8 @@ import java.util.stream.Stream;
 
 @Service
 public class BookingService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private TripFinanceService tripFinance;
 
     private final BookingRepository bookingRepository;
     private final CustomerRepository customerRepository;
@@ -79,10 +81,16 @@ public class BookingService {
 
     @Transactional(readOnly = true)
     public List<CustomerBookingResponse> getCustomerBookings(Long customerId) {
-        return bookingRepository.findCustomerBookingsNewestFirst(customerId)
-                .stream()
-                .map(CustomerBookingResponse::from)
-                .toList();
+        var reservations = bookingRepository.findCustomerBookingsNewestFirst(customerId);
+        if (tripFinance == null || reservations.isEmpty()) {
+            return reservations.stream().map(CustomerBookingResponse::from).toList();
+        }
+        var totals = tripFinance.customerTotals(customerId);
+        return reservations.stream().map(booking -> {
+            var summary = totals.get(booking.getBookingId());
+            return summary == null ? CustomerBookingResponse.from(booking) : CustomerBookingResponse.from(
+                    booking, summary.finalFare(), summary.payableFare(), summary.activeAssignment());
+        }).toList();
     }
 
     public BookingAvailability checkAvailability(
@@ -449,24 +457,8 @@ public class BookingService {
         if ("CONFIRMED".equalsIgnoreCase(booking.getBookingStatus())) {
             return booking;
         }
-        if (booking.getBookingTripfare() == null
-                || booking.getBookingTripfare().signum() <= 0) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Set the final fare before confirming this booking.");
-        }
-
-        booking.setBookingStatus("CONFIRMED");
-        Booking saved = bookingRepository.save(booking);
-        if (booking.getCustId() != null) {
-            notificationService.createCustomerNotification(
-                    booking.getCustId(),
-                    "Booking approved",
-                    "Your booking " + bookingReference(booking.getBookingId())
-                            + " has been approved by Admin.",
-                    "BOOKING_APPROVED");
-        }
-        return saved;
+        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Use Confirm & Assign to confirm the booking and save its driver assignment together.");
     }
 
     @Transactional
@@ -486,6 +478,8 @@ public class BookingService {
                     HttpStatus.CONFLICT,
                     "The fare can only be set before a booking is confirmed.");
         }
+        if(booking.getFareSnapshot()!=null && booking.getBookingTripfare()!=null && tripFare.compareTo(booking.getBookingTripfare())!=0)
+            throw new PricingException(HttpStatus.CONFLICT,"CUSTOMER_ACCEPTANCE_REQUIRED","Accepted distance-based fares cannot be changed silently. Use a customer-approved category fare proposal.");
         booking.setBookingTripfare(tripFare);
         return bookingRepository.save(booking);
     }
@@ -509,7 +503,7 @@ public class BookingService {
                     "This booking can no longer be cancelled by the customer.");
         }
         if (assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                bookingId, List.of("COMPLETED", "CANCELLED"))) {
+                bookingId, List.of("COMPLETED", "CANCELLED", "SUPERSEDED"))) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
                     "A booking with an active driver assignment cannot be cancelled here.");
@@ -542,11 +536,14 @@ public class BookingService {
         if (!customerId.equals(booking.getCustId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Booking not found.");
         }
-        String status = booking.getBookingStatus() == null
+        if (booking.getDurationSeconds() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Use the complete booking editor to refresh road routing, availability and fare.");
+        }        String status = booking.getBookingStatus() == null
                 ? "" : booking.getBookingStatus().trim().toUpperCase(Locale.ROOT);
         if (!Set.of("PENDING", "PENDING_VERIFICATION").contains(status)
                 || assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                        bookingId, List.of("COMPLETED", "CANCELLED"))) {
+                        bookingId, List.of("COMPLETED", "CANCELLED", "SUPERSEDED"))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Only a pending booking without an active driver assignment can be edited.");
         }

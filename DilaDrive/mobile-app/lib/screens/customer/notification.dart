@@ -6,9 +6,14 @@ import '../../theme/app_theme.dart';
 import '../auth/login.dart';
 
 class NotificationPage extends StatefulWidget {
-  const NotificationPage({super.key, this.notificationService});
+  const NotificationPage({
+    super.key,
+    this.notificationService,
+    this.onInboxChanged,
+  });
 
   final CustomerNotificationService? notificationService;
+  final VoidCallback? onInboxChanged;
 
   @override
   State<NotificationPage> createState() => _NotificationPageState();
@@ -39,6 +44,7 @@ class _NotificationPageState extends State<NotificationPage> {
     });
     try {
       await future;
+      if (mounted) widget.onInboxChanged?.call();
     } catch (_) {
       // The FutureBuilder renders the retry state.
     }
@@ -47,6 +53,7 @@ class _NotificationPageState extends State<NotificationPage> {
   Future<void> _markRead(CustomerNotification notification) async {
     try {
       await _service.markAsRead(notification.id);
+      if (!mounted) return;
       await _refresh();
     } on CustomerNotificationException catch (error) {
       if (mounted) {

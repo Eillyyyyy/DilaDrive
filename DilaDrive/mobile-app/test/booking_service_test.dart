@@ -7,6 +7,30 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
+  test('distance review submits without inventing a distance or fare', () async {
+    final client = _ResponseClient(http.Response(
+      jsonEncode({'bookingReference': 'BK-000018', 'bookingStatus': 'PENDING'}),
+      201,
+    ));
+    final service = BookingService(client: client);
+    final draft = BookingDraft(customerName: 'Test Customer', phoneNumber: '0123456789')
+      ..pickupCoordinates = const BookingCoordinates(latitude: 3, longitude: 101)
+      ..destinationCoordinates = const BookingCoordinates(latitude: 4, longitude: 102)
+      ..pickupAddress = 'Pickup'
+      ..destinationAddress = 'Destination'
+      ..bookingDate = DateTime(2030, 1, 2)
+      ..pickupTime = DateTime(2030, 1, 2, 9);
+
+    expect(await service.requestRoadDistanceReview(draft, idempotencyKey: 'review-18'),
+        'BK-000018');
+    expect(client.requestedUri!.path, '/api/bookings/customer/road-distance-review');
+    expect(client.requestHeaders?['idempotency-key'], 'review-18');
+    final body = jsonDecode(client.requestBody!) as Map<String, dynamic>;
+    expect(body, isNot(contains('distanceKm')));
+    expect(body, isNot(contains('acceptedQuoteToken')));
+    service.dispose();
+  });
+
   test('customer booking request matches the backend DTO and retry contract',
       () async {
     MobileSession.clear();
@@ -25,6 +49,10 @@ void main() {
       customerName: 'Test Customer',
       phoneNumber: '0123456789',
     )
+      ..pickupCoordinates =
+          const BookingCoordinates(latitude: 3, longitude: 101)
+      ..destinationCoordinates =
+          const BookingCoordinates(latitude: 4, longitude: 102)
       ..pickupAddress = 'Kuala Lumpur'
       ..destinationAddress = 'KLIA'
       ..tripType = BookingTripType.airportPickup
@@ -32,6 +60,7 @@ void main() {
       ..landedTime = DateTime(2030, 1, 2, 9, 45)
       ..flightNumber = 'MH123'
       ..passengerCount = 2
+      ..smallCount = 1
       ..luggageCount = 1
       ..luggageSize = 'SMALL'
       ..additionalNotes = 'Meet at arrival hall'
@@ -43,6 +72,15 @@ void main() {
         luggageCapacity: 2,
       );
 
+    draft.availabilityCheckedFor = draft.availabilityKey;
+    draft.fareEstimate = const FareEstimate(
+        distanceKm: 12,
+        vehicleModel: 'Fleet Sedan',
+        baseFare: 17.35,
+        distanceCharge: 14.81,
+        additionalCharges: [],
+        total: 32.16,
+        quoteToken: 'server-reviewed-token');
     final reference = await service.createBooking(
       draft,
       idempotencyKey: 'create-retry-key',
@@ -50,23 +88,27 @@ void main() {
 
     expect(reference, 'BK-000017');
     expect(client.requestedMethod, 'POST');
-    expect(client.requestedUri!.path, '/api/bookings/customer');
+    expect(client.requestedUri!.path, '/api/bookings/customer/complete');
     expect(client.requestHeaders?['cookie'], 'JSESSIONID=booking-session');
     expect(client.requestHeaders?['idempotency-key'], 'create-retry-key');
     final body = jsonDecode(client.requestBody!) as Map<String, dynamic>;
     expect(body, {
-      'bookingType': 'Sedan',
       'tripType': 'AIRPORT_PICKUP',
-      'bookingDate': '2030-01-02',
-      'pickupTime': null,
-      'landedTime': '09:45:00',
+      'scheduledAt': '2030-01-02T09:45:00.000',
       'flightNumber': 'MH123',
       'pickupAddress': 'Kuala Lumpur',
       'destinationAddress': 'KLIA',
+      'pickupLatitude': 3,
+      'pickupLongitude': 101,
+      'destinationLatitude': 4,
+      'destinationLongitude': 102,
       'passengerCount': 2,
-      'luggageCount': 1,
-      'luggageSize': 'SMALL',
+      'smallCount': 1,
+      'mediumCount': 0,
+      'largeCount': 0,
       'additionalNotes': 'Meet at arrival hall',
+      'vehicleCategory': 'Sedan',
+      'acceptedQuoteToken': 'server-reviewed-token',
     });
     service.dispose();
     MobileSession.clear();
@@ -83,6 +125,10 @@ void main() {
       customerName: 'Test Customer',
       phoneNumber: '0123456789',
     )
+      ..pickupCoordinates =
+          const BookingCoordinates(latitude: 3, longitude: 101)
+      ..destinationCoordinates =
+          const BookingCoordinates(latitude: 4, longitude: 102)
       ..pickupAddress = 'Pickup'
       ..destinationAddress = 'Destination'
       ..bookingDate = DateTime(2030, 1, 1)
@@ -108,25 +154,22 @@ void main() {
       customerName: 'Test Customer',
       phoneNumber: '0123456789',
     )
+      ..pickupCoordinates =
+          const BookingCoordinates(latitude: 3, longitude: 101)
+      ..destinationCoordinates =
+          const BookingCoordinates(latitude: 4, longitude: 102)
       ..pickupAddress = 'Melaka Sentral'
       ..destinationAddress = 'Kuala Lumpur Airport'
       ..bookingDate = DateTime(2030, 1, 1)
       ..pickupTime = DateTime(2030, 1, 1, 10)
       ..passengerCount = 2;
 
-    await expectLater(
-      service.checkAvailability(draft),
-      throwsA(
-        isA<BookingException>().having(
-          (exception) => exception.message,
-          'message',
-          contains('not available'),
-        ),
-      ),
-    );
+    final result = await service.checkAvailability(draft);
+    expect(result.status, AvailabilityStatus.serviceError);
+    expect(result.message, contains('not available'));
     expect(
       client.requestedUri!.path,
-      '/api/bookings/availability/recommendation',
+      '/api/bookings/availability',
     );
     service.dispose();
   });
@@ -139,6 +182,10 @@ void main() {
     final client = _ResponseClient(http.Response('{}', 200));
     final service = BookingService(client: client);
     final draft = BookingDraft(customerName: '', phoneNumber: '')
+      ..pickupCoordinates =
+          const BookingCoordinates(latitude: 3, longitude: 101)
+      ..destinationCoordinates =
+          const BookingCoordinates(latitude: 4, longitude: 102)
       ..pickupAddress = 'Updated pickup'
       ..destinationAddress = 'Updated destination'
       ..tripType = BookingTripType.normalTransfer

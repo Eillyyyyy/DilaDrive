@@ -17,6 +17,25 @@ class DriverControllerTest {
     private final DriverController controller = new DriverController(driverService);
 
     @Test
+    void passwordChangeIsScopedToDriverSession() {
+        var password = new com.diladrive.dto.ChangePasswordRequest();
+        controller.changeMyPassword(password, driverRequest(42L));
+        verify(driverService).changeDriverPassword(42L, password);
+        assertThrows(ResponseStatusException.class, () -> controller.changeMyPassword(password, new MockHttpServletRequest()));
+    }
+
+    @Test
+    void formOptionsRequireAdminAndProvideCreationChoices() {
+        assertThrows(ResponseStatusException.class,
+                () -> controller.getFormOptions(new MockHttpServletRequest()));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession().setAttribute("adminId", 3L);
+        var options = controller.getFormOptions(request);
+        assertEquals(java.util.List.of("Available", "Busy", "Unavailable"), options.get("createAvailability"));
+        assertEquals(true, options.get("vehicleStatuses").contains("Maintenance"));
+    }
+
+    @Test
     void profileReadUsesDriverSessionId() {
         controller.getMyProfile(driverRequest(42L));
 

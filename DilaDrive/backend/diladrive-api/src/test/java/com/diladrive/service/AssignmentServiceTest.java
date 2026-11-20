@@ -41,6 +41,43 @@ class AssignmentServiceTest {
             notificationRepository);
 
     @Test
+    void adminCannotCancelBookingThroughAssignmentStatus() {
+        Booking booking = confirmedBooking();
+        Assignment assignment = assignment(booking, driver(21L, "AVAILABLE"), vehicle(31L, "AVAILABLE"));
+        when(assignmentRepository.findByIdForUpdate(41L)).thenReturn(Optional.of(assignment));
+
+        var exception = assertThrows(ResponseStatusException.class,
+                () -> service.updateStatus(41L, "CANCELLED"));
+
+        assertEquals(400, exception.getStatusCode().value());
+        assertEquals("ASSIGNED", assignment.getAssignmentStatus());
+        assertEquals("CONFIRMED", booking.getBookingStatus());
+        verify(assignmentRepository, never()).save(any());
+        verifyNoInteractions(bookingRepository, notificationRepository);
+    }
+
+    @Test
+    void rejectsUnavailableVehicleAndExistingResourceAssignments() {
+        Booking booking = confirmedBooking();
+        Driver driver = driver(21L, "AVAILABLE");
+        Vehicle vehicle = vehicle(31L, "MAINTENANCE");
+        when(bookingRepository.findByIdForUpdate(booking.getBookingId())).thenReturn(Optional.of(booking));
+        when(driverRepository.findByIdForUpdate(driver.getDriverId())).thenReturn(Optional.of(driver));
+        when(vehicleRepository.findByIdForUpdate(vehicle.getVehicleId())).thenReturn(Optional.of(vehicle));
+        var request = new AssignmentRequest(booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0));
+        assertThrows(ResponseStatusException.class, () -> service.createAssignment(request));
+        vehicle.setVehicleStatus("AVAILABLE");
+        Assignment reserved = assignment(booking, driver, vehicle);
+        reserved.setScheduledEndAt(LocalDateTime.of(2026, 11, 12, 12, 0));
+        when(assignmentRepository.findResourceReservations(21L, 31L)).thenReturn(java.util.List.of(reserved));
+        assertThrows(ResponseStatusException.class, () -> service.createAssignment(request));
+
+
+        assertThrows(ResponseStatusException.class, () -> service.createAssignment(request));
+        verify(assignmentRepository, never()).save(any());
+    }
+
+    @Test
     void createsAssignmentAndStoresLinkedNotification() {
         Booking booking = confirmedBooking();
         Driver driver = driver(21L, "AVAILABLE");
@@ -48,7 +85,7 @@ class AssignmentServiceTest {
         when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
                 .thenReturn(Optional.of(booking));
         when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED")))
+                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(driverRepository.findByIdForUpdate(driver.getDriverId()))
                 .thenReturn(Optional.of(driver));
@@ -65,12 +102,12 @@ class AssignmentServiceTest {
 
         var result = service.createAssignment(
                 new AssignmentRequest(booking.getBookingId(),
-                        driver.getDriverId(), vehicle.getVehicleId()));
+                        driver.getDriverId(), vehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0)));
 
         assertEquals(41L, result.assignmentId());
         assertEquals("Aina Logistics", result.customer());
-        assertEquals("UNAVAILABLE", driver.getDriverAvailability());
-        assertEquals("UNAVAILABLE", vehicle.getVehicleStatus());
+        assertEquals("AVAILABLE", driver.getDriverAvailability());
+        assertEquals("AVAILABLE", vehicle.getVehicleStatus());
         assertEquals(driver.getDriverId(), booking.getDriverId());
         assertEquals(vehicle.getVehicleId(), booking.getVehicleId());
         verify(notificationRepository).save(argThat(notification ->
@@ -87,7 +124,7 @@ class AssignmentServiceTest {
         when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
                 .thenReturn(Optional.of(booking));
         when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED")))
+                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(driverRepository.findByIdForUpdate(driver.getDriverId()))
                 .thenReturn(Optional.of(driver));
@@ -97,7 +134,7 @@ class AssignmentServiceTest {
         ResponseStatusException error = assertThrows(
                 ResponseStatusException.class,
                 () -> service.createAssignment(new AssignmentRequest(
-                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId())));
+                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0))));
 
         assertEquals(409, error.getStatusCode().value());
         verify(assignmentRepository, never()).save(any());
@@ -113,7 +150,7 @@ class AssignmentServiceTest {
         when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
                 .thenReturn(Optional.of(booking));
         when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED")))
+                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(driverRepository.findByIdForUpdate(driver.getDriverId()))
                 .thenReturn(Optional.of(driver));
@@ -123,7 +160,7 @@ class AssignmentServiceTest {
         ResponseStatusException error = assertThrows(
                 ResponseStatusException.class,
                 () -> service.createAssignment(new AssignmentRequest(
-                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId())));
+                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0))));
 
         assertEquals(409, error.getStatusCode().value());
         verify(assignmentRepository, never()).save(any());
@@ -138,7 +175,7 @@ class AssignmentServiceTest {
         when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
                 .thenReturn(Optional.of(booking));
         when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED")))
+                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(driverRepository.findByIdForUpdate(driver.getDriverId()))
                 .thenReturn(Optional.of(driver));
@@ -148,7 +185,7 @@ class AssignmentServiceTest {
         ResponseStatusException error = assertThrows(
                 ResponseStatusException.class,
                 () -> service.createAssignment(new AssignmentRequest(
-                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId())));
+                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0))));
 
         assertEquals(409, error.getStatusCode().value());
         verify(assignmentRepository, never()).save(any());
@@ -163,7 +200,7 @@ class AssignmentServiceTest {
         when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
                 .thenReturn(Optional.of(booking));
         when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED")))
+                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
                 .thenReturn(false);
         when(driverRepository.findByIdForUpdate(driver.getDriverId()))
                 .thenReturn(Optional.of(driver));
@@ -173,7 +210,7 @@ class AssignmentServiceTest {
         ResponseStatusException error = assertThrows(
                 ResponseStatusException.class,
                 () -> service.createAssignment(new AssignmentRequest(
-                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId())));
+                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0))));
 
         assertEquals(409, error.getStatusCode().value());
         verify(assignmentRepository, never()).save(any());
@@ -220,19 +257,19 @@ class AssignmentServiceTest {
                 .thenReturn(Optional.of(newVehicle));
         when(vehicleRepository.findByIdForUpdate(previousVehicle.getVehicleId()))
                 .thenReturn(Optional.of(previousVehicle));
-        when(assignmentRepository.save(assignment)).thenReturn(assignment);
+        when(assignmentRepository.save(any(Assignment.class))).thenAnswer(invocation -> { Assignment saved=invocation.getArgument(0); if (saved.getAssignmentId()==null) saved.setAssignmentId(41L); return saved; });
         AssignmentSummaryProjection reassignedSummary =
                 summary(41L, "Aina Logistics");
         when(assignmentRepository.findAssignmentSummaryById(41L))
                 .thenReturn(Optional.of(reassignedSummary));
 
         service.reassign(41L, new AssignmentRequest(
-                booking.getBookingId(), newDriver.getDriverId(), newVehicle.getVehicleId()));
+                booking.getBookingId(), newDriver.getDriverId(), newVehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0)));
 
-        assertEquals("AVAILABLE", previousDriver.getDriverAvailability());
-        assertEquals("UNAVAILABLE", newDriver.getDriverAvailability());
-        assertEquals("AVAILABLE", previousVehicle.getVehicleStatus());
-        assertEquals("UNAVAILABLE", newVehicle.getVehicleStatus());
+        assertEquals("UNAVAILABLE", previousDriver.getDriverAvailability());
+        assertEquals("AVAILABLE", newDriver.getDriverAvailability());
+        assertEquals("UNAVAILABLE", previousVehicle.getVehicleStatus());
+        assertEquals("AVAILABLE", newVehicle.getVehicleStatus());
         assertEquals(newDriver.getDriverId(), booking.getDriverId());
         assertEquals(newVehicle.getVehicleId(), booking.getVehicleId());
         verify(notificationRepository).save(argThat(notification ->
@@ -246,6 +283,7 @@ class AssignmentServiceTest {
         Driver previousDriver = driver(21L, "UNAVAILABLE");
         Driver newDriver = driver(22L, "AVAILABLE");
         Vehicle vehicle = vehicle(31L, "UNAVAILABLE");
+        Vehicle linkedVehicle = vehicle(32L, "AVAILABLE");
         Assignment assignment = assignment(booking, previousDriver, vehicle);
         when(assignmentRepository.findByIdForUpdate(41L))
                 .thenReturn(Optional.of(assignment));
@@ -255,18 +293,18 @@ class AssignmentServiceTest {
                 .thenReturn(Optional.of(newDriver));
         when(driverRepository.findByIdForUpdate(previousDriver.getDriverId()))
                 .thenReturn(Optional.of(previousDriver));
-        when(assignmentRepository.save(assignment)).thenReturn(assignment);
+        when(assignmentRepository.save(any(Assignment.class))).thenAnswer(invocation -> { Assignment saved=invocation.getArgument(0); if (saved.getAssignmentId()==null) saved.setAssignmentId(41L); return saved; });
         AssignmentSummaryProjection reassignedSummary =
                 summary(41L, "Aina Logistics");
         when(assignmentRepository.findAssignmentSummaryById(41L))
                 .thenReturn(Optional.of(reassignedSummary));
 
-        service.reassign(41L, new AssignmentRequest(null, newDriver.getDriverId(), null));
+        service.reassign(41L, new AssignmentRequest(null, newDriver.getDriverId(), null, LocalDateTime.of(2026, 11, 12, 11, 0)));
 
-        assertEquals("AVAILABLE", previousDriver.getDriverAvailability());
-        assertEquals("UNAVAILABLE", newDriver.getDriverAvailability());
+        assertEquals("UNAVAILABLE", previousDriver.getDriverAvailability());
+        assertEquals("AVAILABLE", newDriver.getDriverAvailability());
         assertEquals("UNAVAILABLE", vehicle.getVehicleStatus());
-        assertEquals(vehicle.getVehicleId(), booking.getVehicleId());
+        assertEquals(linkedVehicle.getVehicleId(), booking.getVehicleId());
     }
 
     @Test
@@ -285,7 +323,7 @@ class AssignmentServiceTest {
                 .thenReturn(Optional.of(driver));
         when(vehicleRepository.findByIdForUpdate(vehicle.getVehicleId()))
                 .thenReturn(Optional.of(vehicle));
-        when(assignmentRepository.save(assignment)).thenReturn(assignment);
+        when(assignmentRepository.save(any(Assignment.class))).thenAnswer(invocation -> { Assignment saved=invocation.getArgument(0); if (saved.getAssignmentId()==null) saved.setAssignmentId(41L); return saved; });
         AssignmentSummaryProjection completedSummary =
                 summary(41L, "Aina Logistics", "COMPLETED");
         when(assignmentRepository.findAssignmentSummaryById(41L))
@@ -294,8 +332,8 @@ class AssignmentServiceTest {
         var result = service.completeAssignment(41L);
 
         assertEquals("COMPLETED", result.assignmentStatus());
-        assertEquals("AVAILABLE", driver.getDriverAvailability());
-        assertEquals("AVAILABLE", vehicle.getVehicleStatus());
+        assertEquals("UNAVAILABLE", driver.getDriverAvailability());
+        assertEquals("UNAVAILABLE", vehicle.getVehicleStatus());
         assertEquals("COMPLETED", booking.getBookingStatus());
         assertNull(booking.getDriverId());
         assertNull(booking.getVehicleId());
@@ -327,7 +365,7 @@ class AssignmentServiceTest {
                 .thenReturn(Optional.of(assignment));
         when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
                 .thenReturn(Optional.of(booking));
-        when(assignmentRepository.save(assignment)).thenReturn(assignment);
+        when(assignmentRepository.save(any(Assignment.class))).thenAnswer(invocation -> { Assignment saved=invocation.getArgument(0); if (saved.getAssignmentId()==null) saved.setAssignmentId(41L); return saved; });
         AssignmentSummaryProjection updatedSummary =
                 summary(41L, "Aina Logistics", "OTW");
         when(assignmentRepository.findAssignmentSummaryById(41L))
@@ -337,7 +375,7 @@ class AssignmentServiceTest {
 
         assertEquals("OTW", result.assignmentStatus());
         assertEquals("OTW", assignment.getAssignmentStatus());
-        assertEquals("OTW", booking.getBookingStatus());
+        assertEquals("CONFIRMED", booking.getBookingStatus());
         verify(notificationRepository).save(argThat(notification ->
                 "CUSTOMER".equals(notification.getRecipientRole())
                         && booking.getCustId().equals(notification.getRecipientId())
@@ -379,10 +417,26 @@ class AssignmentServiceTest {
         service.deleteAssignment(41L);
 
         assertEquals("CANCELLED", assignment.getAssignmentStatus());
-        assertEquals("AVAILABLE", driver.getDriverAvailability());
-        assertEquals("AVAILABLE", vehicle.getVehicleStatus());
+        assertEquals("UNAVAILABLE", driver.getDriverAvailability());
+        assertEquals("UNAVAILABLE", vehicle.getVehicleStatus());
         verify(assignmentRepository).save(assignment);
         verify(assignmentRepository, never()).delete(any());
+    }
+
+    @Test
+    void legacyDriverWithoutVehicleCannotBeConfirmedAndReceivesRegistrationGuidance() {
+        Booking booking = confirmedBooking(); booking.setBookingStatus("PENDING");
+        Driver driver = driver(21L, "AVAILABLE");
+        when(bookingRepository.findByIdForUpdate(booking.getBookingId())).thenReturn(Optional.of(booking));
+        when(driverRepository.findByIdForUpdate(driver.getDriverId())).thenReturn(Optional.of(driver));
+        when(vehicleRepository.findByDriverId(driver.getDriverId())).thenReturn(java.util.List.of());
+        var failure = assertThrows(ResponseStatusException.class, () -> service.confirmAndAssign(
+            new AssignmentRequest(booking.getBookingId(), driver.getDriverId(), null,
+                LocalDateTime.of(2026,11,12,11,0)), java.math.BigDecimal.TEN));
+        assertEquals(409, failure.getStatusCode().value());
+        org.junit.jupiter.api.Assertions.assertTrue(failure.getReason().contains("Complete vehicle registration"));
+        assertEquals("PENDING", booking.getBookingStatus());
+        verify(assignmentRepository, never()).save(any());
     }
 
     private AssignmentSummaryProjection summary(Long assignmentId, String customer) {
@@ -457,6 +511,9 @@ class AssignmentServiceTest {
         vehicle.setVehicleCapacity(4);
         vehicle.setVehicleLuggageCapacity(4);
         vehicle.setVehicleStatus(status);
+        vehicle.setDriverId(id - 10);
+        when(vehicleRepository.findByDriverId(id - 10)).thenReturn(java.util.List.of(vehicle));
+        when(vehicleRepository.findByIdForUpdate(id)).thenReturn(Optional.of(vehicle));
         return vehicle;
     }
 }

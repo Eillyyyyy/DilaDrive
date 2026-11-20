@@ -14,6 +14,7 @@ import {
   LogOut,
   UserRound,
   ShieldCheck,
+  Settings as SettingsIcon,
 } from "lucide-react";
 
 import Dashboard from "./pages/Dashboard";
@@ -28,6 +29,8 @@ import Notifications from "./pages/Notifications";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import Admins from "./pages/Admins";
+import Settings from "./pages/Settings";
+import DriverEarnings from "./pages/DriverEarnings";
 import api from "./services/api";
 
 const menuItems = [
@@ -41,6 +44,7 @@ const menuItems = [
 
   { name: "Bookings", icon: CalendarDays },
   { name: "Assignments", icon: MapPinned },
+  { name: "Driver Earnings", icon: MapPinned },
 
   { name: "Payments", icon: CreditCard },
 
@@ -49,6 +53,7 @@ const menuItems = [
   { name: "Notifications", icon: Bell },
 
   { name: "Profile", icon: UserRound },
+  { name: "Settings", icon: SettingsIcon },
 ];
 
 export default function App() {
@@ -214,6 +219,10 @@ export default function App() {
       case "Drivers":
         return <Drivers />;
 
+      case "Settings":
+        return <Settings />;
+      case "Driver Earnings":
+        return <DriverEarnings />;
       case "Vehicles":
         return <Vehicles />;
 
@@ -221,7 +230,7 @@ export default function App() {
         return <Bookings onNavigate={setActivePage} />;
 
       case "Assignments":
-        return <Assignments />;
+        return <Assignments onNavigate={setActivePage} />;
 
       case "Payments":
         return <Payments />;

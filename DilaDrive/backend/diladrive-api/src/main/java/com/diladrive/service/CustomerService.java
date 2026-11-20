@@ -29,6 +29,9 @@ public class CustomerService {
     }
 
     public Customer createCustomer(Customer customer) {
+        if ("COMPANY".equalsIgnoreCase(customer.getCustType())) {
+            applyCompanyDetails(customer, customer);
+        }
         customer.setCustPassword(encodePassword(customer.getCustPassword()));
         if (customer.getCustStatus() == null) {
             customer.setCustStatus("PENDING");
@@ -36,11 +39,20 @@ public class CustomerService {
         return customerRepository.save(customer);
     }
 
+    @Transactional
     public Customer updateCustomer(Long id, Customer customer) {
 
         Customer existing =
                 customerRepository.findById(id)
-                        .orElseThrow();
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Customer account not found."));
+
+        if (customer.getCompanyName() != null || customer.getCompanyRegistrationNumber() != null) {
+            String type = customer.getCustType() == null ? existing.getCustType() : customer.getCustType();
+            if (!"COMPANY".equalsIgnoreCase(type)) {
+                throw new IllegalArgumentException("Company details require a corporate account.");
+            }
+            applyCompanyDetails(existing, customer);
+        }
 
         existing.setCustName(customer.getCustName());
         existing.setCustEmail(customer.getCustEmail());
@@ -49,10 +61,28 @@ public class CustomerService {
             existing.setCustPassword(encodePassword(customer.getCustPassword()));
         }
         existing.setCustPhoneno(customer.getCustPhoneno());
-        existing.setCustType(customer.getCustType());
-        existing.setCustStatus(customer.getCustStatus());
+        if (customer.getCustType() != null) {
+            existing.setCustType(customer.getCustType());
+        }
+        if (customer.getCustStatus() != null) {
+            existing.setCustStatus(customer.getCustStatus());
+        }
 
         return customerRepository.save(existing);
+    }
+
+    private void applyCompanyDetails(Customer existing, Customer requested) {
+        String name = requested.getCompanyName() == null ? existing.getCompanyName() : requested.getCompanyName();
+        String registration = requested.getCompanyRegistrationNumber() == null
+                ? existing.getCompanyRegistrationNumber() : requested.getCompanyRegistrationNumber();
+        if (name == null || name.isBlank() || registration == null || registration.isBlank()) {
+            throw new IllegalArgumentException("Company name and registration number are required for a corporate account.");
+        }
+        if (name.trim().length() > 150 || registration.trim().length() > 30) {
+            throw new IllegalArgumentException("Company name and registration number must be at most 150 and 30 characters.");
+        }
+        existing.setCompanyName(name.trim());
+        existing.setCompanyRegistrationNumber(registration.trim());
     }
 
     @Transactional(readOnly = true)

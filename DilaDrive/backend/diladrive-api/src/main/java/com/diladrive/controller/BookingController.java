@@ -32,6 +32,54 @@ public class BookingController {
         this.bookingService = bookingService;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.diladrive.service.CustomerTripService trips;
+
+    @PostMapping("/estimate")
+    public com.diladrive.service.CustomerTripService.Quote quote(
+            @Valid @RequestBody com.diladrive.dto.TripQuoteRequest trip,
+            @RequestParam(required=false) Long bookingId,HttpServletRequest request) {
+        Long customerId=requireCustomerId(request);
+        return bookingId==null ? trips.quote(trip) : trips.quoteEdit(customerId,bookingId,trip);
+    }
+
+    @PostMapping("/availability")
+    public com.diladrive.service.CustomerTripService.Quote availability(
+            @Valid @RequestBody com.diladrive.dto.TripQuoteRequest trip,
+            @RequestParam(required=false) Long bookingId,HttpServletRequest request) {
+        Long customerId=requireCustomerId(request);
+        return bookingId==null ? trips.availability(trip,null) : trips.availabilityEdit(customerId,bookingId,trip);
+    }
+
+    @PostMapping("/route")
+    public com.diladrive.service.RoadRoutingService.Route route(
+            @Valid @RequestBody com.diladrive.dto.TripQuoteRequest trip, HttpServletRequest request) {
+        requireCustomerId(request);
+        return trips.route(trip);
+    }
+
+    @PostMapping({"/customer", "/customer/complete"})
+    public ResponseEntity<Map<String,Object>> complete(
+            @Valid @RequestBody com.diladrive.dto.TripQuoteRequest trip, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(trips.create(requireCustomerId(request),trip,request.getHeader("Idempotency-Key")));
+    }
+
+    @PostMapping("/customer/road-distance-review")
+    public ResponseEntity<Map<String,Object>> requestDistanceReview(
+            @Valid @RequestBody com.diladrive.dto.TripQuoteRequest trip, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(trips.requestDistanceReview(
+                requireCustomerId(request), trip, request.getHeader("Idempotency-Key")));
+    }
+    @PutMapping("/{id}/customer/complete")
+    public Map<String,Object> updateComplete(@PathVariable Long id,@Valid @RequestBody com.diladrive.dto.TripQuoteRequest trip,HttpServletRequest request) {
+        return trips.update(requireCustomerId(request),id,trip);
+    }
+
+    public record Rejection(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max=1000) String reason) {}
+    @PostMapping("/{id}/reject")
+    public ResponseEntity<Void> reject(@PathVariable Long id,@Valid @RequestBody Rejection rejection,HttpServletRequest request) {
+        requireAdminId(request); trips.reject(id,rejection.reason()); return ResponseEntity.noContent().build();
+    }
     @GetMapping
     public List<Booking> getAllBookings(HttpServletRequest request) {
         requireAdminId(request);
@@ -67,12 +115,8 @@ public class BookingController {
                     HttpStatus.BAD_REQUEST,
                     "Choose a supported trip type.");
         }
-        return bookingService.recommendVehicle(
-                pickupAddress,
-                destinationAddress,
-                scheduledAt,
-                passengerCount,
-                luggageCount);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Use POST /api/bookings/availability with geocoded locations and small, medium and large luggage counts. The legacy recommendation cannot check road travel intervals.");
     }
 
     @GetMapping("/fare-estimate")
@@ -81,7 +125,8 @@ public class BookingController {
         return bookingService.unavailableFareEstimate();
     }
 
-    @PostMapping("/customer")
+    // Kept as an internal compatibility adapter; HTTP customer creation uses the complete DTO above.
+    @Deprecated
     public ResponseEntity<CustomerBookingCreatedResponse> createCustomerBooking(
             @Valid @RequestBody CustomerBookingRequest booking,
             HttpServletRequest request) {
@@ -100,11 +145,8 @@ public class BookingController {
         // Availability counts are operational data; expose them only to admins
         // and signed-in customers using the existing session model.
         requireAdminOrCustomer(request);
-        return bookingService.checkAvailability(
-                vehicleType,
-                tripDate,
-                pickupTime
-        );
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Use POST /api/bookings/availability. An exact pickup-time count cannot verify driving duration and schedule overlaps.");
     }
 
     @PostMapping

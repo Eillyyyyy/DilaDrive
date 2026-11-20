@@ -55,17 +55,6 @@ public class CustomerController {
         }
     }
 
-    @DeleteMapping("/{id}")
-    public String deleteCustomer(
-            @PathVariable Long id,
-            HttpServletRequest request) {
-        requireAdminId(request);
-
-        customerService.deleteCustomer(id);
-
-        return "Customer Deleted";
-    }
-
     @GetMapping("/me")
     public CustomerProfileResponse getMyProfile(HttpServletRequest request) {
         return customerService.getCustomerProfile(requireCustomerId(request));

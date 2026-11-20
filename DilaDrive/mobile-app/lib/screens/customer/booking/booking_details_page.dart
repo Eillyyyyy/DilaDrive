@@ -24,6 +24,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   DateTime? _pickupTime;
   DateTime? _landedTime;
   int _passengerCount = 1;
+  int _small = 0, _medium = 0, _large = 0;
   int _luggageCount = 0;
   String? _luggageSize;
 
@@ -40,6 +41,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     _pickupTime = draft.pickupTime;
     _landedTime = draft.landedTime;
     _passengerCount = draft.passengerCount;
+    _small = draft.smallCount;
+    _medium = draft.mediumCount;
+    _large = draft.largeCount;
     _luggageCount = draft.luggageCount;
     _luggageSize = draft.luggageSize;
   }
@@ -113,6 +117,27 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return null;
   }
 
+  void _saveDraft() {
+    widget.draft
+      ..tripType = _tripType
+      ..bookingDate = _date
+      ..pickupTime = _pickupTime
+      ..landedTime = _landedTime
+      ..flightNumber = _flightController.text.trim().isEmpty
+          ? null
+          : _flightController.text.trim()
+      ..passengerCount = _passengerCount
+      ..smallCount = _small
+      ..mediumCount = _medium
+      ..largeCount = _large
+      ..luggageCount = _small + _medium + _large
+      ..luggageSize = _luggageCount == 0 ? null : _luggageSize
+      ..additionalNotes = _notesController.text.trim().isEmpty
+          ? null
+          : _notesController.text.trim()
+      ..clearAvailability();
+  }
+
   void _continue() {
     if (!_formKey.currentState!.validate()) return;
 
@@ -140,16 +165,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       showBookingMessage(context, timeError);
       return;
     }
-    if (_tripType == BookingTripType.airportPickup &&
-        _flightController.text.trim().isEmpty) {
-      showBookingMessage(
-          context, 'Enter the flight number for airport pickup.');
-      return;
-    }
-    if (_luggageCount > 0 && _luggageSize == null) {
-      showBookingMessage(context, 'Select a luggage size.');
-      return;
-    }
     if (_nameController.text.trim().isEmpty ||
         _phoneController.text.trim().isEmpty) {
       showBookingMessage(
@@ -159,22 +174,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       return;
     }
 
-    widget.draft
-      ..tripType = _tripType
-      ..bookingDate = date
-      ..pickupTime = _pickupTime
-      ..landedTime = _landedTime
-      ..flightNumber = _flightController.text.trim().isEmpty
-          ? null
-          : _flightController.text.trim()
-      ..passengerCount = _passengerCount
-      ..luggageCount = _luggageCount
-      ..luggageSize = _luggageCount == 0 ? null : _luggageSize
-      ..additionalNotes = _notesController.text.trim().isEmpty
-          ? null
-          : _notesController.text.trim()
-      ..recommendedVehicle = null
-      ..fareEstimate = null;
+    _saveDraft();
 
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -191,186 +191,183 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     final requiredTimeIcon =
         isAirportPickup ? Icons.flight_land_outlined : Icons.access_time;
 
-    return BookingPageLayout(
-      title: 'Tell us about your trip',
-      subtitle:
-          'Contact details are taken from the account you signed in with.',
-      currentStep: 1,
-      actionLabel: 'Check vehicle availability',
-      onAction: _continue,
-      child: Form(
-        key: _formKey,
-        child: Column(
-          children: [
-            BookingCard(
-              child: Column(
-                children: [
-                  TextFormField(
-                    controller: _nameController,
-                    readOnly: true,
-                    decoration: bookingInputDecoration(
-                      label: 'Customer name',
-                      icon: Icons.person_outline,
-                    ),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'Your account does not include a customer name.'
-                        : null,
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _phoneController,
-                    readOnly: true,
-                    keyboardType: TextInputType.phone,
-                    decoration: bookingInputDecoration(
-                      label: 'Phone number',
-                      icon: Icons.phone_outlined,
-                    ),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'Add a phone number to your account before booking.'
-                        : null,
-                  ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<BookingTripType>(
-                    initialValue: _tripType,
-                    decoration: bookingInputDecoration(
-                      label: 'Trip type',
-                      icon: Icons.route_outlined,
-                    ),
-                    items: BookingTripType.values
-                        .map(
-                          (type) => DropdownMenuItem(
-                            value: type,
-                            child: Text(type.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _tripType = value);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  _PickerField(
-                    label: 'Booking date',
-                    value: bookingDateLabel(_date),
-                    icon: Icons.calendar_month_outlined,
-                    onTap: _selectDate,
-                  ),
-                  const SizedBox(height: 14),
-                  _PickerField(
-                    label: requiredTimeLabel,
-                    value: bookingTimeLabel(context, requiredTime),
-                    icon: requiredTimeIcon,
-                    onTap: () => _selectTime(landedTime: isAirportPickup),
-                  ),
-                  if (isAirportPickup ||
-                      _tripType == BookingTripType.airportDropoff) ...[
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: _flightController,
-                      maxLength: 20,
-                      textCapitalization: TextCapitalization.characters,
-                      decoration: bookingInputDecoration(
-                        label: isAirportPickup
-                            ? 'Flight number'
-                            : 'Flight number (optional)',
-                        icon: Icons.flight_outlined,
-                      ),
-                      validator: (value) {
-                        if (isAirportPickup &&
-                            (value == null || value.trim().isEmpty)) {
-                          return 'Enter the arriving flight number.';
-                        }
-                        if ((value?.trim().length ?? 0) > 20) {
-                          return 'Flight number must be 20 characters or fewer.';
-                        }
-                        return null;
-                      },
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            BookingCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Passengers',
-                    style: TextStyle(
-                      color: bookingNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  _Counter(
-                    value: _passengerCount,
-                    minimum: 1,
-                    onChanged: (value) =>
-                        setState(() => _passengerCount = value),
-                  ),
-                  const Divider(height: 24),
-                  const Text(
-                    'Luggage',
-                    style: TextStyle(
-                      color: bookingNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  _Counter(
-                    value: _luggageCount,
-                    minimum: 0,
-                    onChanged: (value) => setState(() {
-                      _luggageCount = value;
-                      if (value == 0) _luggageSize = null;
-                    }),
-                  ),
-                  if (_luggageCount > 0) ...[
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      initialValue: _luggageSize,
-                      decoration: bookingInputDecoration(
-                        label: 'Luggage size',
-                        icon: Icons.luggage_outlined,
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'SMALL', child: Text('Small')),
-                        DropdownMenuItem(
-                          value: 'MEDIUM',
-                          child: Text('Medium'),
+    return PopScope<void>(
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) _saveDraft();
+        },
+        child: BookingPageLayout(
+          title: 'Tell us about your trip',
+          subtitle:
+              'Contact details are taken from the account you signed in with.',
+          currentStep: 1,
+          actionLabel: 'Check vehicle availability',
+          onAction: _continue,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                BookingCard(
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: _nameController,
+                        readOnly: true,
+                        decoration: bookingInputDecoration(
+                          label: 'Customer name',
+                          icon: Icons.person_outline,
                         ),
-                        DropdownMenuItem(value: 'LARGE', child: Text('Large')),
+                        validator: (value) => value == null ||
+                                value.trim().isEmpty
+                            ? 'Your account does not include a customer name.'
+                            : null,
+                      ),
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: _phoneController,
+                        readOnly: true,
+                        keyboardType: TextInputType.phone,
+                        decoration: bookingInputDecoration(
+                          label: 'Phone number',
+                          icon: Icons.phone_outlined,
+                        ),
+                        validator: (value) => value == null ||
+                                value.trim().isEmpty
+                            ? 'Add a phone number to your account before booking.'
+                            : null,
+                      ),
+                      const SizedBox(height: 14),
+                      DropdownButtonFormField<BookingTripType>(
+                        initialValue: _tripType,
+                        decoration: bookingInputDecoration(
+                          label: 'Trip type',
+                          icon: Icons.route_outlined,
+                        ),
+                        items: BookingTripType.values
+                            .map(
+                              (type) => DropdownMenuItem(
+                                value: type,
+                                child: Text(type.label),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setState(() => _tripType = value);
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      _PickerField(
+                        label: 'Booking date',
+                        value: bookingDateLabel(_date),
+                        icon: Icons.calendar_month_outlined,
+                        onTap: _selectDate,
+                      ),
+                      const SizedBox(height: 14),
+                      _PickerField(
+                        label: requiredTimeLabel,
+                        value: bookingTimeLabel(context, requiredTime),
+                        icon: requiredTimeIcon,
+                        onTap: () => _selectTime(landedTime: isAirportPickup),
+                      ),
+                      if (isAirportPickup ||
+                          _tripType == BookingTripType.airportDropoff) ...[
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _flightController,
+                          maxLength: 20,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: bookingInputDecoration(
+                            label: 'Flight number (optional)',
+                            icon: Icons.flight_outlined,
+                          ),
+                          validator: (value) {
+                            if ((value?.trim().length ?? 0) > 20) {
+                              return 'Flight number must be 20 characters or fewer.';
+                            }
+                            return null;
+                          },
+                        ),
                       ],
-                      onChanged: (value) =>
-                          setState(() => _luggageSize = value),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            BookingCard(
-              child: TextField(
-                controller: _notesController,
-                maxLength: 1000,
-                minLines: 2,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: bookingInputDecoration(
-                  label: 'Additional notes (optional)',
-                  icon: Icons.notes_outlined,
-                  hint: 'Share any information that may help with your trip',
+                    ],
+                  ),
                 ),
-              ),
+                const SizedBox(height: 14),
+                BookingCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Passengers',
+                        style: TextStyle(
+                          color: bookingNavy,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _Counter(
+                        value: _passengerCount,
+                        minimum: 1,
+                        onChanged: (value) =>
+                            setState(() => _passengerCount = value),
+                      ),
+                      const Divider(height: 24),
+                      const Text(
+                        'Luggage',
+                        style: TextStyle(
+                          color: bookingNavy,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _small = _passengerCount;
+                          _large = _passengerCount;
+                        }),
+                        child: const Text('Suggest one large bag and backpack per passenger'),
+                      ),
+                      const Text('Backpacks / small bags (1 point each)'),
+                      _Counter(
+                          value: _small,
+                          minimum: 0,
+                          onChanged: (v) => setState(() => _small = v)),
+                      const Text('Medium luggage (2 points each)'),
+                      _Counter(
+                          value: _medium,
+                          minimum: 0,
+                          onChanged: (v) => setState(() => _medium = v)),
+                      const Text('Large luggage (3 points each)'),
+                      _Counter(
+                          value: _large,
+                          minimum: 0,
+                          onChanged: (v) => setState(() => _large = v)),
+                      Text(
+                          'Total luggage points: ${_small + 2 * _medium + 3 * _large}'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                BookingCard(
+                  child: TextField(
+                    controller: _notesController,
+                    maxLength: 1000,
+                    minLines: 2,
+                    maxLines: 4,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: bookingInputDecoration(
+                      label: 'Additional notes (optional)',
+                      icon: Icons.notes_outlined,
+                      hint:
+                          'Share any information that may help with your trip',
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-    );
+          ),
+        ));
   }
 }
 

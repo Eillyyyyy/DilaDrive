@@ -20,7 +20,37 @@ import static org.mockito.Mockito.when;
 class VehicleServiceTest {
 
     private final VehicleRepository vehicleRepository = mock(VehicleRepository.class);
-    private final VehicleService service = new VehicleService(vehicleRepository);
+    private final VehicleService service = new VehicleService(vehicleRepository, mock(com.diladrive.repository.AssignmentRepository.class));
+
+    @Test
+    void updatesAssignedVehicleWithoutChangingRelationship() {
+        Vehicle vehicle = existingVehicle();
+        vehicle.setDriverId(17L);
+        vehicle.setVehicleLuggageCapacity(3);
+        when(vehicleRepository.findByDriverId(17L)).thenReturn(java.util.List.of(vehicle));
+        when(vehicleRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(vehicle));
+        when(vehicleRepository.save(vehicle)).thenReturn(vehicle);
+        Vehicle update = new Vehicle();
+        update.setVehicleModel("Updated model");
+        update.setVehiclePlateno("ABC123");
+        update.setVehicleType("MPV");
+        update.setVehicleCapacity(8);
+        update.setVehicleLuggageCapacity(5);
+        update.setVehicleStatus("Available");
+        Vehicle result = service.updateAssignedVehicle(17L, update);
+        assertEquals(7L, result.getVehicleId());
+        assertEquals(17L, result.getDriverId());
+        assertEquals(5, result.getVehicleLuggageCapacity());
+    }
+
+    @Test
+    void refusesMissingAndAmbiguousAssignments() {
+        when(vehicleRepository.findByDriverId(17L)).thenReturn(java.util.List.of());
+        assertThrows(ResponseStatusException.class, () -> service.updateAssignedVehicle(17L, new Vehicle()));
+        when(vehicleRepository.findByDriverId(17L)).thenReturn(java.util.List.of(new Vehicle(), new Vehicle()));
+        assertThrows(ResponseStatusException.class, () -> service.getAssignedVehicle(17L));
+        verify(vehicleRepository, never()).save(any());
+    }
 
     @Test
     void loadsVehicleByIdForTheDetailsView() {
@@ -55,7 +85,7 @@ class VehicleServiceTest {
         assertEquals(12, result.getVehicleCapacity());
         assertEquals(LocalDate.of(2027, 5, 1), result.getVehicleRoadtaxexpiry());
         assertEquals(LocalDate.of(2027, 6, 1), result.getVehicleServiceexpiry());
-        assertEquals("UNAVAILABLE", result.getVehicleStatus());
+        assertEquals("INACTIVE", result.getVehicleStatus());
         verify(vehicleRepository).save(existing);
     }
 

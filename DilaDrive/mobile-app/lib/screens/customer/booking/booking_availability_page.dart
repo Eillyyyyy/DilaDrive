@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../../../models/booking_draft.dart';
 import '../../../services/booking_service.dart';
 import '../../../theme/app_theme.dart';
+import '../../../widgets/booking_availability_message.dart';
 import '../../auth/login.dart';
 import 'booking_fare_page.dart';
 import 'booking_page_layout.dart';
+import 'booking_review_page.dart';
 
 class BookingAvailabilityPage extends StatefulWidget {
   const BookingAvailabilityPage({
@@ -27,8 +29,10 @@ class _BookingAvailabilityPageState extends State<BookingAvailabilityPage> {
   late final BookingService _bookingService =
       widget.bookingService ?? BookingService();
   bool _isLoading = true;
+  bool _distanceReviewAvailable = false;
   AvailabilityResult? _result;
-  String? _error;
+
+  int _requestVersion = 0;
 
   @override
   void initState() {
@@ -43,21 +47,31 @@ class _BookingAvailabilityPageState extends State<BookingAvailabilityPage> {
   }
 
   Future<void> _checkAvailability() async {
+    final version = ++_requestVersion;
+    final key = widget.draft.availabilityKey;
+    widget.draft.clearAvailability();
     setState(() {
       _isLoading = true;
       _result = null;
-      _error = null;
+      _distanceReviewAvailable = false;
     });
     try {
       final result = await _bookingService.checkAvailability(widget.draft);
-      if (!mounted) return;
+      if (!mounted || version != _requestVersion) return;
+      if (key != widget.draft.availabilityKey) {
+        setState(() => _result = AvailabilityResult.unavailable(
+            'Trip details changed. Check availability again.',
+            status: AvailabilityStatus.serviceError));
+        widget.draft.clearAvailability();
+        return;
+      }
       setState(() {
         _result = result;
         widget.draft.recommendedVehicle =
             result.isAvailable ? result.vehicle : null;
       });
     } on BookingException catch (exception) {
-      if (!mounted) return;
+      if (!mounted || version != _requestVersion) return;
       if (exception.requiresLogin) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute<void>(builder: (_) => const LoginPage()),
@@ -65,14 +79,30 @@ class _BookingAvailabilityPageState extends State<BookingAvailabilityPage> {
         );
         return;
       }
-      setState(() => _error = exception.message);
+      setState(() {
+        _distanceReviewAvailable = widget.draft.existingBookingId == null &&
+            exception.code == 'ROAD_DISTANCE_REVIEW_AVAILABLE';
+        _result = AvailabilityResult.unavailable(exception.message,
+            status: AvailabilityStatus.serviceError);
+      });
+    } catch (_) {
+      if (mounted && version == _requestVersion) {
+        setState(() => _result = AvailabilityResult.unavailable(
+            AvailabilityStatus.serviceError.message,
+            status: AvailabilityStatus.serviceError));
+      }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && version == _requestVersion) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   void _continue() {
-    if (_result?.isAvailable != true) return;
+    if (_result?.isAvailable != true || !widget.draft.hasFreshAvailability) {
+      _checkAvailability();
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => BookingFarePage(draft: widget.draft),
@@ -82,19 +112,16 @@ class _BookingAvailabilityPageState extends State<BookingAvailabilityPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isAvailable = _result?.isAvailable == true;
+    final isAvailable =
+        _result?.isAvailable == true && widget.draft.hasFreshAvailability;
     return BookingPageLayout(
       title: 'Checking your options',
       subtitle:
           'We will recommend a vehicle based on capacity and availability.',
       currentStep: 2,
-      actionLabel: isAvailable
-          ? 'Review fare information'
-          : _error != null || _result != null
-              ? 'Check again'
-              : 'Checking availability…',
-      onAction: isAvailable ? _continue : _checkAvailability,
-      actionEnabled: isAvailable || !_isLoading,
+      actionLabel: 'Continue to Fare',
+      onAction: _continue,
+      actionEnabled: isAvailable && !_isLoading,
       isLoading: _isLoading,
       child: Column(
         children: [
@@ -139,53 +166,39 @@ class _BookingAvailabilityPageState extends State<BookingAvailabilityPage> {
                 ),
               ),
             )
-          else if (isAvailable)
-            _RecommendedVehicleCard(vehicle: _result!.vehicle!)
-          else
+          else if (isAvailable) ...[
+            const Text('Available when checked',
+                style: TextStyle(
+                    color: Colors.green, fontWeight: FontWeight.w700)),
+            Text(
+                'Your trip: ${widget.draft.passengerCount} passengers, ${widget.draft.luggageUnits} luggage points'),
+            const SizedBox(height: 8),
+            _RecommendedVehicleCard(vehicle: _result!.vehicle!),
+          ] else
             BookingCard(
-              child: Column(
-                children: [
-                  Icon(
-                    _error == null ? Icons.event_busy : Icons.cloud_off,
-                    color:
-                        _error == null ? Colors.orange[800] : Colors.red[700],
-                    size: 38,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _error == null
-                        ? (_result?.message ??
-                            'No suitable vehicle is available for this trip.')
-                        : 'Availability could not be verified',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: bookingNavy,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: AppTheme.secondaryText, height: 1.4),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Change trip details'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: bookingNavy,
-                    ),
-                  ),
-                ],
+              child: BookingAvailabilityMessage(
+                result: _result ??
+                    AvailabilityResult.unavailable(
+                        AvailabilityStatus.serviceError.message,
+                        status: AvailabilityStatus.serviceError),
+                onRetry: _checkAvailability,
+                onChange: () => Navigator.of(context).pop(),
               ),
             ),
           const SizedBox(height: 14),
+          if (_distanceReviewAvailable && !_isLoading)
+            OutlinedButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => BookingReviewPage(
+                    draft: widget.draft,
+                    bookingService: _bookingService,
+                    requestDistanceReview: true,
+                  ),
+                ),
+              ),
+              child: const Text('Review booking without an estimate'),
+            ),
           const BookingCard(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,10 +284,10 @@ class _RecommendedVehicleCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _CapacityLine(
-            label: 'Luggage capacity',
+            label: 'Luggage points capacity',
             value: vehicle.luggageCapacity == null
                 ? 'Not recorded'
-                : '${vehicle.luggageCapacity} items',
+                : '${vehicle.luggageCapacity} points',
           ),
           const SizedBox(height: 12),
           const Text(

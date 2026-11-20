@@ -26,5 +26,6 @@ public record AssignmentResponse(
         String assignmentStatus,
         @JsonProperty("assignmentDate")
         @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
-        LocalDateTime assignmentDate) {
+        LocalDateTime assignmentDate, LocalDateTime scheduledEndAt,
+        Integer smallCount, Integer mediumCount, Integer largeCount, Integer luggageUnits) {
 }

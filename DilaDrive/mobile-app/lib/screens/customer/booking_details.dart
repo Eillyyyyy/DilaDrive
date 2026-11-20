@@ -5,6 +5,7 @@ import '../../services/customer_booking_service.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login.dart';
 import 'update_booking.dart';
+import '../../widgets/booking_fare_proposals.dart';
 
 class BookingDetailsPage extends StatefulWidget {
   const BookingDetailsPage({super.key, required this.booking});
@@ -88,6 +89,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       body: ListView(
         padding: const EdgeInsets.all(18),
         children: [
+          BookingFareProposals(
+              bookingId: booking.id,
+              onAccepted: () => Navigator.pop(context, true)),
           Container(
             padding: const EdgeInsets.all(19),
             decoration: BoxDecoration(
@@ -203,8 +207,32 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     '${booking.luggageCount}',
                     if (booking.luggageSize?.trim().isNotEmpty == true)
                       booking.luggageSize!,
-                  ].join(' · '),
+                  ].join(' Â· '),
                 ),
+              ],
+              if (booking.smallCount != null) ...[
+                const Divider(height: 20),
+                _InfoLine(
+                    icon: Icons.luggage_outlined,
+                    label: 'Small / medium / large',
+                    value:
+                        '${booking.smallCount} / ${booking.mediumCount} / ${booking.largeCount}'),
+                _InfoLine(
+                    icon: Icons.inventory_2_outlined,
+                    label: 'Luggage units',
+                    value: '${booking.luggageUnits}'),
+                _InfoLine(
+                    icon: Icons.access_time,
+                    label: 'Estimated duration',
+                    value:
+                        '${((booking.durationSeconds ?? 0) / 60).ceil()} minutes'),
+              ],
+              if (booking.rejectionReason != null) ...[
+                const Divider(height: 20),
+                _InfoLine(
+                    icon: Icons.info_outline,
+                    label: 'Rejection reason',
+                    value: booking.rejectionReason!),
               ],
               if (booking.distanceKm != null) ...[
                 const Divider(height: 20),
@@ -223,9 +251,23 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
               children: [
                 _InfoLine(
                   icon: Icons.payments_outlined,
-                  label: 'Recorded trip fare',
+                  label: 'Base fare',
                   value: 'RM ${booking.fare!.toStringAsFixed(2)}',
                 ),
+                if (booking.finalFare != null &&
+                    (booking.isCompleted || booking.finalFare != booking.fare))
+                  _InfoLine(
+                    icon: Icons.receipt_long_outlined,
+                    label: 'Final fare',
+                    value: 'RM ${booking.finalFare!.toStringAsFixed(2)}',
+                  ),
+                if (booking.payableFare != null &&
+                    booking.payableFare != booking.finalFare)
+                  _InfoLine(
+                    icon: Icons.description_outlined,
+                    label: 'Issued invoice amount',
+                    value: 'RM ${booking.payableFare!.toStringAsFixed(2)}',
+                  ),
               ],
             ),
           ],
@@ -271,8 +313,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.cancel_outlined),
-                      label:
-                          Text(_cancelling ? 'Cancelling…' : 'Cancel booking'),
+                      label: Text(
+                          _cancelling ? 'Cancellingâ€¦' : 'Cancel booking'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red.shade700,
                         side: BorderSide(color: Colors.red.shade200),

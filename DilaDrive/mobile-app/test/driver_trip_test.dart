@@ -16,6 +16,10 @@ void main() {
       'passengerCount': 3,
       'luggageCount': 2,
       'luggageSize': 'MEDIUM',
+      'smallCount': 1,
+      'mediumCount': 1,
+      'largeCount': 0,
+      'luggageUnits': 3,
       'vehiclePlate': 'ABC 1234',
       'assignmentStatus': 'ASSIGNED',
     });
@@ -23,6 +27,9 @@ void main() {
     expect(trip.bookingReference, 'BK-000027');
     expect(trip.customer, 'Customer Name');
     expect(trip.isAirportPickup, isTrue);
+    expect(trip.luggageUnits, 3);
+    expect(trip.smallCount, 1);
+    expect(trip.mediumCount, 1);
     expect(trip.tripTypeLabel, 'Airport pickup');
     expect(trip.flightNo, 'MH 123');
     expect(trip.luggageCount, 2);

@@ -51,9 +51,11 @@ class _UpdateAccountPageState extends State<UpdateAccountPage> {
     if (file == null) return;
     final bytes = await file.readAsBytes();
     if (bytes.length > 900 * 1024) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Choose an image smaller than 900 KB.')),
       );
+      }
       return;
     }
     final extension = file.name.toLowerCase().split('.').last;

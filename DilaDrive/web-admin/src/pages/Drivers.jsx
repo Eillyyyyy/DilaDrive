@@ -1,5 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import api from "../services/api";
+import { getApiErrorMessage } from "../services/apiErrors";
+import { loadDriverManagement } from "../services/driverManagement";
+import { DRIVER_TYPES, ACCOUNT_STATUSES, AVAILABILITY_OPTIONS, VEHICLE_STATUSES,
+  emptyDriver, emptyVehicle, formatDriver, toDriverPayload, toDriverCreatePayload,
+  toDriverEditForm, validateDriverFields } from "../services/driverForm";
 import {
   Search,
   Eye,
@@ -26,84 +31,6 @@ import {
 // INITIAL DATA
 // ==========================================
 
-const emptyDriver = {
-  name: "",
-  email: "",
-  phone: "",
-  icNo: "",
-  licenseNo: "",
-  licenseExpiry: "",
-  driverType: "Company Driver",
-  vehicle: {
-    model: "",
-    plate: "",
-    type: "",
-    capacity: "",
-    luggageCapacity: "",
-    roadTaxExpiry: "",
-    serviceExpiry: "",
-    status: "Available",
-  },
-  availability: "Available",
-  password: "",
-  confirmPassword: "",
-};
-
-const formatDriver = (driver) => ({
-  id: driver.driverId,
-  name: driver.driverName || "",
-  email: driver.driverEmail || "",
-  phone: driver.driverPhoneno || "",
-  icNo: driver.driverIcno || "",
-  licenseNo: driver.driverLicenseno || "",
-  licenseExpiry: driver.driverLicenseExpiry || "",
-  driverType: driver.driverType || "Company Driver",
-  vehicle: driver.vehiclePlateno || "",
-  availability: driver.driverAvailability || "Available",
-  accountStatus:
-    driver.driverStatus?.toUpperCase() === "ACTIVE"
-      ? "Active"
-      : driver.driverStatus?.toUpperCase() === "DISABLED"
-        ? "Disabled"
-        : "Pending Activation",
-});
-
-const toDriverPayload = (driver) => ({
-  driverName: driver.name.trim(),
-  driverEmail: driver.email.trim().toLowerCase(),
-  driverPhoneno: driver.phone.trim(),
-  driverIcno: driver.icNo?.trim() || "",
-  driverLicenseno: driver.licenseNo?.trim() || "",
-  driverLicenseExpiry: driver.licenseExpiry || "",
-  driverType: driver.driverType || "Company Driver",
-  driverAvailability: driver.availability || "Available",
-  driverStatus:
-    driver.accountStatus === "Active"
-      ? "ACTIVE"
-      : driver.accountStatus === "Disabled"
-        ? "DISABLED"
-        : "PENDING",
-});
-
-const toDriverCreatePayload = (driver) => ({
-  ...toDriverPayload(driver),
-  vehicle: {
-    vehicleModel: driver.vehicle.model.trim(),
-    vehiclePlateno: driver.vehicle.plate.trim().toUpperCase(),
-    vehicleType: driver.vehicle.type.trim(),
-    vehicleCapacity: Number(driver.vehicle.capacity),
-    vehicleLuggageCapacity: Number(driver.vehicle.luggageCapacity),
-    vehicleRoadtaxexpiry: driver.vehicle.roadTaxExpiry || null,
-    vehicleServiceexpiry: driver.vehicle.serviceExpiry || null,
-    vehicleStatus:
-      driver.vehicle.status === "Available"
-        ? "AVAILABLE"
-        : driver.vehicle.status === "In Use"
-          ? "UNAVAILABLE"
-          : "MAINTENANCE",
-  },
-});
-
 const statusStyles = {
   Available: "bg-emerald-50 text-emerald-700",
   Assigned: "bg-blue-50 text-blue-700",
@@ -116,7 +43,6 @@ const statusStyles = {
 
 const accountStyles = {
   Active: "bg-emerald-50 text-emerald-700",
-  "Pending Activation": "bg-amber-50 text-amber-700",
   Disabled: "bg-red-50 text-red-700",
 };
 
@@ -125,11 +51,11 @@ const accountStyles = {
 // ==========================================
 
 function StatusBadge({ status }) {
-  const safeStatus = statusStyles[status] ? status : "Unavailable";
+  const safeStatus = status || "Not recorded";
 
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${statusStyles[safeStatus]}`}
+      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${statusStyles[safeStatus] || "bg-slate-100 text-slate-600"}`}
     >
       <span
         className={`h-2 w-2 rounded-full ${
@@ -148,13 +74,11 @@ function StatusBadge({ status }) {
 }
 
 function AccountBadge({ status }) {
-  const safeStatus = accountStyles[status]
-    ? status
-    : "Pending Activation";
+  const safeStatus = status || "Not recorded";
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${accountStyles[safeStatus]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${accountStyles[safeStatus] || "bg-slate-100 text-slate-600"}`}
     >
       {safeStatus === "Active" ? (
         <CircleCheck size={13} />
@@ -191,6 +115,9 @@ function Field({
   type = "text",
   required = false,
   placeholder = "",
+  error,
+  min,
+  step,
 }) {
   return (
     <label className="block">
@@ -201,12 +128,16 @@ function Field({
 
       <input
         type={type}
-        value={value || ""}
+        aria-invalid={!!error}
+        min={min}
+        step={step}
+        value={value ?? ""}
         onChange={onChange}
         required={required}
         placeholder={placeholder}
         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
       />
+      {error && <span role="alert" className="mt-1 block text-xs text-red-600">{error}</span>}
     </label>
   );
 }
@@ -290,6 +221,389 @@ function Detail({ icon: Icon, label, value }) {
 // MAIN DRIVER MANAGEMENT
 // ==========================================
 
+function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }) {
+  return <>
+              {/* PERSONAL INFORMATION */}
+
+              <section className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Personal Information
+                  </h3>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    Basic contact details for the driver.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Full Name"
+                    error={fieldErrors["name"]}
+                    value={newDriver.name}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        name: event.target.value,
+                      })
+                    }
+                    placeholder="Enter full name"
+                    required
+                  />
+
+                  <Field
+                    label="Email Address"
+                    error={fieldErrors["email"]}
+                    type="email"
+                    value={newDriver.email}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        email: event.target.value,
+                      })
+                    }
+                    placeholder="driver@example.com"
+                    required
+                  />
+
+                  <Field
+                    label="Phone Number"
+                    error={fieldErrors["phone"]}
+                    value={newDriver.phone}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        phone: event.target.value,
+                      })
+                    }
+                    placeholder="e.g. 0123456789"
+                    required
+                  />
+
+                  <Field
+                    label="IC Number"
+                    error={fieldErrors["icNo"]}
+                    value={newDriver.icNo}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        icNo: event.target.value,
+                      })
+                    }
+                    placeholder="Enter identification number"
+                  />
+                </div>
+              </section>
+
+              {/* LOGIN CREDENTIALS */}
+
+              {!editing && <section className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Login Credentials
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Set a password for the driver account.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Password"
+                    error={fieldErrors["password"]}
+                    type="password"
+                    value={newDriver.password}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        password: event.target.value,
+                      })
+                    }
+                    placeholder="Enter password"
+                    required
+                  />
+
+                  <Field
+                    label="Confirm Password"
+                    error={fieldErrors["confirmPassword"]}
+                    type="password"
+                    value={newDriver.confirmPassword}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        confirmPassword: event.target.value,
+                      })
+                    }
+                    placeholder="Re-enter password"
+                    required
+                  />
+                </div>
+
+                {newDriver.confirmPassword && (
+                  <p
+                    className={`text-xs font-medium ${
+                      newDriver.password === newDriver.confirmPassword
+                        ? "text-emerald-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {newDriver.password === newDriver.confirmPassword
+                      ? "✓ Passwords match"
+                      : "Passwords do not match"}
+                  </p>
+                )}
+
+                <p className="text-xs text-slate-500">
+                  Password must contain at least 8 characters.
+                </p>
+              </section>}
+
+              {/* DRIVER INFORMATION */}
+
+              <section className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Driver Information
+                  </h3>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    Identification, driving licence and assignment details.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+
+                  <Field
+                    label="Driving License No"
+                    error={fieldErrors["licenseNo"]}
+                    value={newDriver.licenseNo}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        licenseNo: event.target.value,
+                      })
+                    }
+                    placeholder="Enter driving licence number"
+                  />
+
+                  <Field
+                    label="License Expiry Date"
+                    error={fieldErrors["licenseExpiry"]}
+                    type="date"
+                    value={newDriver.licenseExpiry}
+                    onChange={(event) =>
+                      setNewDriver({
+                        ...newDriver,
+                        licenseExpiry: event.target.value,
+                      })
+                    }
+                  />
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Driver Type
+                    </span>
+
+                    <select
+                      value={newDriver.driverType}
+                      onChange={(event) =>
+                        setNewDriver({
+                          ...newDriver,
+                          driverType: event.target.value,
+                        })
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+                    >
+                      {DRIVER_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </label>
+                </div>
+              </section>
+
+              {/* VEHICLE INFORMATION */}
+
+              <section className="space-y-4 border-t border-slate-100 pt-6">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Vehicle Information
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Vehicle details linked to this driver account.
+                  </p>
+                </div>
+
+                {editing && !newDriver.vehicle && (
+                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                    This legacy driver has no registered vehicle. You can still update the driver profile.
+                  </p>
+                )}
+                {newDriver.vehicle && <fieldset disabled={editing && !newDriver.updateVehicle} className="disabled:opacity-60">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Vehicle Model"
+                    error={fieldErrors["vehicle.model"]}
+                    value={newDriver.vehicle.model}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          model: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. Toyota Hiace"
+                    required
+                  />
+
+                  <Field
+                    label="Registration Number / Plate Number"
+                    error={fieldErrors["vehicle.plate"]}
+                    value={newDriver.vehicle.plate}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          plate: event.target.value.toUpperCase(),
+                        },
+                      }))
+                    }
+                    placeholder="e.g. MCA1234"
+                    required
+                  />
+
+                  <Field
+                    label="Vehicle Type"
+                    error={fieldErrors["vehicle.type"]}
+                    value={newDriver.vehicle.type}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          type: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. MPV, Sedan, Bus"
+                    required
+                  />
+
+                  <Field
+                    label="Passenger Capacity"
+                    error={fieldErrors["vehicle.capacity"]}
+                    type="number"
+                    value={newDriver.vehicle.capacity}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          capacity: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. 7"
+                    required
+                  />
+
+                  <Field
+                    label="Luggage Capacity (items)"
+                    error={fieldErrors["vehicle.luggageCapacity"]}
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={newDriver.vehicle.luggageCapacity}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          luggageCapacity: event.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="Enter the actual item capacity"
+                    required
+                  />
+
+                  <Field
+                    label="Road Tax Expiry Date"
+                    error={fieldErrors["vehicle.roadTaxExpiry"]}
+                    type="date"
+                    value={newDriver.vehicle.roadTaxExpiry}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          roadTaxExpiry: event.target.value,
+                        },
+                      }))
+                    }
+                  />
+
+                  <Field
+                    label="Next Service Date"
+                    error={fieldErrors["vehicle.serviceExpiry"]}
+                    type="date"
+                    value={newDriver.vehicle.serviceExpiry}
+                    onChange={(event) =>
+                      setNewDriver((previous) => ({
+                        ...previous,
+                        vehicle: {
+                          ...previous.vehicle,
+                          serviceExpiry: event.target.value,
+                        },
+                      }))
+                    }
+                  />
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Vehicle Status
+                      <span className="ml-1 text-red-500">*</span>
+                    </span>
+                    <select
+                      value={newDriver.vehicle.status}
+                      onChange={(event) =>
+                        setNewDriver((previous) => ({
+                          ...previous,
+                          vehicle: {
+                            ...previous.vehicle,
+                            status: event.target.value,
+                          },
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+                    >
+                      {VEHICLE_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
+                    </select>
+                  </label>
+                </div>
+                </fieldset>}
+              </section>
+
+              <section className="space-y-4 border-t border-slate-100 pt-6">
+                <h3 className="text-sm font-bold text-slate-900">Driver Status</h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {[["availability", "Driver Availability", AVAILABILITY_OPTIONS],
+                    ["accountStatus", "Account Status", ACCOUNT_STATUSES]].map(([key, label, options]) => (
+                    <label key={key} className="block">
+                      <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
+                      <select value={newDriver[key]} disabled={!editing && key === "accountStatus"}
+                        onChange={event => setNewDriver(previous => ({...previous, [key]: event.target.value}))}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10">
+                        {options.map(option => <option key={option}>{option}</option>)}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </section>
+  </>;
+}
+
 export default function Drivers() {
   const [driverList, setDriverList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -300,6 +614,9 @@ export default function Drivers() {
 
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [editingDriver, setEditingDriver] = useState(null);
+  const [loadingDriver, setLoadingDriver] = useState(false);
+  const editRequest = useRef(0);
+  const editAbort = useRef(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const [newDriver, setNewDriver] = useState(emptyDriver);
@@ -307,25 +624,43 @@ export default function Drivers() {
 
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const formDriver = editingDriver || newDriver;
+  const setFormDriver = editingDriver ? setEditingDriver : setNewDriver;
 
   // ==========================================
   // FETCH DRIVERS FROM BACKEND
   // ==========================================
 
   useEffect(() => {
-    fetchDrivers().catch((fetchError) => {
-      console.error("Error fetching drivers:", fetchError);
-      setError("Failed to load drivers. Please try again.");
+    const controller = new AbortController();
+    fetchDrivers({signal: controller.signal}).catch((fetchError) => {
+      if (controller.signal.aborted || fetchError.code === "ERR_CANCELED") return;
+      setError(getApiErrorMessage(fetchError, fetchError.message || "Failed to load drivers. Please try again."));
     });
+    return () => {
+      controller.abort();
+      editAbort.current?.abort();
+      editRequest.current++;
+    };
   }, []);
 
-  const fetchDrivers = async () => {
+  const fetchDrivers = async (config = {}) => {
     setLoading(true);
     try {
-      const response = await api.get("/drivers");
-      setDriverList(response.data.map(formatDriver));
+      const result = await loadDriverManagement(api, config);
+      if (config.signal?.aborted) return;
+      setDriverList(result.drivers.map(driver => ({
+        ...formatDriver(driver),
+        vehicle: result.vehicles === null ? "Vehicle data unavailable" : result.vehicles
+          .filter(vehicle => vehicle.driverId === driver.driverId)
+          .map(vehicle => vehicle.vehiclePlateno).filter(Boolean).join(", "),
+      })));
+      setError(result.errors.map(requestError => getApiErrorMessage(requestError,
+        "Some driver management data could not be loaded.")).join(" "));
     } finally {
-      setLoading(false);
+      if (!config.signal?.aborted) setLoading(false);
     }
   };
 
@@ -337,10 +672,6 @@ export default function Drivers() {
 
   const activeAccounts = driverList.filter(
     (driver) => driver.accountStatus === "Active"
-  ).length;
-
-  const pendingAccounts = driverList.filter(
-    (driver) => driver.accountStatus === "Pending Activation"
   ).length;
 
   const disabledAccounts = driverList.filter(
@@ -392,87 +723,23 @@ export default function Drivers() {
   // VALIDATION
   // ==========================================
 
-  const validateDriver = (driver, currentId = null) => {
-    const name = driver.name.trim();
-    const email = driver.email.trim().toLowerCase();
-    const phone = driver.phone.trim();
-
-    if (!name || !email || !phone) {
-      return "Name, email and phone number are required.";
-    }
-
-    if (currentId === null) {
-      if (!driver.password) {
-        return "Password is required.";
-      }
-
-      if (!driver.confirmPassword) {
-        return "Please confirm your password.";
-      }
-
-      if (driver.password.length < 8) {
-        return "Password must contain at least 8 characters.";
-      }
-
-      if (driver.password !== driver.confirmPassword) {
-        return "Password and confirm password do not match.";
-      }
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return "Please enter a valid email address.";
-    }
-
-    const phoneDigits = phone.replace(/\D/g, "");
-
-    if (phoneDigits.length < 9 || phoneDigits.length > 15) {
-      return "Please enter a valid phone number.";
-    }
-
-    const duplicate = driverList.some(
-      (existing) =>
-        existing.id !== currentId &&
-        (existing.email?.toLowerCase() === email ||
-          existing.phone?.replace(/\D/g, "") === phoneDigits)
-    );
-
-    if (duplicate) {
-      return "This email address or phone number already exists.";
-    }
-
-    if (currentId === null) {
-      if (
-        !driver.vehicle.model.trim() ||
-        !driver.vehicle.plate.trim() ||
-        !driver.vehicle.type.trim() ||
-        driver.vehicle.capacity === ""
-      ) {
-        return "Vehicle model, registration number, type and passenger capacity are required.";
-      }
-
-      const capacity = Number(driver.vehicle.capacity);
-      if (!Number.isInteger(capacity) || capacity < 1) {
-        return "Vehicle passenger capacity must be a whole number greater than zero.";
-      }
-
-      const luggageCapacity = Number(driver.vehicle.luggageCapacity);
-      if (!Number.isInteger(luggageCapacity) || luggageCapacity < 0) {
-        return "Vehicle luggage capacity must be a whole number zero or greater.";
-      }
-    }
-
-    return "";
-  };
-
   // ==========================================
   // CREATE DRIVER
   // ==========================================
 
+  const setFormRequestError = requestError => {
+    const message = String(requestError.response?.data?.message || requestError.response?.data || "");
+    const fields = {};
+    for (const [pattern, key] of [[/email/i, "email"], [/password/i, "password"], [/phone/i, "phone"],
+      [/driverName|name is required/i, "name"], [/registration|plate/i, "vehicle.plate"],
+      [/luggage/i, "vehicle.luggageCapacity"], [/passenger capacity/i, "vehicle.capacity"]]) {
+      if (pattern.test(message)) fields[key] = message;
+    }
+    setFieldErrors(fields);
+  };
+
   const getRequestError = (requestError, fallback) => {
-    const responseMessage = requestError.response?.data;
-    return typeof responseMessage === "string"
-      ? responseMessage
-      : responseMessage?.message || responseMessage?.detail || fallback;
+    return getApiErrorMessage(requestError, fallback);
   };
 
   const handleCreateDriver = async (event) => {
@@ -480,32 +747,30 @@ export default function Drivers() {
     setError("");
     setSuccessMessage("");
 
-    const validationError = validateDriver(newDriver);
-    if (validationError) {
-      setError(validationError);
+    const validationError = validateDriverFields(newDriver, null, driverList);
+    setFieldErrors(validationError);
+    if (Object.keys(validationError).length) {
+      setError("Please correct the highlighted fields.");
       return;
     }
 
     setSavingDriver(true);
     try {
-      const response = await api.post("/drivers", {
+      await api.post("/drivers", {
         ...toDriverCreatePayload(newDriver),
         driverPassword: newDriver.password,
       });
-      const createdDriver = formatDriver(response.data);
-      createdDriver.vehicle = newDriver.vehicle.plate.trim().toUpperCase();
-      setDriverList((previous) => [
-        createdDriver,
-        ...previous,
-      ]);
       setNewDriver(emptyDriver);
       setShowCreateModal(false);
       setSearch("");
       setStatusFilter("All");
       setAccountFilter("All");
       setSuccessMessage("Driver account created successfully.");
+      try { await fetchDrivers(); } catch {
+        setError("Driver was created, but the list could not be refreshed. Please reload the page.");
+      }
     } catch (requestError) {
-      console.error("Error creating driver:", requestError);
+      setFormRequestError(requestError);
       setError(
         getRequestError(requestError, "Failed to create driver account.")
       );
@@ -524,41 +789,50 @@ export default function Drivers() {
     setError("");
     setSuccessMessage("");
 
-    const validationError = validateDriver(
-      editingDriver,
-      editingDriver.id
-    );
+    const validationError = validateDriverFields(editingDriver, editingDriver.id, driverList);
 
-    if (validationError) {
-      setError(validationError);
+    setFieldErrors(validationError);
+    if (Object.keys(validationError).length) {
+      setError("Please correct the highlighted fields.");
       return;
     }
 
-    const updatedDriver = {
-      ...editingDriver,
-      name: editingDriver.name.trim(),
-      email: editingDriver.email.trim().toLowerCase(),
-      phone: editingDriver.phone.trim(),
-      vehicle: editingDriver.vehicle.trim(),
-    };
-
+    setSavingDriver(true);
     try {
-      const response = await api.put(
-        `/drivers/${updatedDriver.id}`,
-        toDriverPayload(updatedDriver)
-      );
-      const savedDriver = formatDriver(response.data);
-      setDriverList((previous) =>
-        previous.map((driver) =>
-          driver.id === savedDriver.id ? savedDriver : driver
-        )
-      );
+      const payload = toDriverCreatePayload(editingDriver);
+      await api.put(`/drivers/${editingDriver.id}`, payload);
       setSelectedDriver(null);
       setEditingDriver(null);
       setSuccessMessage("Driver details updated successfully.");
+      try {
+        await fetchDrivers();
+      } catch (refreshError) {
+        setError("Changes were saved, but the driver list could not be refreshed. Please reload the page.");
+      }
     } catch (requestError) {
-      console.error("Error updating driver:", requestError);
-      setError(getRequestError(requestError, "Failed to update driver."));
+      setFormRequestError(requestError);
+      setError(getRequestError(requestError, "Failed to update driver and vehicle."));
+    } finally { setSavingDriver(false); }
+  };
+
+  const openEditDriver = async (driver) => {
+    const requestId = ++editRequest.current;
+    editAbort.current?.abort();
+    const controller = new AbortController();
+    editAbort.current = controller;
+    setSelectedDriver(null);
+    setError("");
+    setSuccessMessage("");
+    setLoadingDriver(true);
+    try {
+      const { data } = await api.get(`/drivers/${driver.id}`, {signal: controller.signal});
+      if (requestId !== editRequest.current) return;
+      setFieldErrors({});
+      setEditingDriver(toDriverEditForm(data));
+    } catch (requestError) {
+      if (requestError.code !== "ERR_CANCELED" && requestId === editRequest.current) setError(getRequestError(requestError, requestError.message || "Failed to load driver details."));
+    } finally {
+      if (requestId === editRequest.current) setLoadingDriver(false);
     }
   };
 
@@ -582,7 +856,7 @@ export default function Drivers() {
       nextStatus = "Disabled";
     } else if (driver.accountStatus === "Disabled") {
       const confirmed = window.confirm(
-        `Reactivate the account for ${driver.name}?`
+        `Enable the account for ${driver.name}?`
       );
 
       if (!confirmed) return;
@@ -590,7 +864,7 @@ export default function Drivers() {
       nextStatus = "Active";
     } else {
       const confirmed = window.confirm(
-        `Activate the account for ${driver.name}?`
+        `Enable the account for ${driver.name}?`
       );
 
       if (!confirmed) return;
@@ -604,7 +878,7 @@ export default function Drivers() {
         `/drivers/${driver.id}`,
         toDriverPayload(updatedDriver)
       );
-      const savedDriver = formatDriver(response.data);
+      const savedDriver = {...formatDriver(response.data), vehicle: driver.vehicle};
       setDriverList((previous) =>
         previous.map((item) =>
           item.id === driver.id ? savedDriver : item
@@ -629,6 +903,10 @@ export default function Drivers() {
   // ==========================================
 
   const closeModals = () => {
+    if (savingDriver) return;
+    editRequest.current++;
+    editAbort.current?.abort();
+    setLoadingDriver(false);
     setShowCreateModal(false);
     setSelectedDriver(null);
     setEditingDriver(null);
@@ -661,10 +939,12 @@ export default function Drivers() {
         </div>
 
         <button
+          disabled={loading}
           onClick={() => {
             setError("");
             setSuccessMessage("");
             setNewDriver(emptyDriver);
+            setFieldErrors({});
             setShowCreateModal(true);
           }}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800"
@@ -725,9 +1005,9 @@ export default function Drivers() {
         />
 
         <SummaryCard
-          title="Pending Activation"
-          value={pendingAccounts}
-          description="Awaiting admin activation"
+          title="Available Drivers"
+          value={availableDrivers}
+          description="Active accounts available for assignment"
           icon={Clock3}
           iconStyle="bg-amber-50 text-amber-700"
         />
@@ -816,11 +1096,7 @@ export default function Drivers() {
                 className="w-full bg-transparent py-3 text-sm text-slate-700 outline-none"
               >
                 <option value="All">All Availability</option>
-                <option value="Available">Available</option>
-                <option value="Assigned">Assigned</option>
-                <option value="On Trip">On Trip</option>
-                <option value="Off Duty">Off Duty</option>
-                <option value="Unavailable">Unavailable</option>
+                {[...new Set(driverList.map(driver => driver.availability).filter(Boolean))].sort().map(status => <option key={status} value={status}>{status}</option>)}
               </select>
             </div>
 
@@ -832,11 +1108,7 @@ export default function Drivers() {
               className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-teal-600"
             >
               <option value="All">All Accounts</option>
-              <option value="Active">Active</option>
-              <option value="Pending Activation">
-                Pending Activation
-              </option>
-              <option value="Disabled">Disabled</option>
+              {[...new Set(driverList.map(driver => driver.accountStatus).filter(Boolean))].sort().map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
         </div>
@@ -920,7 +1192,7 @@ export default function Drivers() {
                       <button
                         onClick={() => {
                           setError("");
-                          setEditingDriver({ ...driver });
+                          openEditDriver(driver);
                         }}
                         title="Edit driver"
                         className="rounded-lg bg-teal-50 p-2 text-teal-700 transition hover:bg-teal-100"
@@ -1001,19 +1273,19 @@ export default function Drivers() {
           CREATE DRIVER ACCOUNT MODAL
       ====================================== */}
 
-      {showCreateModal && (
+      {(showCreateModal || editingDriver) && (
         <Modal
-          title="Create Driver Account"
-          subtitle="Enter the driver's details and create their login credentials."
+          title={editingDriver ? "Update Driver" : "Create Driver Account"}
+          subtitle={editingDriver ? "Update driver and assigned vehicle details." : "Enter the driver's details and create their login credentials."}
           onClose={closeModals}
           wide
         >
-          <form onSubmit={handleCreateDriver} className="flex min-h-0 flex-col">
+          <form noValidate onSubmit={editingDriver ? handleUpdateDriver : handleCreateDriver} className="flex min-h-0 flex-col">
             <div className="min-h-0 space-y-6 overflow-y-auto p-5 sm:p-6">
 
               {/* ACCOUNT SETUP */}
 
-              <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4">
+              {!editingDriver && <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4">
                 <KeyRound
                   size={20}
                   className="mt-0.5 shrink-0 text-blue-700"
@@ -1025,357 +1297,12 @@ export default function Drivers() {
                   </p>
 
                   <p className="mt-1 text-sm leading-5 text-blue-800">
-                    The new driver account will be created with Pending
-                    Activation status. The administrator can activate
-                    the account after reviewing the details.
+                    The driver account is active immediately after creation. Driver and vehicle information are both required.
                   </p>
                 </div>
-              </div>
+              </div>}
 
-              {/* PERSONAL INFORMATION */}
-
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Personal Information
-                  </h3>
-
-                  <p className="mt-1 text-xs text-slate-500">
-                    Basic contact details for the driver.
-                  </p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    label="Full Name"
-                    value={newDriver.name}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        name: event.target.value,
-                      })
-                    }
-                    placeholder="Enter full name"
-                    required
-                  />
-
-                  <Field
-                    label="Email Address"
-                    type="email"
-                    value={newDriver.email}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        email: event.target.value,
-                      })
-                    }
-                    placeholder="driver@example.com"
-                    required
-                  />
-
-                  <Field
-                    label="Phone Number"
-                    value={newDriver.phone}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        phone: event.target.value,
-                      })
-                    }
-                    placeholder="e.g. 0123456789"
-                    required
-                  />
-
-                  <Field
-                    label="IC Number"
-                    value={newDriver.icNo}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        icNo: event.target.value,
-                      })
-                    }
-                    placeholder="Enter identification number"
-                  />
-                </div>
-              </section>
-
-              {/* LOGIN CREDENTIALS */}
-
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Login Credentials
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Set a password for the driver account.
-                  </p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    label="Password"
-                    type="password"
-                    value={newDriver.password}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        password: event.target.value,
-                      })
-                    }
-                    placeholder="Enter password"
-                    required
-                  />
-
-                  <Field
-                    label="Confirm Password"
-                    type="password"
-                    value={newDriver.confirmPassword}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        confirmPassword: event.target.value,
-                      })
-                    }
-                    placeholder="Re-enter password"
-                    required
-                  />
-                </div>
-
-                {newDriver.confirmPassword && (
-                  <p
-                    className={`text-xs font-medium ${
-                      newDriver.password === newDriver.confirmPassword
-                        ? "text-emerald-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {newDriver.password === newDriver.confirmPassword
-                      ? "✓ Passwords match"
-                      : "Passwords do not match"}
-                  </p>
-                )}
-
-                <p className="text-xs text-slate-500">
-                  Password must contain at least 8 characters.
-                </p>
-              </section>
-
-              {/* DRIVER INFORMATION */}
-
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Driver Information
-                  </h3>
-
-                  <p className="mt-1 text-xs text-slate-500">
-                    Identification, driving licence and assignment details.
-                  </p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-
-                  <Field
-                    label="Driving License No"
-                    value={newDriver.licenseNo}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        licenseNo: event.target.value,
-                      })
-                    }
-                    placeholder="Enter driving licence number"
-                    required
-                  />
-
-                  <Field
-                    label="License Expiry Date"
-                    type="date"
-                    value={newDriver.licenseExpiry}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        licenseExpiry: event.target.value,
-                      })
-                    }
-                    required
-                  />
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">
-                      Driver Type
-                    </span>
-
-                    <select
-                      value={newDriver.driverType}
-                      onChange={(event) =>
-                        setNewDriver({
-                          ...newDriver,
-                          driverType: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
-                    >
-                      <option value="Company Driver">Company Driver</option>
-                      <option value="Associate Driver">Associate Driver</option>
-                    </select>
-                  </label>
-                </div>
-              </section>
-
-              {/* VEHICLE INFORMATION */}
-
-              <section className="space-y-4 border-t border-slate-100 pt-6">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Vehicle Information
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Register a vehicle and link it to this driver account.
-                  </p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    label="Vehicle Model"
-                    value={newDriver.vehicle.model}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          model: event.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="e.g. Toyota Hiace"
-                    required
-                  />
-
-                  <Field
-                    label="Registration Number / Plate Number"
-                    value={newDriver.vehicle.plate}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          plate: event.target.value.toUpperCase(),
-                        },
-                      }))
-                    }
-                    placeholder="e.g. MCA1234"
-                    required
-                  />
-
-                  <Field
-                    label="Vehicle Type"
-                    value={newDriver.vehicle.type}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          type: event.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="e.g. MPV, Sedan, Bus"
-                    required
-                  />
-
-                  <Field
-                    label="Passenger Capacity"
-                    type="number"
-                    value={newDriver.vehicle.capacity}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          capacity: event.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="e.g. 7"
-                    required
-                  />
-
-                  <Field
-                    label="Luggage Capacity (items)"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={newDriver.vehicle.luggageCapacity}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          luggageCapacity: event.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="Enter the actual item capacity"
-                    required
-                  />
-
-                  <Field
-                    label="Road Tax Expiry Date"
-                    type="date"
-                    value={newDriver.vehicle.roadTaxExpiry}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          roadTaxExpiry: event.target.value,
-                        },
-                      }))
-                    }
-                  />
-
-                  <Field
-                    label="Next Service Date"
-                    type="date"
-                    value={newDriver.vehicle.serviceExpiry}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          serviceExpiry: event.target.value,
-                        },
-                      }))
-                    }
-                  />
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">
-                      Vehicle Status
-                      <span className="ml-1 text-red-500">*</span>
-                    </span>
-                    <select
-                      value={newDriver.vehicle.status}
-                      onChange={(event) =>
-                        setNewDriver((previous) => ({
-                          ...previous,
-                          vehicle: {
-                            ...previous.vehicle,
-                            status: event.target.value,
-                          },
-                        }))
-                      }
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
-                    >
-                      <option value="Available">Available</option>
-                      <option value="In Use">In Use</option>
-                      <option value="Maintenance">Maintenance</option>
-                    </select>
-                  </label>
-                </div>
-              </section>
+              <DriverFormFields newDriver={formDriver} setNewDriver={setFormDriver} editing={!!editingDriver} fieldErrors={fieldErrors} />
 
               {/* ERROR MESSAGE */}
 
@@ -1404,7 +1331,7 @@ export default function Drivers() {
                 className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <UserPlus size={17} />
-                {savingDriver ? "Creating..." : "Create Account"}
+                {savingDriver ? (editingDriver ? "Saving..." : "Creating...") : (editingDriver ? "Save Changes" : "Create Account")}
               </button>
             </div>
           </form>
@@ -1496,12 +1423,11 @@ export default function Drivers() {
                   ? "This account is marked as active in the management interface."
                   : selectedDriver.accountStatus === "Disabled"
                     ? "This account is marked as disabled."
-                    : "This account is waiting for activation."}
+                    : "Enable or disable this legacy account to set its access status."}
               </p>
 
               <p className="mt-2 text-xs leading-5 text-slate-400">
-                Actual login permissions must be enforced by the backend
-                authentication system.
+                Active accounts can sign in. Disabled accounts cannot sign in.
               </p>
             </div>
           </div>
@@ -1515,18 +1441,6 @@ export default function Drivers() {
             </button>
 
             <button
-              onClick={() => {
-                setEditingDriver({ ...selectedDriver });
-                setSelectedDriver(null);
-                setError("");
-              }}
-              className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
-            >
-              <Pencil size={16} />
-              Edit Details
-            </button>
-
-            <button
               onClick={() => handleAccountStatus(selectedDriver)}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
@@ -1535,8 +1449,8 @@ export default function Drivers() {
               {selectedDriver.accountStatus === "Active"
                 ? "Disable"
                 : selectedDriver.accountStatus === "Disabled"
-                  ? "Reactivate"
-                  : "Activate"}
+                  ? "Enable"
+                  : "Enable"}
             </button>
           </div>
         </Modal>
@@ -1546,199 +1460,9 @@ export default function Drivers() {
           EDIT DRIVER MODAL
       ====================================== */}
 
-      {editingDriver && (
-        <Modal
-          title="Update Driver"
-          subtitle={`Update details for ${editingDriver.name}`}
-          onClose={() => {
-            setEditingDriver(null);
-            setError("");
-          }}
-        >
-          <form onSubmit={handleUpdateDriver}>
-            <div className="max-h-[65vh] space-y-5 overflow-y-auto p-6">
-              <section>
-                <h3 className="mb-4 text-sm font-bold text-slate-900">
-                  Personal Information
-                </h3>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    label="Full Name"
-                    value={editingDriver.name}
-                    onChange={(event) =>
-                      setEditingDriver({
-                        ...editingDriver,
-                        name: event.target.value,
-                      })
-                    }
-                    required
-                  />
-
-                  <Field
-                    label="Email Address"
-                    type="email"
-                    value={editingDriver.email}
-                    onChange={(event) =>
-                      setEditingDriver({
-                        ...editingDriver,
-                        email: event.target.value,
-                      })
-                    }
-                    required
-                  />
-
-                  <Field
-                    label="Phone Number"
-                    value={editingDriver.phone}
-                    onChange={(event) =>
-                      setEditingDriver({
-                        ...editingDriver,
-                        phone: event.target.value,
-                      })
-                    }
-                    required
-                  />
-
-                  <Field
-                    label="IC Number"
-                    value={editingDriver.icNo}
-                    onChange={(event) =>
-                      setEditingDriver({
-                        ...editingDriver,
-                        icNo: event.target.value,
-                      })
-                    }
-                  />
-
-                  <Field
-                    label="Driving License No"
-                    value={editingDriver.licenseNo}
-                    onChange={(event) =>
-                      setEditingDriver({
-                        ...editingDriver,
-                        licenseNo: event.target.value,
-                      })
-                    }
-                  />
-
-                  <Field
-                    label="License Expiry Date"
-                    type="date"
-                    value={editingDriver.licenseExpiry}
-                    onChange={(event) =>
-                      setEditingDriver({
-                        ...editingDriver,
-                        licenseExpiry: event.target.value,
-                      })
-                    }
-                  />
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">
-                      Driver Type
-                    </span>
-                    <select
-                      value={editingDriver.driverType || "Company Driver"}
-                      onChange={(event) =>
-                        setEditingDriver({
-                          ...editingDriver,
-                          driverType: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
-                    >
-                      <option value="Company Driver">Company Driver</option>
-                      <option value="Associate Driver">Associate Driver</option>
-                    </select>
-                  </label>
-                </div>
-              </section>
-
-              <section>
-                <h3 className="mb-4 text-sm font-bold text-slate-900">
-                  Driver Status
-                </h3>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">
-                      Availability
-                    </span>
-
-                    <select
-                      value={editingDriver.availability || "Available"}
-                      onChange={(event) =>
-                        setEditingDriver({
-                          ...editingDriver,
-                          availability: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
-                    >
-                      <option value="Available">Available</option>
-                      <option value="Assigned">Assigned</option>
-                      <option value="On Trip">On Trip</option>
-                      <option value="Off Duty">Off Duty</option>
-                      <option value="Unavailable">Unavailable</option>
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">
-                      Account Status
-                    </span>
-
-                    <select
-                      value={editingDriver.accountStatus}
-                      onChange={(event) =>
-                        setEditingDriver({
-                          ...editingDriver,
-                          accountStatus: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
-                    >
-                      <option value="Pending Activation">
-                        Pending Activation
-                      </option>
-                      <option value="Active">Active</option>
-                      <option value="Disabled">Disabled</option>
-                    </select>
-                  </label>
-                </div>
-              </section>
-
-              {error && (
-                <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {error}
-                </p>
-              )}
-            </div>
-
-            <div className="flex shrink-0 justify-end gap-3 border-t border-slate-200 bg-slate-50 p-5">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingDriver(null);
-                  setError("");
-                }}
-                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-white"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                className="inline-flex items-center gap-2 rounded-xl bg-teal-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
-              >
-                <Check size={17} />
-                Save Changes
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
+      {loadingDriver && <Modal title="Loading Driver" subtitle="Fetching driver and assigned vehicle details..." onClose={closeModals} wide>
+        <p role="status" className="p-6 text-sm text-slate-600">Loading driver details...</p>
+      </Modal>}
     </div>
   );
 }

@@ -8,12 +8,14 @@ import '../models/mobile_user.dart';
 import 'api_http_client.dart';
 import 'auth_exception.dart';
 import 'mobile_session.dart';
+import 'push_notification_service.dart';
 
 export '../models/mobile_user.dart';
 export 'auth_exception.dart';
 
 class AuthService {
-  AuthService({http.Client? client}) : _client = client ?? createApiHttpClient();
+  AuthService({http.Client? client})
+      : _client = client ?? createApiHttpClient();
 
   final http.Client _client;
 
@@ -23,6 +25,7 @@ class AuthService {
 
   Future<void> logout() async {
     try {
+      await PushNotificationService.unregister();
       if (MobileSession.isAuthenticated) {
         await _client
             .post(
@@ -87,7 +90,9 @@ class AuthService {
     }
 
     try {
-      return MobileUser.fromJson(payload);
+      final user = MobileUser.fromJson(payload);
+      unawaited(PushNotificationService.syncToken());
+      return user;
     } on FormatException catch (exception) {
       throw AuthException(exception.message);
     }

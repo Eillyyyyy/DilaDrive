@@ -30,6 +30,12 @@ import java.util.UUID;
 
 @Service
 public class PaymentService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private TripFinanceService tripFinance;
+
+    private BigDecimal payableFare(com.diladrive.entity.Booking booking) {
+        return tripFinance == null ? booking.getBookingTripfare() : tripFinance.payableFare(booking);
+    }
     private static final Set<String> METHODS = Set.of("BANK_TRANSFER", "CARD");
     private final PaymentRepository payments;
     private final BookingRepository bookings;
@@ -81,7 +87,8 @@ public class PaymentService {
         var booking = bookings.findByIdForUpdate(bookingId)
                 .filter(item -> customerId.equals(item.getCustId()))
                 .orElseThrow(() -> notFound("Booking not found."));
-        if (booking.getBookingTripfare() == null || booking.getBookingTripfare().signum() <= 0) {
+        BigDecimal fare = payableFare(booking);
+        if (fare == null || fare.signum() <= 0) {
             throw conflict("Admin must set the final fare before payment can be submitted.");
         }
         String bookingStatus = booking.getBookingStatus() == null ? ""
@@ -100,7 +107,7 @@ public class PaymentService {
             throw conflict("A payment for this booking is already awaiting Admin review.");
         }
         BigDecimal paid = payments.sumVerifiedAmount(bookingId);
-        BigDecimal remaining = booking.getBookingTripfare().subtract(paid);
+        BigDecimal remaining = fare.subtract(paid);
         if (remaining.signum() <= 0 || amount.compareTo(remaining) > 0) {
             throw conflict("Payment amount cannot exceed the remaining confirmed fare of RM "
                     + remaining.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP) + ".");
@@ -146,8 +153,8 @@ public class PaymentService {
         if (!"COMPLETED".equalsIgnoreCase(booking.getBookingStatus())) {
             throw conflict("Cash can be recorded only after the trip is completed.");
         }
-        if (booking.getBookingTripfare() == null
-                || booking.getBookingTripfare().signum() <= 0) {
+        BigDecimal fare = payableFare(booking);
+        if (fare == null || fare.signum() <= 0) {
             throw conflict("Admin must set the final fare before cash can be recorded.");
         }
         if (amount == null || amount.scale() > 2 || amount.signum() <= 0) {
@@ -157,7 +164,7 @@ public class PaymentService {
                 bookingId, "PENDING_VERIFICATION")) {
             throw conflict("A payment for this booking is already awaiting Admin review.");
         }
-        BigDecimal remaining = booking.getBookingTripfare()
+        BigDecimal remaining = fare
                 .subtract(payments.sumVerifiedAmount(bookingId));
         if (remaining.signum() <= 0 || amount.compareTo(remaining) > 0) {
             throw conflict("Cash amount cannot exceed the remaining confirmed fare of RM "
@@ -197,7 +204,8 @@ public class PaymentService {
         if ("VERIFIED".equals(normalized)) {
             BigDecimal total = payments.sumVerifiedAmount(payment.getBooking().getBookingId())
                     .add(payment.getAmount());
-            if (total.compareTo(payment.getBooking().getBookingTripfare()) > 0) {
+            BigDecimal fare = payableFare(payment.getBooking());
+            if (fare == null || total.compareTo(fare) > 0) {
                 throw conflict("This payment would exceed the confirmed booking fare.");
             }
             payment.setVerifiedAt(Instant.now());

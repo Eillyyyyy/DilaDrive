@@ -17,8 +17,38 @@ class CustomerBooking {
     this.waitingHours,
     this.fare,
     this.createdAt,
+    this.smallCount,
+    this.mediumCount,
+    this.largeCount,
+    this.luggageUnits,
+    this.durationSeconds,
+    this.pickupLatitude,
+    this.pickupLongitude,
+    this.destinationLatitude,
+    this.destinationLongitude,
+    this.contactName,
+    this.contactPhone,
+    this.rejectionReason,
+    this.finalFare,
+    this.payableFare,
+    this.activeAssignment = false,
   });
 
+  final int? smallCount;
+  final int? mediumCount;
+  final int? largeCount;
+  final int? luggageUnits;
+  final int? durationSeconds;
+  final double? pickupLatitude;
+  final double? pickupLongitude;
+  final double? destinationLatitude;
+  final double? destinationLongitude;
+  final String? contactName;
+  final String? contactPhone;
+  final String? rejectionReason;
+  final double? finalFare;
+  final double? payableFare;
+  final bool activeAssignment;
   final int id;
   final String status;
   final String? type;
@@ -72,6 +102,7 @@ class CustomerBooking {
         'DROP' => 'Drop-off',
         'COMPLETED' => 'Completed',
         'CANCELLED' => 'Cancelled',
+        'REJECTED' => 'Rejected',
         _ => status.trim().isEmpty ? 'Status unavailable' : status,
       };
 
@@ -90,7 +121,7 @@ class CustomerBooking {
 
   bool get isCompleted => normalizedStatus == 'COMPLETED';
 
-  bool get canCancel => const {
+  bool get canCancel => !activeAssignment && const {
         'PENDING',
         'PENDING_VERIFICATION',
         'CONFIRMED',
@@ -106,6 +137,21 @@ class CustomerBooking {
     }
 
     return CustomerBooking(
+      smallCount: _integer(json['smallCount']),
+      mediumCount: _integer(json['mediumCount']),
+      largeCount: _integer(json['largeCount']),
+      luggageUnits: _integer(json['luggageUnits']),
+      durationSeconds: _integer(json['durationSeconds']),
+      pickupLatitude: _decimal(json['pickupLatitude']),
+      pickupLongitude: _decimal(json['pickupLongitude']),
+      destinationLatitude: _decimal(json['destinationLatitude']),
+      destinationLongitude: _decimal(json['destinationLongitude']),
+      contactName: _string(json['contactName']),
+      contactPhone: _string(json['contactPhone']),
+      rejectionReason: _string(json['rejectionReason']),
+      finalFare: _decimal(json['finalFare']),
+      payableFare: _decimal(json['payableFare']),
+      activeAssignment: json['activeAssignment'] == true,
       id: id,
       status: status,
       type: _string(json['bookingType']),

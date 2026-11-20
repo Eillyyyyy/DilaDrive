@@ -35,6 +35,13 @@ void main() {
           ..pickupAddress = 'Kuala Lumpur'
           ..destinationAddress = 'Melaka'
           ..bookingDate = DateTime(2030, 1, 1)
+          ..fareEstimate = const FareEstimate(
+              distanceKm: 58,
+              vehicleModel: 'Sedan',
+              baseFare: 10,
+              distanceCharge: 116,
+              additionalCharges: [],
+              total: 126)
           ..recommendedVehicle = const RecommendedVehicle(
             id: 1,
             model: 'Fleet Sedan',

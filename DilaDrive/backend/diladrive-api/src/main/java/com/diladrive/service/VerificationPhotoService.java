@@ -116,6 +116,18 @@ public class VerificationPhotoService {
     @Transactional(readOnly = true)
     public List<VerificationPhotoResponse> list(Long assignmentId, Long driverId) {
         requireOwner(assignmentId, driverId);
+        return listPhotos(assignmentId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<VerificationPhotoResponse> listForAdmin(Long assignmentId) {
+        if (!assignments.existsById(assignmentId)) {
+            throw notFound("Assignment not found.");
+        }
+        return listPhotos(assignmentId);
+    }
+
+    private List<VerificationPhotoResponse> listPhotos(Long assignmentId) {
         return photos.findByAssignmentAssignmentIdOrderByUploadedAtDesc(assignmentId)
                 .stream().map(VerificationPhotoResponse::from).toList();
     }
@@ -123,6 +135,15 @@ public class VerificationPhotoService {
     @Transactional(readOnly = true)
     public StoredPhoto read(Long assignmentId, Long photoId, Long driverId) {
         requireOwner(assignmentId, driverId);
+        return readPhoto(assignmentId, photoId);
+    }
+
+    @Transactional(readOnly = true)
+    public StoredPhoto readForAdmin(Long assignmentId, Long photoId) {
+        return readPhoto(assignmentId, photoId);
+    }
+
+    private StoredPhoto readPhoto(Long assignmentId, Long photoId) {
         VerificationPhoto photo = photos.findByPhotoIdAndAssignmentAssignmentId(photoId, assignmentId)
                 .orElseThrow(() -> notFound("Photo not found."));
         String filename = Path.of(photo.getFileUrl()).getFileName().toString();

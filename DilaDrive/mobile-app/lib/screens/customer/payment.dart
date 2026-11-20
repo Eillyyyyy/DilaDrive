@@ -84,7 +84,7 @@ class _PaymentPageState extends State<PaymentPage> {
             final payments = (snapshot.data ?? const <CustomerPayment>[])
                 .where((payment) => payment.bookingId == widget.booking.id)
                 .toList(growable: false);
-            final fare = widget.booking.fare;
+            final fare = widget.booking.payableFare ?? widget.booking.fare;
             final verified = payments
                 .where((payment) => payment.status.toUpperCase() == 'VERIFIED')
                 .fold<double>(0, (total, item) => total + item.amount);

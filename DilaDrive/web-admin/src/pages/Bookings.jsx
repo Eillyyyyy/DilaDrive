@@ -1,6 +1,9 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import api from "../services/api";
+import { TripCharges } from "./DriverEarnings";
+import AssignmentResourcePicker from "../components/AssignmentResourcePicker";
+import { bookingAssignment, confirmationError } from "../services/bookingAssignments";
 import {
   Search,
   Eye,
@@ -23,44 +26,51 @@ import {
 const BOOKING_STATUSES = [
   "Pending Verification",
   "Confirmed",
+  "In Progress",
   "Completed",
-  "Cancelled",
+  "Cancelled", "Rejected",
 ];
 
 export default function Bookings({
-  bookings = [],
-  onVerifyBooking,
   onNavigate,
 }) {
  const [bookingList, setBookingList] = useState([]);
- const [driverList, setDriverList] = useState([]);
- const [vehicleList, setVehicleList] = useState([]);
+ const requestVersion = useRef(0);
  useEffect(() => {
-   fetchBookings();
+   const refresh = () => { fetchBookings(); };
+   refresh();
+   window.addEventListener("focus", refresh);
+   window.addEventListener("diladrive:assignments-changed", refresh);
+   return () => {
+     requestVersion.current++;
+     window.removeEventListener("focus", refresh);
+     window.removeEventListener("diladrive:assignments-changed", refresh);
+   };
  }, []);
 
 const fetchBookings = async () => {
+  const version = ++requestVersion.current;
+  setLoading(true);
+  setLoadError("");
   try {
-    const [response, customersResponse, driversResponse, vehiclesResponse] =
+    const [response, customersResponse, assignmentsResponse] =
       await Promise.all([
         api.get("/bookings"),
         api.get("/customers"),
-        api.get("/drivers"),
-        api.get("/vehicles"),
+        api.get("/assignments"),
       ]);
+    if (version !== requestVersion.current) return;
     const customers = customersResponse.data;
-    const drivers = driversResponse.data;
-    const vehicles = vehiclesResponse.data;
-    setDriverList(drivers);
-    setVehicleList(vehicles);
 
     const formattedBookings =
       response.data.map(booking => ({
 
         id: booking.bookingId,
+        hasAcceptedFare: !!booking.fareSnapshot,
+        roadDistancePending: booking.roadDistancePending === true,
 
         customer:
-          booking.custName ||
+          booking.contactName || booking.custName ||
           booking.customerName ||
           customers.find((customer) =>
             String(customer.custId) === String(booking.custId)
@@ -85,6 +95,10 @@ const fetchBookings = async () => {
         passengers:
           booking.bookingPassengercount,
 
+        smallCount: booking.smallCount, mediumCount: booking.mediumCount, largeCount: booking.largeCount,
+        phone: booking.contactPhone,
+        luggageUnits: booking.luggageUnits, reservedEndAt: booking.reservedEndAt,
+        durationSeconds: booking.durationSeconds,
         luggageCount:
           booking.bookingLuggagecount,
 
@@ -103,27 +117,19 @@ const fetchBookings = async () => {
         notes:
           booking.bookingNotes,
 
-        driverId: booking.driverId,
-
-        vehicleId: booking.vehicleId,
-
-        driver: booking.driverId
-          ? drivers.find((driver) =>
-              String(driver.driverId) === String(booking.driverId)
-            )?.driverName || "Assigned"
-          : "",
-
-        vehicle: booking.vehicleId
-          ? vehicles.find((vehicle) =>
-              String(vehicle.vehicleId) === String(booking.vehicleId)
-            )?.vehiclePlateno || "Assigned"
-          : "",
+        ...bookingAssignment(booking, assignmentsResponse.data),
 
         status: ({
           PENDING: "Pending Verification",
           PENDING_VERIFICATION: "Pending Verification",
           CONFIRMED: "Confirmed",
-          CANCELLED: "Cancelled",
+          ASSIGNED: "Confirmed",
+          OTW: "In Progress",
+          WAITING: "In Progress",
+          PICKUP: "In Progress",
+          DROP: "In Progress",
+          COMPLETED: "Completed",
+          CANCELLED: "Cancelled", REJECTED: "Rejected",
         }[String(booking.bookingStatus || "").toUpperCase()] ||
           booking.bookingStatus ||
           "Pending Verification")
@@ -131,9 +137,12 @@ const fetchBookings = async () => {
       }));
 
     setBookingList(formattedBookings);
+    setSelectedBooking(previous => previous ? formattedBookings.find(b => b.id === previous.id) || null : null);
 
   } catch (error) {
-    console.error("Unable to load bookings:", error);
+    if (version === requestVersion.current) setLoadError(error.response?.data?.message || error.response?.data?.detail || error.message);
+  } finally {
+    if (version === requestVersion.current) setLoading(false);
   }
   };
 
@@ -145,6 +154,17 @@ const fetchBookings = async () => {
   const [fareInput, setFareInput] = useState("");
 
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const submitLock = useRef(false);
+  const [notice, setNotice] = useState("");
+  const [scheduledEndAt, setScheduledEndAt] = useState("");
+  useEffect(() => {
+    setScheduledEndAt(bookingToVerify?.reservedEndAt?.slice(0,19) || "");
+    setError("");
+  }, [bookingToVerify?.id]);
+  const [assignmentOption, setAssignmentOption] = useState(null);
 
   const stats = useMemo(() => ({
     total: bookingList.length,
@@ -160,7 +180,7 @@ const fetchBookings = async () => {
     ).length,
 
     assigned: bookingList.filter(
-      (b) => Boolean(b.driverId || b.driver)
+      (b) => Boolean(b.assignmentId)
     ).length,
   }), [bookingList]);
 
@@ -191,84 +211,53 @@ const fetchBookings = async () => {
     });
   }, [bookingList, search, statusFilter]);
 
-  const updateBooking = (id, changes) => {
-    setBookingList((previous) =>
-      previous.map((booking) =>
-        booking.id === id
-          ? { ...booking, ...changes }
-          : booking
-      )
-    );
-
-    setSelectedBooking((previous) =>
-      previous?.id === id
-        ? { ...previous, ...changes }
-        : previous
-    );
+  const handleVerifyBooking = async () => {
+    if (!bookingToVerify || submitLock.current) return;
+    const finalFare = Number(bookingToVerify.fare) > 0 ? Number(bookingToVerify.fare) : Number(fareInput);
+    if (!assignmentOption) {
+      setError("Recheck availability and select a suitable vehicle and eligible driver."); return;
+    }
+    if (!scheduledEndAt || scheduledEndAt <= (bookingToVerify.date + "T" + bookingToVerify.pickupTime).slice(0, 16)) {
+      setError("Enter a scheduled end time after pickup. No trip duration is assumed."); return;
+    }
+    if (!bookingToVerify.hasAcceptedFare && (!Number.isFinite(finalFare) || finalFare <= 0)) {
+      setError("Enter a final fare greater than zero."); return;
+    }
+    submitLock.current = true;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const assignmentBody = {
+        driverId: assignmentOption.driverId, vehicleId: assignmentOption.vehicleId,
+        scheduledEndAt, ...(bookingToVerify.hasAcceptedFare ? {} : { tripFare: finalFare }),
+      };
+      if (bookingToVerify.status === "Confirmed") {
+        // Repair an already confirmed legacy booking without reconfirming it.
+        await api.post("/assignments", { ...assignmentBody, bookingId: bookingToVerify.id });
+      } else {
+        await api.post(`/bookings/${bookingToVerify.id}/confirm-and-assign`, assignmentBody);
+      }
+      setBookingToVerify(null);
+      setNotice("Booking confirmed and assignment saved.");
+      window.dispatchEvent(new Event("diladrive:assignments-changed"));
+    } catch (failure) {
+      setError(confirmationError(failure));
+    } finally {
+      submitLock.current = false;
+      setBusy(false);
+    }
   };
 
-  const handleVerifyBooking = async () => {
-    if (!bookingToVerify) return;
-
-    const booking = bookingToVerify;
-
-    if (["Cancelled", "Completed"].includes(booking.status)) {
-      setError("Cancelled or completed bookings cannot be confirmed.");
+  const openAssignment = (booking) => {
+    setError("");
+    if (booking.roadDistancePending) {
+      setSelectedBooking(booking);
       return;
     }
-
-    try {
-      let finalFare = Number(booking.fare);
-      if (!Number.isFinite(finalFare) || finalFare <= 0) {
-        finalFare = Number(fareInput);
-        if (!Number.isFinite(finalFare) || finalFare <= 0) {
-          setError("Enter a final fare greater than zero before confirming.");
-          return;
-        }
-        await api.put(`/bookings/${booking.id}/fare`, {
-          tripFare: finalFare,
-        });
-      }
-
-      let verifiedBooking;
-      if (onVerifyBooking) {
-        verifiedBooking = await onVerifyBooking(booking.id);
-      } else {
-        const response = await api.put(`/bookings/${booking.id}/verify`);
-        verifiedBooking = response.data;
-      }
-
-      updateBooking(booking.id, {
-        fare: finalFare,
-        status: "Confirmed",
-        driverId: verifiedBooking?.driverId ?? booking.driverId,
-        vehicleId: verifiedBooking?.vehicleId ?? booking.vehicleId,
-        driver: verifiedBooking?.driverId
-          ? driverList.find((driver) =>
-              String(driver.driverId) === String(verifiedBooking.driverId)
-            )?.driverName || "Assigned"
-          : booking.driver,
-        vehicle: verifiedBooking?.vehicleId
-          ? vehicleList.find((vehicle) =>
-              String(vehicle.vehicleId) === String(verifiedBooking.vehicleId)
-            )?.vehiclePlateno || "Assigned"
-          : booking.vehicle,
-      });
-
-      setBookingToVerify(null);
-      setError("");
-    } catch (verificationError) {
-      setError(
-        verificationError.response?.data?.message ||
-        verificationError.response?.data?.detail ||
-        "Unable to confirm this booking. Please try again."
-      );
-    }
-  };
-
-  const openAssignment = () => {
-    setError("");
-    onNavigate?.("Assignments");
+    if (!booking.assignmentId && ["Confirmed", "Pending Verification"].includes(booking.status)) {
+      setBookingToVerify(booking);
+      setScheduledEndAt(booking.reservedEndAt?.slice(0, 19) || "");
+      setFareInput(Number(booking.fare) > 0 ? String(booking.fare) : "");
+    } else onNavigate?.("Assignments");
   };
 
   const getBookingStyle = (status) => {
@@ -290,15 +279,15 @@ const fetchBookings = async () => {
   };
 
   const getTripStyle = (status) => {
-    if (status === "Completed") {
+    if (status === "COMPLETED") {
       return "bg-emerald-50 text-emerald-700";
     }
 
-    if (status === "OTW" || status === "Pickup") {
+    if (status === "OTW" || status === "PICKUP") {
       return "bg-blue-50 text-blue-700";
     }
 
-    if (status === "Waiting" || status === "Drop") {
+    if (status === "WAITING" || status === "DROP") {
       return "bg-amber-50 text-amber-700";
     }
 
@@ -340,6 +329,9 @@ const fetchBookings = async () => {
 
   return (
     <div className="admin-page">
+      {loading && <p role="status">Loading bookings...</p>}
+      {loadError && <ErrorMessage>{loadError} <button type="button" onClick={fetchBookings}>Retry</button></ErrorMessage>}
+      {notice && <p role="status" className="rounded-xl bg-emerald-50 p-4 text-emerald-800">{notice}</p>}
 
       {/* Header */}
       <header className="admin-page-header">
@@ -357,6 +349,7 @@ const fetchBookings = async () => {
             availability, and manage driver and vehicle assignments.
           </p>
         </div>
+        <button type="button" disabled={loading || busy} onClick={fetchBookings} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-50"><RefreshCw size={17} />Refresh</button>
       </header>
 
       {/* Summary */}
@@ -466,7 +459,7 @@ const fetchBookings = async () => {
                   booking.status || "Pending Verification";
 
                 const assigned =
-                  Boolean(booking.driverId || booking.driver);
+                  Boolean(booking.assignmentId);
 
                 return (
                   <tr
@@ -553,11 +546,12 @@ const fetchBookings = async () => {
                           View
                         </button>
 
-                        {status === "Pending Verification" && (
+                        {status === "Pending Verification" && !booking.assignmentId && !booking.roadDistancePending && (
                           <button
                             type="button"
                             onClick={() => {
                               setBookingToVerify(booking);
+      setScheduledEndAt(booking.reservedEndAt?.slice(0, 19) || "");
                               setFareInput(
                                 Number.isFinite(Number(booking.fare)) &&
                                   Number(booking.fare) > 0
@@ -569,7 +563,7 @@ const fetchBookings = async () => {
                             className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
                           >
                             <CheckCircle2 size={15} />
-                            Verify
+                            Confirm & Assign
                           </button>
                         )}
 
@@ -585,7 +579,7 @@ const fetchBookings = async () => {
                             ) : (
                               <Truck size={15} />
                             )}
-                            {assigned ? "Reassign" : "Assign"}
+                            {assigned ? "View / Reassign" : "Complete assignment"}
                           </button>
                         )}
                       </div>
@@ -635,6 +629,9 @@ const fetchBookings = async () => {
               >
                 {selectedBooking.status || "Pending Verification"}
               </span>
+              {selectedBooking.roadDistancePending && (
+                <p className="mt-2 text-sm text-amber-800">Confirm the measured road distance before assigning this booking.</p>
+              )}
             </div>
 
             <Detail label="Customer" value={selectedBooking.customer} />
@@ -645,18 +642,36 @@ const fetchBookings = async () => {
             <Detail label="Pickup Time / Landing Time" value={selectedBooking.time || selectedBooking.pickupTime} />
             <Detail label="Flight Number" value={selectedBooking.flight} />
             <Detail label="Passengers" value={selectedBooking.passengers} />
+            <TripCharges key={selectedBooking.id} bookingId={selectedBooking.id}
+              allowDistance={selectedBooking.status === "Pending Verification"}
+              onDistanceConfirmed={fetchBookings}
+              canEditCharges={["Confirmed", "In Progress", "Completed"].includes(selectedBooking.status)} />
             <Detail label="Luggage Count" value={selectedBooking.luggageCount} />
-            <Detail label="Luggage Size" value={selectedBooking.luggageSize} />
+                         <Detail label="Luggage Size" value={selectedBooking.luggageSize} />
+             {selectedBooking.smallCount != null && <>
+               <Detail label="Small / medium / large" value={`${selectedBooking.smallCount} / ${selectedBooking.mediumCount} / ${selectedBooking.largeCount}`} />
+               <Detail label="Luggage points" value={selectedBooking.luggageUnits} />
+               <Detail label="Estimated travel minutes" value={Math.ceil(selectedBooking.durationSeconds / 60)} />
+             </>}
+             {selectedBooking.status === "Pending Verification" && <button type="button" disabled={busy} className="rounded-xl border border-rose-300 px-4 py-2 text-rose-700" onClick={async () => {
+               const reason = window.prompt("Reason for rejecting this booking:");
+               if (!reason?.trim()) return;
+               setBusy(true);
+               try { await api.post(`/bookings/${selectedBooking.id}/reject`, { reason: reason.trim() }); await fetchBookings(); }
+               catch (e) { setError(e.response?.data?.message || "Could not reject booking."); }
+               finally { setBusy(false); }
+             }}>Reject booking</button>}
             <Detail label="Vehicle Type" value={selectedBooking.type} />
             <Detail label="Trip Type" value={selectedBooking.tripType} />
             <Detail label="Additional Notes" value={selectedBooking.notes} />
             <Detail label="Trip Fare" value={money(selectedBooking.fare)} />
+            {selectedBooking.legacyRelationship && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Legacy driver/vehicle references exist without an assignment. They are not a confirmed allocation. Review the resources before completing the assignment.</p>}
             <Detail label="Assigned Driver" value={selectedBooking.driver || "Not assigned"} />
             <Detail label="Assigned Vehicle" value={selectedBooking.vehicle || "Not assigned"} />
             <Detail label="Trip Status" value={selectedBooking.tripStatus || "Not assigned"} />
             <Detail label="Payment Status" value={selectedBooking.paymentStatus || "Not provided"} />
 
-            {selectedBooking.status === "Pending Verification" && (
+            {selectedBooking.status === "Pending Verification" && !selectedBooking.assignmentId && !selectedBooking.roadDistancePending && (
               <button
                 type="button"
                 onClick={() => {
@@ -673,7 +688,7 @@ const fetchBookings = async () => {
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700"
               >
                 <ShieldCheck size={18} />
-                Verify Booking
+                Confirm & Assign
               </button>
             )}
 
@@ -682,13 +697,16 @@ const fetchBookings = async () => {
               <button
                 type="button"
                 onClick={() => {
-                  openAssignment(selectedBooking);
+                  if (!selectedBooking.assignmentId) {
+                    setBookingToVerify(selectedBooking);
+                    setFareInput(String(selectedBooking.fare || ""));
+                  } else openAssignment(selectedBooking);
                   setSelectedBooking(null);
                 }}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-3 font-semibold text-white hover:bg-teal-700"
               >
                 <Truck size={18} />
-                {selectedBooking.driver ? "Reassign Trip" : "Assign Driver & Vehicle"}
+                {selectedBooking.assignmentId ? "View / Reassign Trip" : "Complete missing assignment"}
               </button>
             )}
           </div>
@@ -698,9 +716,10 @@ const fetchBookings = async () => {
       {/* Verify confirmation */}
       {bookingToVerify && (
         <Modal
-          title="Confirm Booking"
+          title={bookingToVerify.status === "Confirmed" ? "Complete missing assignment" : "Confirm & Assign"}
           subtitle="Check availability before confirming this request."
           onClose={() => {
+            if (busy) return;
             setBookingToVerify(null);
             setError("");
           }}
@@ -715,11 +734,23 @@ const fetchBookings = async () => {
             <div className="rounded-xl bg-slate-50 p-4">
               <Detail label="Trip Date" value={formatDate(bookingToVerify.date)} />
               <Detail label="Customer" value={bookingToVerify.customer} />
-              <Detail label="Route" value={`${bookingToVerify.pickup || "N/A"} → ${bookingToVerify.dropoff || "N/A"}`} />
+              <Detail label="Contact phone" value={bookingToVerify.phone} />
+              <Detail label="Route" value={`${bookingToVerify.pickup || "N/A"} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ${bookingToVerify.dropoff || "N/A"}`} />
               <Detail label="Passengers" value={bookingToVerify.passengers || 1} />
             </div>
 
-            {(!Number.isFinite(Number(bookingToVerify.fare)) ||
+            <Detail label="Luggage points" value={bookingToVerify.luggageUnits ?? "Not recorded"} />
+            <p className="text-sm text-slate-600">{bookingToVerify.status === "Confirmed" ? "This legacy booking needs its missing assignment." : "This pending request has not reserved a vehicle."} The recommended type is {bookingToVerify.type}; another suitable type may be selected.</p>
+            <label className="block space-y-2 text-sm font-medium text-slate-700">
+              Scheduled trip end time
+              <input type="datetime-local" step="1" required disabled={busy} value={scheduledEndAt} min={(bookingToVerify.date + "T" + bookingToVerify.pickupTime).slice(0,16)} onChange={e => setScheduledEndAt(e.target.value)} className="w-full rounded-xl border border-slate-300 p-3" />
+              <span className="block text-xs font-normal text-slate-500">Include driving duration and the configured buffer. Confirmed active assignments with an unknown end need schedule correction before resource reuse.</span>
+            </label>
+
+            <AssignmentResourcePicker bookingId={bookingToVerify.id} scheduledEndAt={scheduledEndAt}
+              onChange={setAssignmentOption} disabled={busy} />
+
+            {!bookingToVerify.hasAcceptedFare && (!Number.isFinite(Number(bookingToVerify.fare)) ||
               Number(bookingToVerify.fare) <= 0) && (
               <label className="block space-y-2 text-sm font-medium text-slate-700">
                 Final fare (RM)
@@ -745,6 +776,7 @@ const fetchBookings = async () => {
               <button
                 type="button"
                 onClick={() => {
+                  if (busy) return;
                   setBookingToVerify(null);
                   setError("");
                 }}
@@ -756,10 +788,11 @@ const fetchBookings = async () => {
               <button
                 type="button"
                 onClick={handleVerifyBooking}
+                disabled={busy || loading || !assignmentOption}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white hover:bg-emerald-700"
               >
                 <CheckCircle2 size={17} />
-                Confirm Booking
+                {busy ? "Saving..." : "Confirm & Assign"}
               </button>
             </div>
           </div>

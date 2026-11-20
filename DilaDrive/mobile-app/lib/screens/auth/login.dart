@@ -208,7 +208,7 @@ class _LoginPageState extends State<LoginPage> {
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
-                  Icons.local_shipping,
+                  Icons.directions_car,
                   color: primaryColor,
                   size: 45,
                 ),

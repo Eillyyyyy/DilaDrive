@@ -27,6 +27,7 @@ class DriverProfileService {
     required String name,
     required String email,
     required String phone,
+    String? profileImage,
   }) async {
     final response = await _request(() => _client.put(
           Uri.parse('${AppConfig.apiBaseUrl}/api/drivers/me'),
@@ -39,9 +40,34 @@ class DriverProfileService {
             'name': name.trim(),
             'email': email.trim(),
             'phone': phone.trim(),
+            if (profileImage != null) 'profileImage': profileImage,
           }),
         ));
     return _parse(response.body);
+  }
+
+  Future<void> changePassword(
+      {required String currentPassword, required String newPassword}) async {
+    await _request(() => _client.post(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/drivers/me/password'),
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...MobileSession.headers
+          },
+          body: jsonEncode(
+              {'currentPassword': currentPassword, 'newPassword': newPassword}),
+        ));
+  }
+
+  String _errorMessage(http.Response response, String fallback) {
+    try {
+      final body = jsonDecode(response.body);
+      if (body is Map && body['message'] is String) {
+        return body['message'] as String;
+      }
+    } on FormatException {/* Use the status-specific fallback. */}
+    return fallback;
   }
 
   DriverProfile _parse(String body) {
@@ -79,16 +105,16 @@ class DriverProfileService {
           requiresLogin: true);
     }
     if (response.statusCode == 403) {
-      throw const DriverProfileException(
-          'This profile is only available to the signed-in driver.');
+      throw DriverProfileException(_errorMessage(
+          response, 'This action is not available to the signed-in driver.'));
     }
     if (response.statusCode == 409) {
-      throw const DriverProfileException(
-          'That email address is already used by another account.');
+      throw DriverProfileException(_errorMessage(
+          response, 'That email address is already used by another account.'));
     }
     if (response.statusCode == 400) {
-      throw const DriverProfileException(
-          'Check the name, email and phone number, then try again.');
+      throw DriverProfileException(_errorMessage(
+          response, 'Check the entered information, then try again.'));
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw DriverProfileException(

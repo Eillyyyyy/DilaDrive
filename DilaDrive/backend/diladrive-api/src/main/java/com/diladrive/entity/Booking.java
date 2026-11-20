@@ -66,12 +66,109 @@ public class Booking {
     @Column(name = "booking_tripfare")
     private BigDecimal bookingTripfare;
 
+    @Column(name = "applied_hourly_rate")
+    private BigDecimal appliedHourlyRate;
+    @Column(name = "applied_commission_percent")
+    private BigDecimal appliedCommissionPercent;
+    @Column(name = "applied_commission_basis")
+    private String appliedCommissionBasis;
+    @Column(name = "applied_partial_hour_policy")
+    private String appliedPartialHourPolicy;
+    @Column(name = "road_distance_pending", nullable = false)
+    private boolean roadDistancePending;
+
+    public boolean isRoadDistancePending() { return roadDistancePending; }
+    public void setRoadDistancePending(boolean value) { roadDistancePending = value; }
+
+    public BigDecimal getAppliedHourlyRate() { return appliedHourlyRate; }
+    public BigDecimal getAppliedCommissionPercent() { return appliedCommissionPercent; }
+    public String getAppliedCommissionBasis() { return appliedCommissionBasis; }
+    public String getAppliedPartialHourPolicy() { return appliedPartialHourPolicy; }
+
+    public void applyTripPricing(BigDecimal hourlyRate, BigDecimal commissionPercent,
+                                 String commissionBasis, String partialHourPolicy) {
+        appliedHourlyRate = hourlyRate;
+        appliedCommissionPercent = commissionPercent;
+        appliedCommissionBasis = commissionBasis;
+        appliedPartialHourPolicy = partialHourPolicy;
+    }
+
+    @Column(name="fare_snapshot",columnDefinition="text")
+    private String fareSnapshot;
+    public String getFareSnapshot() { return fareSnapshot; }
+    public void setFareSnapshot(String value) { fareSnapshot=value; }
+
     @Column(name = "booking_status")
     private String bookingStatus;
 
     @Column(name = "booking_createdat")
     private LocalDateTime bookingCreatedat;
 
+    @Column(name = "pickup_latitude")
+    private Double pickupLatitude;
+    public Double getPickupLatitude() { return pickupLatitude; }
+    public void setPickupLatitude(Double value) { this.pickupLatitude = value; }
+
+    @Column(name = "pickup_longitude")
+    private Double pickupLongitude;
+    public Double getPickupLongitude() { return pickupLongitude; }
+    public void setPickupLongitude(Double value) { this.pickupLongitude = value; }
+
+    @Column(name = "destination_latitude")
+    private Double destinationLatitude;
+    public Double getDestinationLatitude() { return destinationLatitude; }
+    public void setDestinationLatitude(Double value) { this.destinationLatitude = value; }
+
+    @Column(name = "destination_longitude")
+    private Double destinationLongitude;
+    public Double getDestinationLongitude() { return destinationLongitude; }
+    public void setDestinationLongitude(Double value) { this.destinationLongitude = value; }
+
+    @Column(name = "small_count")
+    private Integer smallCount;
+    public Integer getSmallCount() { return smallCount; }
+    public void setSmallCount(Integer value) { this.smallCount = value; }
+
+    @Column(name = "medium_count")
+    private Integer mediumCount;
+    public Integer getMediumCount() { return mediumCount; }
+    public void setMediumCount(Integer value) { this.mediumCount = value; }
+
+    @Column(name = "large_count")
+    private Integer largeCount;
+    public Integer getLargeCount() { return largeCount; }
+    public void setLargeCount(Integer value) { this.largeCount = value; }
+
+    @Column(name = "luggage_units")
+    private Integer luggageUnits;
+    public Integer getLuggageUnits() { return luggageUnits; }
+    public void setLuggageUnits(Integer value) { this.luggageUnits = value; }
+
+    @Column(name = "duration_seconds")
+    private Long durationSeconds;
+    public Long getDurationSeconds() { return durationSeconds; }
+    public void setDurationSeconds(Long value) { this.durationSeconds = value; }
+
+    @Column(name = "reserved_end_at")
+    private LocalDateTime reservedEndAt;
+    public LocalDateTime getReservedEndAt() { return reservedEndAt; }
+    public void setReservedEndAt(LocalDateTime value) { this.reservedEndAt = value; }
+
+
+    @Column(name = "contact_name")
+    private String contactName;
+    public String getContactName() { return contactName; }
+    public void setContactName(String value) { this.contactName = value; }
+
+    @Column(name = "contact_phone")
+    private String contactPhone;
+    public String getContactPhone() { return contactPhone; }
+    public void setContactPhone(String value) { this.contactPhone = value; }
+
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
+    public String getRejectionReason() { return rejectionReason; }
+    public void setRejectionReason(String value) { this.rejectionReason = value; }
     public Booking() {
     }
 

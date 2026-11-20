@@ -15,6 +15,8 @@ public interface VehicleRepository
 
     List<Vehicle> findByVehicleStatusIgnoreCase(String status);
 
+    List<Vehicle> findByDriverId(Long driverId);
+
     long countByVehicleStatusIgnoreCase(String status);
 
     boolean existsByVehiclePlatenoIgnoreCase(String vehiclePlateno);

@@ -1,0 +1,149 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../models/booking_draft.dart';
+import '../theme/app_theme.dart';
+
+class BookingRouteMap extends StatefulWidget {
+  const BookingRouteMap(
+      {super.key,
+      required this.draft,
+      required this.onSelect,
+      this.tileProvider});
+  final BookingDraft draft;
+  final ValueChanged<BookingCoordinates> onSelect;
+  final TileProvider? tileProvider;
+
+  @override
+  State<BookingRouteMap> createState() => _BookingRouteMapState();
+}
+
+class _BookingRouteMapState extends State<BookingRouteMap> {
+  final _controller = MapController();
+  bool _ready = false;
+  String? _cameraSignature;
+  BookingDraft get draft => widget.draft;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _fitCamera() {
+    if (!mounted || !_ready) return;
+    final points = [draft.pickupCoordinates, draft.destinationCoordinates]
+        .whereType<BookingCoordinates>()
+        .where((p) => p.isValid)
+        .map((p) => LatLng(p.latitude, p.longitude))
+        .toList();
+    if (points.isEmpty) return;
+    if (points.length == 1) {
+      _controller.move(points.first, 15);
+      return;
+    }
+    final geometry = draft.roadRoute?['geometry'] as List?;
+    if (geometry != null) {
+      points.addAll(geometry.map(
+          (p) => LatLng((p[1] as num).toDouble(), (p[0] as num).toDouble())));
+    }
+    _controller.fitCamera(CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints(points),
+        padding: const EdgeInsets.all(42),
+        maxZoom: 16));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pins = [draft.pickupCoordinates, draft.destinationCoordinates]
+        .whereType<BookingCoordinates>()
+        .toList();
+    final geometry = (draft.roadRoute?['geometry'] as List?) ?? [];
+    const tileUrl = String.fromEnvironment('MAP_TILE_URL',
+        defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+    final signature =
+        '${pins.map((p) => '${p.latitude},${p.longitude}').join(';')}|${identityHashCode(draft.roadRoute)}';
+    if (signature != _cameraSignature) {
+      _cameraSignature = signature;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fitCamera());
+    }
+    return Stack(children: [
+      FlutterMap(
+        mapController: _controller,
+        options: MapOptions(
+          onMapReady: () {
+            _ready = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) => _fitCamera());
+          },
+          initialCenter: pins.isEmpty
+              ? const LatLng(3.139, 101.6869)
+              : LatLng(pins.first.latitude, pins.first.longitude),
+          initialZoom: 11,
+          initialCameraFit: pins.length < 2
+              ? null
+              : CameraFit.bounds(
+                  bounds: LatLngBounds.fromPoints(pins
+                      .map((p) => LatLng(p.latitude, p.longitude))
+                      .toList()),
+                  padding: const EdgeInsets.all(42)),
+          onTap: (_, p) => widget.onSelect(
+              BookingCoordinates(latitude: p.latitude, longitude: p.longitude)),
+        ),
+        children: [
+          TileLayer(
+              urlTemplate: tileUrl,
+              tileProvider: widget.tileProvider,
+              // NetworkTileProvider uses flutter_map's persistent, HTTP-header-aware
+              // native cache by default. Chrome uses the browser HTTP cache.
+              // Do not override freshness, disable caches, or bulk-prefetch tiles.
+              userAgentPackageName: 'com.example.diladrive_customer',
+              subdomains: const [],
+              panBuffer: 0,
+              maxNativeZoom: 19,
+              retinaMode: false),
+          if (geometry.isNotEmpty)
+            PolylineLayer(polylines: [
+              Polyline(
+                  points: geometry
+                      .map((p) => LatLng(
+                          (p[1] as num).toDouble(), (p[0] as num).toDouble()))
+                      .toList(),
+                  color: AppTheme.primaryNavy,
+                  strokeWidth: 5)
+            ]),
+          MarkerLayer(markers: [
+            if (draft.pickupCoordinates?.isValid == true)
+              _marker(draft.pickupCoordinates!, pickup: true),
+            if (draft.destinationCoordinates?.isValid == true)
+              _marker(draft.destinationCoordinates!, pickup: false),
+          ]),
+        ],
+      ),
+      Positioned(
+          bottom: 2,
+          right: 4,
+          child: Material(
+              color: Colors.white,
+              child: InkWell(
+                  onTap: () => launchUrl(
+                      Uri.parse('https://www.openstreetmap.org/copyright')),
+                  child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                      child: Text(
+                          '© OpenStreetMap contributors · Routing: OSRM',
+                          style: TextStyle(fontSize: 11)))))),
+    ]);
+  }
+
+  Marker _marker(BookingCoordinates coordinates, {required bool pickup}) =>
+      Marker(
+          point: LatLng(coordinates.latitude, coordinates.longitude),
+          width: 44,
+          height: 44,
+          child: Icon(pickup ? Icons.trip_origin : Icons.location_on,
+              key: ValueKey(
+                  pickup ? 'pickup-map-marker' : 'destination-map-marker'),
+              size: 36,
+              color: pickup ? Colors.green.shade700 : Colors.red));
+}

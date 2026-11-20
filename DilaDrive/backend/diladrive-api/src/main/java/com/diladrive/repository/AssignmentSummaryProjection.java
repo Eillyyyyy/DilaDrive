@@ -26,6 +26,10 @@ public interface AssignmentSummaryProjection {
     Integer getPassengerCount();
 
     Integer getLuggageCount();
+    Integer getSmallCount();
+    Integer getMediumCount();
+    Integer getLargeCount();
+    Integer getLuggageUnits();
 
     String getLuggageSize();
 
@@ -40,4 +44,6 @@ public interface AssignmentSummaryProjection {
     String getAssignmentStatus();
 
     LocalDateTime getAssignmentDate();
+
+    LocalDateTime getScheduledEndAt();
 }

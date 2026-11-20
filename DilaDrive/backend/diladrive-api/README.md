@@ -5,6 +5,20 @@ Run with Java 17+, Maven, and PostgreSQL:
 mvn spring-boot:run
 ```
 
+With no active profile, `development` allows credentialed HTTP requests from
+`localhost` and `127.0.0.1` on any port (Flutter Web and React Admin). The `local`
+profile uses the same origin policy. Production must set
+`SPRING_PROFILES_ACTIVE=production` and `CORS_ALLOWED_ORIGINS` to the exact HTTPS
+frontend origins, comma-separated; never use `*` in production. Explicit profiles
+do not load the development origin patterns. Restart the API after configuration
+changes. The central MVC configuration handles preflight before controller session
+checks; this project has no Spring Security filter chain.
+
+Flutter Web defaults to `http://localhost:8080`; override with
+`flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8080`.
+Android emulators retain `http://10.0.2.2:8080`. React Admin uses
+`http://localhost:8080/api` unless `VITE_API_BASE_URL` is set.
+
 The React Admin web app and Flutter mobile app both call this Spring Boot API;
 the API uses one PostgreSQL datasource for all clients. Configure deployments
 with environment variables rather than editing `application.properties`:
@@ -21,7 +35,7 @@ with environment variables rather than editing `application.properties`:
 | `DATABASE_PASSWORD` | PostgreSQL password | `postgres` (local development only) |
 | `JPA_DDL_AUTO` | Hibernate schema mode | `validate` |
 | `JPA_SHOW_SQL` | Log generated SQL | `true` |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated exact browser origins | `http://localhost:5173` |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins; exact origins in production | Development/local: loopback on any port; other profiles: `http://localhost:5173` |
 | `SESSION_COOKIE_SAME_SITE` | Session-cookie SameSite policy | `strict` |
 | `SESSION_COOKIE_SECURE` | Set Secure on session cookies | `false` |
 
@@ -147,3 +161,35 @@ values are supplied):
 Customer address, payment method, and payment reference are not stored by the
 current application, so the PDF explicitly labels those values as not provided
 or not recorded rather than inventing them.
+
+## Confirm & Assign returns 404
+
+See [the verified routing investigation](../../docs/confirm-and-assign-404.md).
+The action is POST /api/bookings/{id}/confirm-and-assign; restart Spring Boot
+after introducing a new controller, and log in again after restart. The report
+distinguishes an unmapped endpoint from booking/driver/vehicle lookup failures
+and includes the exact project restart command and actual test results.
+
+### Firebase Cloud Messaging (Android)
+
+The Android app is registered with Firebase project `diladrive-c2808`. Its
+`google-services.json` is the client configuration. The backend uses Application
+Default Credentials for the same Firebase project.
+
+From this directory in PowerShell:
+
+```powershell
+.\run-local.ps1 -EnablePush -FirebaseCredentials 'C:\path\to\diladrive-service-account.json'
+```
+
+The launcher validates the service account project and keeps the credential path
+in the backend process environment. Keep the service-account JSON outside the
+repository. For other deployments set `BOOKING_PUSH_ENABLED=true`,
+`FIREBASE_PROJECT_ID=diladrive-c2808`, and configure Application Default
+Credentials with FCM send permission.
+
+After starting the backend, sign in on Android and grant notification permission.
+An admin notification addressed to that driver or a booking event for the signed-in
+recipient exercises the send path. The foreground uses an in-app banner and
+Android displays background notifications in the DilaDrive updates channel.
+Stored notifications are available in the inbox independently of push delivery.

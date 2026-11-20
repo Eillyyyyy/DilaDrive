@@ -1,134 +1,78 @@
 import 'package:flutter/material.dart';
-
-import '../../models/driver_profile.dart';
+import '../../controllers/driver_profile_controller.dart';
 import '../../services/driver_profile_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/driver_profile_widgets.dart';
 import '../auth/login.dart';
 
 class DriverViewAccountPage extends StatefulWidget {
-  const DriverViewAccountPage({super.key});
-
+  const DriverViewAccountPage(
+      {super.key, this.profileService, this.vehicleOnly = false});
+  final DriverProfileService? profileService;
+  final bool vehicleOnly;
   @override
   State<DriverViewAccountPage> createState() => _DriverViewAccountPageState();
 }
 
 class _DriverViewAccountPageState extends State<DriverViewAccountPage> {
-  final DriverProfileService _service = DriverProfileService();
-  late Future<DriverProfile> _profile;
-
+  late final DriverProfileController _controller;
   @override
   void initState() {
     super.initState();
-    _profile = _service.getProfile();
+    _controller = DriverProfileController(service: widget.profileService);
+    _controller.load();
   }
 
   @override
   void dispose() {
-    _service.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
-  void _retryOrSignIn(Object? error) {
-    final requiresLogin =
-        error is DriverProfileException && error.requiresLogin;
-    if (requiresLogin) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const LoginPage()),
-        (_) => false,
-      );
-    } else {
-      setState(() {
-        _profile = _service.getProfile();
-      });
-    }
-  }
-
+  void _signIn() => Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginPage()), (_) => false);
   @override
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: AppTheme.lightBlueBackground,
-        appBar: AppBar(title: const Text('Driver Account')),
-        body: FutureBuilder<DriverProfile>(
-          future: _profile,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text(snapshot.error.toString(),
-                        textAlign: TextAlign.center),
-                    TextButton.icon(
-                      onPressed: () => _retryOrSignIn(snapshot.error),
-                      icon: const Icon(Icons.refresh),
-                      label: Text(snapshot.error is DriverProfileException &&
-                              (snapshot.error as DriverProfileException)
-                                  .requiresLogin
-                          ? 'Sign in'
-                          : 'Retry'),
-                    ),
-                  ]),
-                ),
-              );
-            }
-            final profile = snapshot.data!;
-            final items = <String, String>{
-              'Driver ID': profile.id.toString(),
-              'Full name': profile.name,
-              'Email': profile.email,
-              'Phone': profile.phone ?? 'Not provided',
-              if (profile.licenseNumber != null)
-                'Driving license': profile.licenseNumber!,
-              if (profile.licenseExpiry != null)
-                'License expiry': profile.licenseExpiry!,
-              if (profile.driverType != null)
-                'Driver type': profile.driverType!,
-              if (profile.availability != null)
-                'Availability': profile.availability!,
-              if (profile.status != null) 'Account status': profile.status!,
-            };
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Card(
-                  color: AppTheme.primaryNavy,
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(children: [
-                      const CircleAvatar(
-                        radius: 38,
-                        backgroundColor: Colors.white,
-                        child: Icon(Icons.person,
-                            size: 42, color: AppTheme.primaryNavy),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(profile.name,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 3),
-                      const Text('Driver',
-                          style: TextStyle(color: Colors.white70)),
-                    ]),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...items.entries.map((entry) => Card(
-                      child: ListTile(
-                        title: Text(entry.key,
-                            style: const TextStyle(
-                                color: AppTheme.secondaryText, fontSize: 13)),
-                        subtitle: Text(entry.value,
-                            style: const TextStyle(
-                                color: AppTheme.mainText, fontSize: 16)),
-                      ),
-                    )),
-              ],
-            );
-          },
-        ),
+        appBar: AppBar(
+            title: Text(widget.vehicleOnly
+                ? 'Vehicle information'
+                : 'Account information')),
+        body: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              if (_controller.loading && _controller.profile == null) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (_controller.error != null) {
+                return Center(
+                    child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child:
+                            Column(mainAxisSize: MainAxisSize.min, children: [
+                          Text(_controller.error!.message,
+                              textAlign: TextAlign.center),
+                          TextButton(
+                              onPressed: _controller.error!.requiresLogin
+                                  ? _signIn
+                                  : _controller.load,
+                              child: Text(_controller.error!.requiresLogin
+                                  ? 'Sign in'
+                                  : 'Retry')),
+                        ])));
+              }
+              final profile = _controller.profile;
+              if (profile == null) return const SizedBox.shrink();
+              return RefreshIndicator(
+                  onRefresh: _controller.load,
+                  child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(18),
+                      children: [
+                        widget.vehicleOnly
+                            ? DriverAssignedVehicleCard(profile: profile)
+                            : DriverProfileContent(profile: profile)
+                      ]));
+            }),
       );
 }

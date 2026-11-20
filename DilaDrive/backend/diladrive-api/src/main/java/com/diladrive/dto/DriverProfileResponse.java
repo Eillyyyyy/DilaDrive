@@ -11,9 +11,18 @@ public record DriverProfileResponse(
         String licenseNumber,
         String licenseExpiry,
         String driverType,
-        String availability) {
+        String availability,
+        String profileImage, String vehicleModel, String vehiclePlate,
+        long totalTrips, long completedTrips, long upcomingTrips,
+        String vehicleType, Integer vehicleCapacity, java.time.LocalDate vehicleRoadTaxExpiry,
+        String vehicleStatus, boolean vehicleAssigned) {
 
     public static DriverProfileResponse from(Driver driver) {
+        return from(driver, null, 0, 0, 0);
+    }
+
+    public static DriverProfileResponse from(Driver driver, com.diladrive.entity.Vehicle vehicle,
+            long total, long completed, long upcoming) {
         return new DriverProfileResponse(
                 driver.getDriverId(),
                 driver.getDriverName(),
@@ -23,6 +32,12 @@ public record DriverProfileResponse(
                 driver.getDriverLicenseno(),
                 driver.getDriverLicenseExpiry(),
                 driver.getDriverType(),
-                driver.getDriverAvailability());
+                driver.getDriverAvailability(), driver.getProfileImage(),
+                vehicle == null ? null : vehicle.getVehicleModel(),
+                vehicle == null ? null : vehicle.getVehiclePlateno(), total, completed, upcoming,
+                vehicle == null ? null : vehicle.getVehicleType(),
+                vehicle == null ? null : vehicle.getVehicleCapacity(),
+                vehicle == null ? null : vehicle.getVehicleRoadtaxexpiry(),
+                vehicle == null ? null : vehicle.getVehicleStatus(), vehicle != null);
     }
 }
