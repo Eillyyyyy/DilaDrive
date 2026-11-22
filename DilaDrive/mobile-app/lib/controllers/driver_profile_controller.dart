@@ -15,7 +15,7 @@ class DriverProfileController extends ChangeNotifier {
   int _generation = 0;
 
   Future<void> load() async {
-    if (_disposed) return;
+    if (_disposed || loading) return;
     final generation = ++_generation;
     loading = true;
     error = null;

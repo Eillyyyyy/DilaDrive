@@ -5,6 +5,9 @@ class MobileSession {
 
   static String? _sessionCookie;
   static bool _webSessionAuthenticated = false;
+  static int _generation = 0;
+  static int get generation => _generation;
+  static void Function(String message)? onDriverDeactivated;
 
   static Map<String, String> get headers => kIsWeb
       ? const {}
@@ -19,6 +22,7 @@ class MobileSession {
     // Browsers hide Set-Cookie from Dart. BrowserClient stores and sends it
     // automatically when withCredentials is enabled.
     if (kIsWeb) {
+      _generation++;
       _webSessionAuthenticated = true;
       return;
     }
@@ -28,6 +32,7 @@ class MobileSession {
 
       final cookie = entry.value.split(';').first.trim();
       if (cookie.startsWith('JSESSIONID=') && cookie.length > 11) {
+        _generation++;
         _sessionCookie = cookie;
         return;
       }
@@ -35,7 +40,14 @@ class MobileSession {
   }
 
   static void clear() {
+    _generation++;
     _sessionCookie = null;
     _webSessionAuthenticated = false;
+  }
+
+  static void revokeDriverSession(int requestGeneration, String message) {
+    if (requestGeneration != _generation || !isAuthenticated) return;
+    clear();
+    onDriverDeactivated?.call(message);
   }
 }

@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'dart:typed_data';
 
 import '../../models/customer_profile.dart';
 import '../../models/mobile_user.dart';
@@ -160,7 +158,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 onTap: () => Navigator.push<void>(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => ViewAccountPage(profile: profile),
+                    builder: (_) => ViewAccountPage(service: _service),
                   ),
                 ),
               ),
@@ -214,11 +212,10 @@ class _ProfileHeader extends StatelessWidget {
         ),
         child: Row(
           children: [
-            CircleAvatar(
+            CustomerProfileAvatar(
               radius: 34,
-              backgroundImage: profile.profileImage == null ? null : MemoryImage(_profileImageBytes(profile.profileImage!)),
+              image: profile.profileImage,
               backgroundColor: Colors.white,
-              child: profile.profileImage == null ? const Icon(Icons.person, size: 38, color: AppTheme.primaryNavy) : null,
             ),
             const SizedBox(width: 15),
             Expanded(
@@ -254,8 +251,6 @@ class _ProfileHeader extends StatelessWidget {
         ),
       );
 }
-
-Uint8List _profileImageBytes(String value) => base64Decode(value.substring(value.indexOf(',') + 1));
 
 String _customerTypeLabel(String? type) => switch (type?.toUpperCase()) {
       'NORMAL' => 'Individual customer',

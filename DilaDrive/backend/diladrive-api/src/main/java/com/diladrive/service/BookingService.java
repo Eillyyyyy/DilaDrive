@@ -230,52 +230,6 @@ public class BookingService {
     }
 
     @Transactional
-    public Booking createBooking(Booking request) {
-        if (request.getCustId() == null
-                || request.getBookingTripdate() == null
-                || request.getBookingPickuptime() == null
-                || isBlank(request.getBookingPickupaddress())
-                || isBlank(request.getBookingDestinationaddress())
-                || request.getBookingTripfare() == null
-                || isBlank(request.getBookingType())) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Customer, trip date/time, both addresses, vehicle type, and fare are required."
-            );
-        }
-
-        String type = request.getBookingType().trim();
-        if (!type.equalsIgnoreCase("Sedan")
-                && !type.equalsIgnoreCase("MPV")) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Vehicle type must be Sedan or MPV."
-            );
-        }
-
-        if (request.getBookingTripdate().isBefore(LocalDate.now())) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Pickup date cannot be in the past."
-            );
-        }
-        if (request.getBookingTripdate().isEqual(LocalDate.now())
-                && request.getBookingPickuptime().isBefore(LocalTime.now())) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Pickup time cannot be in the past."
-            );
-        }
-
-        request.setBookingType(type);
-        request.setDriverId(null);
-        request.setVehicleId(null);
-        request.setBookingStatus("PENDING_VERIFICATION");
-        request.setBookingCreatedat(LocalDateTime.now());
-        return bookingRepository.save(request);
-    }
-
-    @Transactional
     public CustomerBookingCreatedResponse createCustomerBooking(
             Long customerId,
             CustomerBookingRequest request) {

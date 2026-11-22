@@ -149,15 +149,6 @@ public class BookingController {
                 "Use POST /api/bookings/availability. An exact pickup-time count cannot verify driving duration and schedule overlaps.");
     }
 
-    @PostMapping
-    public ResponseEntity<Booking> createBooking(
-            @RequestBody Booking booking,
-            HttpServletRequest request) {
-        requireAdminId(request);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(bookingService.createBooking(booking));
-    }
-
     @PutMapping("/{id}/verify")
     public Booking verifyBooking(
             @PathVariable Long id,

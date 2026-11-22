@@ -55,7 +55,10 @@ public class AdminService {
     }
 
     public AdminProfileResponse getProfile(Long adminId) {
-        return new AdminProfileResponse(findAdmin(adminId));
+        Admin admin = adminRepository.findById(adminId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Admin account not found."));
+        return new AdminProfileResponse(requireActiveAdmin(admin));
     }
 
     public AdminProfileResponse updateProfile(
@@ -150,6 +153,10 @@ public class AdminService {
         Admin admin = adminRepository.findById(adminId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.UNAUTHORIZED, "Admin session is no longer valid."));
+        return requireActiveAdmin(admin);
+    }
+
+    private Admin requireActiveAdmin(Admin admin) {
         if (!"ACTIVE".equalsIgnoreCase(admin.getStatus())) {
             throw new ResponseStatusException(
                     HttpStatus.UNAUTHORIZED, "Admin session is no longer valid.");

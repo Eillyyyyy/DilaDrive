@@ -80,14 +80,13 @@ export default function Customers() {
     setSelectedCustomer(null);
     setSaveError("");
     setCustomerForm({
-      id: customer?.id,
+      id: customer.id,
       custName: customer?.name ?? "",
       custEmail: customer?.email ?? "",
       custPhoneno: customer?.phone ?? "",
       custType: customer?.custType ?? "NORMAL",
       companyName: customer?.companyName ?? "",
       companyRegistrationNumber: customer?.companyRegistrationNumber ?? "",
-      custPassword: "",
     });
   };
 
@@ -133,7 +132,7 @@ export default function Customers() {
     if (savingCustomer) return;
     setSavingCustomer(true);
     setSaveError("");
-    const { id, custPassword, custType, companyName, companyRegistrationNumber, ...fields } = customerForm;
+    const { id, custType, companyName, companyRegistrationNumber, ...fields } = customerForm;
     const payload = {
       ...fields,
       custName: fields.custName.trim(),
@@ -149,11 +148,7 @@ export default function Customers() {
         setSaveError("Enter the customer name.");
         return;
       }
-      if (id) {
-        await api.put(`/customers/${id}`, payload);
-      } else {
-        await api.post("/customers", { ...payload, custType, custPassword });
-      }
+      await api.put(`/customers/${id}`, payload);
       setCustomerForm(null);
       await fetchCustomers();
     } catch (error) {
@@ -254,10 +249,6 @@ export default function Customers() {
             access transportation services.
           </p>
         </div>
-        <button type="button" onClick={() => openCustomerForm()}
-          className="w-fit rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800">
-          Add customer
-        </button>
       </section>
 
       {/* Summary cards */}
@@ -602,7 +593,7 @@ export default function Customers() {
           <form role="dialog" aria-modal="true" aria-labelledby="customer-form-title"
             onSubmit={saveCustomer} className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-2xl">
             <h2 id="customer-form-title" className="text-xl font-bold text-slate-900">
-              {customerForm.id ? "Edit customer" : "Add customer"}
+              Edit customer
             </h2>
             <fieldset disabled={savingCustomer} className="space-y-3">
               <label className="block text-sm font-medium">
@@ -620,24 +611,6 @@ export default function Customers() {
                 <input type="tel" name="custPhoneno" value={customerForm.custPhoneno} onChange={changeCustomerField}
                   className="mt-1 w-full rounded-lg border px-3 py-2" />
               </label>
-              {!customerForm.id && (
-                <>
-                  <label className="block text-sm font-medium">
-                    Account type
-                    <select name="custType" value={customerForm.custType} onChange={changeCustomerField}
-                      className="mt-1 w-full rounded-lg border px-3 py-2">
-                      <option value="NORMAL">Normal</option>
-                      <option value="COMPANY">Corporate</option>
-                    </select>
-                  </label>
-                  <label className="block text-sm font-medium">
-                    Password
-                    <input required type="password" autoComplete="new-password" name="custPassword"
-                      value={customerForm.custPassword} onChange={changeCustomerField}
-                      className="mt-1 w-full rounded-lg border px-3 py-2" />
-                  </label>
-                </>
-              )}
               {customerForm.custType === "COMPANY" && (
                 <>
                   <label className="block text-sm font-medium">

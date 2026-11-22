@@ -28,17 +28,6 @@ public class CustomerService {
         return customerRepository.findAll();
     }
 
-    public Customer createCustomer(Customer customer) {
-        if ("COMPANY".equalsIgnoreCase(customer.getCustType())) {
-            applyCompanyDetails(customer, customer);
-        }
-        customer.setCustPassword(encodePassword(customer.getCustPassword()));
-        if (customer.getCustStatus() == null) {
-            customer.setCustStatus("PENDING");
-        }
-        return customerRepository.save(customer);
-    }
-
     @Transactional
     public Customer updateCustomer(Long id, Customer customer) {
 

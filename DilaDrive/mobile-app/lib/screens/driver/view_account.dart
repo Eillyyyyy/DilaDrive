@@ -62,7 +62,20 @@ class _DriverViewAccountPageState extends State<DriverViewAccountPage> {
                         ])));
               }
               final profile = _controller.profile;
-              if (profile == null) return const SizedBox.shrink();
+              if (profile == null) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('No account details are available.'),
+                      TextButton(
+                        onPressed: _controller.load,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                );
+              }
               return RefreshIndicator(
                   onRefresh: _controller.load,
                   child: ListView(

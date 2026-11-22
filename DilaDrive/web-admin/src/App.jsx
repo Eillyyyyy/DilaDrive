@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -72,30 +72,49 @@ export default function App() {
     phone: "",
     role: "ADMIN",
   });
+  const [profileRequest, setProfileRequest] = useState({ state: "loading" });
+  const [profileRetry, setProfileRetry] = useState(0);
+  const restoreSession = useRef(Boolean(currentUser));
+  const profileOpen = activePage === "Profile";
+  const userId = currentUser?.id;
 
   useEffect(() => {
-    if (!currentUser) return undefined;
-    let active = true;
+    if (!profileOpen) setProfileRequest({ state: "loading" });
+    if (!userId || (!profileOpen && !restoreSession.current)) return undefined;
+    const request = new AbortController();
+    if (profileOpen) setProfileRequest({ state: "loading" });
     api
-      .get("/auth/session")
+      .get("/auth/session", { signal: request.signal })
       .then(({ data }) => {
-        if (!active) return;
+        if (request.signal.aborted) return;
+        restoreSession.current = false;
         const user = { id: data.id, email: data.email, role: data.role };
         setCurrentUser(user);
         setProfile(data);
         localStorage.setItem("currentUser", JSON.stringify(user));
         localStorage.setItem("profile", JSON.stringify(data));
+        if (profileOpen) setProfileRequest({ state: "ready" });
       })
-      .catch(() => {
-        if (!active) return;
-        localStorage.removeItem("currentUser");
-        localStorage.removeItem("profile");
-        setCurrentUser(null);
+      .catch((error) => {
+        if (request.signal.aborted) return;
+        restoreSession.current = false;
+        const status = error.response?.status;
+        if (status === 401) {
+          localStorage.removeItem("currentUser");
+          localStorage.removeItem("profile");
+          setCurrentUser(null);
+          setActivePage("Dashboard");
+          return;
+        }
+        if (!profileOpen) return;
+        let message = "Unable to load your account details.";
+        if (!error.response) message = "Cannot connect to DilaDrive. Check your connection.";
+        else if (status === 404) message = "Admin account not found.";
+        else if (status >= 500) message = "The server could not load your account right now.";
+        setProfileRequest({ state: "error", message });
       });
-    return () => {
-      active = false;
-    };
-  }, []);
+    return () => request.abort();
+  }, [profileOpen, profileRetry, userId]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -242,6 +261,24 @@ export default function App() {
         return <Notifications />;
 
       case "Profile":
+        if (profileRequest.state !== "ready") {
+          return (
+            <section className="admin-page">
+              <h1 className="admin-page-title">Profile</h1>
+              {profileRequest.state === "loading" ? (
+                <p role="status" className="text-slate-600">Loading account details…</p>
+              ) : (
+                <div role="alert" className="space-y-3 text-slate-700">
+                  <p>{profileRequest.message}</p>
+                  <button type="button" className="rounded-lg bg-teal-700 px-4 py-2 text-white"
+                    onClick={() => setProfileRetry((attempt) => attempt + 1)}>
+                    Retry
+                  </button>
+                </div>
+              )}
+            </section>
+          );
+        }
         return (
           <Profile
             user={profile}

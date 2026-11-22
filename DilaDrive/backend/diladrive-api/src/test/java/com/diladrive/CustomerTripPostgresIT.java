@@ -18,12 +18,104 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** All fixtures and migrations run in a unique disposable PostgreSQL schema. */
 @SpringBootTest(properties={"spring.jpa.show-sql=false","logging.level.root=ERROR","booking.push-enabled=false"})
 @org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 @EnabledIfEnvironmentVariable(named="RUN_CUSTOMER_TRIP_IT", matches="true")
 class CustomerTripPostgresIT {
+    @Test void selfProfileReadsUseCurrentDatabaseRowsAndHideCredentials() throws Exception {
+        long admin = jdbc.queryForObject("""
+                insert into admin(admin_name, admin_status, admin_password)
+                values ('Original Admin', 'ACTIVE', 'sensitive') returning admin_id
+                """, Long.class);
+        var adminSession = new org.springframework.mock.web.MockHttpSession();
+        adminSession.setAttribute("adminId", admin);
+        mvc.perform(get("/api/auth/session").session(adminSession).param("id", "99999"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Original Admin"))
+                .andExpect(jsonPath("$.password").doesNotExist());
+        jdbc.update("update admin set admin_name='Fresh Admin' where admin_id=?", admin);
+        mvc.perform(get("/api/auth/session").session(adminSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Fresh Admin"));
+        jdbc.update("update admin set admin_status='INACTIVE' where admin_id=?", admin);
+        mvc.perform(get("/api/auth/session").session(adminSession)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/session").sessionAttr("adminId", Long.MAX_VALUE))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/auth/session")).andExpect(status().isUnauthorized());
+
+        var driverSession = mobileSession(driver, "DRIVER");
+        mvc.perform(get("/api/drivers/me").session(driverSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(driver));
+        jdbc.update("update driver set driver_name='Fresh Driver' where driver_id=?", driver);
+        mvc.perform(get("/api/drivers/me").session(driverSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Fresh Driver"))
+                .andExpect(jsonPath("$.driverIcno").doesNotExist())
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.vehicleAssigned").value(true));
+
+        var customerSession = mobileSession(customer, "CUSTOMER");
+        jdbc.update("update customer set cust_type='NORMAL', cust_status='PENDING' where cust_id=?", customer);
+        mvc.perform(get("/api/customers/me").session(customerSession))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.type").value("NORMAL"))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.companyName").doesNotExist());
+        jdbc.update("""
+                update customer set cust_name='Fresh Customer', cust_type='COMPANY',
+                cust_companyname='Fresh Company', company_registration_number='REG123' where cust_id=?
+                """, customer);
+        mvc.perform(get("/api/customers/me").session(customerSession).param("id", "99999"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(customer))
+                .andExpect(jsonPath("$.name").value("Fresh Customer"))
+                .andExpect(jsonPath("$.companyName").value("Fresh Company"))
+                .andExpect(jsonPath("$.companyRegistrationNumber").value("REG123"))
+                .andExpect(jsonPath("$.custPassword").doesNotExist());
+        mvc.perform(get("/api/drivers/me").session(customerSession)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/customers/me").session(driverSession)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/drivers/me")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/customers/me")).andExpect(status().isUnauthorized());
+    }
+
+    @Test void driverDisabledAfterSessionEstablishmentCannotReachProtectedHandlers() throws Exception {
+        var session = mobileSession(driver, "DRIVER");
+        mvc.perform(get("/api/assignments/mine").session(session)).andExpect(status().isOk());
+        jdbc.update("update driver set driver_status='DISABLED' where driver_id=?", driver);
+        mvc.perform(get("/api/assignments/mine").session(session))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("DRIVER_ACCOUNT_DEACTIVATED"));
+        mvc.perform(get("/api/assignments/mine").session(session)).andExpect(status().isUnauthorized());
+        var requests = List.of(
+                get("/api/drivers/me"), put("/api/drivers/me"), post("/api/drivers/me/password"),
+                get("/api/assignments/mine"), get("/api/assignments/1"),
+                patch("/api/assignments/1/status"), get("/api/assignments/1/photos"),
+                multipart("/api/assignments/1/photos"), get("/api/assignments/1/photos/1/content"),
+                post("/api/payments/bookings/1/cash"), get("/api/notifications/driver/" + driver),
+                patch("/api/notifications/1/read"), post("/api/mobile/push-token"),
+                delete("/api/mobile/push-token"));
+        for (var request : requests) {
+            // Each case represents a pre-existing driver session.
+            session = mobileSession(driver, "DRIVER");
+            session.setAttribute("adminId", 99L);
+            mvc.perform(request.session(session))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("DRIVER_ACCOUNT_DEACTIVATED"));
+            assertNull(session.getAttribute("mobileUserId"));
+            assertNull(session.getAttribute("mobileRole"));
+            assertEquals(99L, session.getAttribute("adminId"));
+        }
+        jdbc.update("update driver set driver_status='INACTIVE' where driver_id=?", driver);
+        mvc.perform(get("/api/drivers/me").session(mobileSession(driver, "DRIVER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("DRIVER_ACCOUNT_DEACTIVATED"));
+    }
+
+    private static org.springframework.mock.web.MockHttpSession mobileSession(long id, String role) {
+        var session = new org.springframework.mock.web.MockHttpSession();
+        session.setAttribute("mobileUserId", id);
+        session.setAttribute("mobileRole", role);
+        return session;
+    }
     static String schema="diladrive_trip_check_"+System.currentTimeMillis();
     static String url,user,password;
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) throws Exception {
@@ -180,9 +272,20 @@ class CustomerTripPostgresIT {
         assertEquals(0,jdbc.queryForObject("select count(*) from booking_vehicle_hold",Integer.class));
         assertEquals(1,jdbc.queryForObject("select count(*) from booking",Integer.class));
     }
-    @Test void unverifiedCustomerCannotCreate() {
-        jdbc.update("update customer set cust_status='PENDING'");
-        assertThrows(org.springframework.web.server.ResponseStatusException.class,this::create);
+    @Test void pendingAndRejectedCustomersCannotCreateThroughAnyCustomerRoute() throws Exception {
+        for (String status : List.of("PENDING", "REJECTED")) {
+            jdbc.update("update customer set cust_status=? where cust_id=?", status, customer);
+            for (String path : List.of("/api/bookings/customer", "/api/bookings/customer/complete",
+                    "/api/bookings/customer/road-distance-review")) {
+                mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path)
+                                .sessionAttr("mobileUserId", customer)
+                                .sessionAttr("mobileRole", "CUSTOMER")
+                                .header("Idempotency-Key", UUID.randomUUID().toString())
+                                .contentType("application/json")
+                                .content(json.writeValueAsString(request(3,1,1,0))))
+                        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+            }
+        }
         assertEquals(0,jdbc.queryForObject("select count(*) from booking",Integer.class));
     }
     @Test void twoCustomersCanRequestSameSlotThenAdminConfirmsAlternativeAndHistoryIsPreserved() throws Exception {

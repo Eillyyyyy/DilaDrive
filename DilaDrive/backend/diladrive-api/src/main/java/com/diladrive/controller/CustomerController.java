@@ -30,18 +30,6 @@ public class CustomerController {
         return customerService.getAllCustomers();
     }
 
-    @PostMapping
-    public ResponseEntity<?> createCustomer(
-            @RequestBody Customer customer,
-            HttpServletRequest request) {
-        requireAdminId(request);
-        try {
-            return ResponseEntity.ok(customerService.createCustomer(customer));
-        } catch (IllegalArgumentException exception) {
-            return ResponseEntity.badRequest().body(exception.getMessage());
-        }
-    }
-
     @PutMapping("/{id}")
     public ResponseEntity<?> updateCustomer(
             @PathVariable Long id,

@@ -15,20 +15,13 @@ class CustomerServiceTest {
     private final CustomerService service = new CustomerService(repository);
 
     @Test
-    void adminCanCreateAndUpdateCorporateDetailsWithoutAContract() {
+    void adminCanUpdateRegisteredCorporateDetailsWithoutAContract() {
         Customer customer = new Customer();
         customer.setCustType("COMPANY");
-        customer.setCustPassword("test-password");
-        customer.setCompanyName(" Example Transport ");
-        customer.setCompanyRegistrationNumber(" REG123 ");
+        customer.setCompanyName("Example Transport");
+        customer.setCompanyRegistrationNumber("REG123");
         when(repository.save(any(Customer.class))).thenAnswer(call -> call.getArgument(0));
         when(repository.findById(1L)).thenReturn(Optional.of(customer));
-
-        var created = service.createCustomer(customer);
-        assertEquals("Example Transport", created.getCompanyName());
-        assertEquals("REG123", created.getCompanyRegistrationNumber());
-        assertEquals("PENDING", created.getCustStatus());
-        assertNotEquals("test-password", created.getCustPassword());
 
         Customer update = new Customer();
         update.setCompanyName(" Updated Company ");
@@ -38,13 +31,16 @@ class CustomerServiceTest {
     }
 
     @Test
-    void incompleteCorporateDetailsCannotBeSaved() {
+    void incompleteCorporateUpdatesCannotBeSaved() {
         Customer customer = new Customer();
         customer.setCustType("COMPANY");
-        customer.setCompanyName("  ");
+        customer.setCompanyName("Example Transport");
         customer.setCompanyRegistrationNumber("REG123");
+        when(repository.findById(1L)).thenReturn(Optional.of(customer));
 
-        assertThrows(IllegalArgumentException.class, () -> service.createCustomer(customer));
-        verifyNoInteractions(repository);
+        Customer update = new Customer();
+        update.setCompanyName("  ");
+        assertThrows(IllegalArgumentException.class, () -> service.updateCustomer(1L, update));
+        verify(repository, never()).save(any(Customer.class));
     }
 }
