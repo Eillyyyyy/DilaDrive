@@ -122,4 +122,37 @@ void main() {
       )),
     );
   });
+
+  test('omits null optional values and sends explicit photo removal', () async {
+    MobileSession.storeResponseCookies(
+        {'set-cookie': 'JSESSIONID=customer-session'});
+    final payloads = <Map<String, dynamic>>[];
+    final service = CustomerProfileService(client: MockClient((request) async {
+      payloads.add(jsonDecode(request.body) as Map<String, dynamic>);
+      return http.Response(
+          '{"id":7,"name":"Ayla","email":"ayla@example.com"}', 200);
+    }));
+    addTearDown(service.dispose);
+
+    await service.updateMyProfile(
+        name: 'Ayla', email: 'ayla@example.com', profileImage: null);
+    await service.updateMyProfile(
+        name: 'Ayla',
+        email: 'ayla@example.com',
+        profileImage: '',
+        clearPhone: true);
+    await service.updateMyProfile(
+        name: 'Ayla',
+        email: 'ayla@example.com',
+        profileImage: 'data:image/png;base64,iVBORw0KGgo=');
+
+    expect(payloads[0], {'name': 'Ayla', 'email': 'ayla@example.com'});
+    expect(payloads[1], {
+      'name': 'Ayla',
+      'email': 'ayla@example.com',
+      'clearPhone': true,
+      'profileImage': ''
+    });
+    expect(payloads[2]['profileImage'], 'data:image/png;base64,iVBORw0KGgo=');
+  });
 }

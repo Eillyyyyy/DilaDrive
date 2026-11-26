@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+
 import '../../models/customer_booking.dart';
 import '../../models/customer_payment.dart';
 import '../../services/customer_payment_service.dart';
@@ -59,7 +61,7 @@ class _PaymentPageState extends State<PaymentPage> {
       );
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: const Text('Payment information')),
         body: FutureBuilder<List<CustomerPayment>>(
@@ -98,7 +100,7 @@ class _PaymentPageState extends State<PaymentPage> {
               onRefresh: _refresh,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(18),
+                padding: pagePadding(context),
                 children: [
                   Card(
                     color: AppTheme.primaryNavy,
@@ -147,7 +149,7 @@ class _PaymentPageState extends State<PaymentPage> {
                     child: Padding(
                       padding: EdgeInsets.all(16),
                       child: Text(
-                        'Payment is handled outside this app. Do not enter card details here. Card payments include the documented 6% surcharge. A receipt is issued after Admin verifies the proof.',
+                        'Payment is handled outside this app. Do not enter card details here. A receipt is issued after Admin verifies the proof.',
                         style: TextStyle(
                             color: AppTheme.secondaryText, height: 1.4),
                       ),
@@ -158,15 +160,7 @@ class _PaymentPageState extends State<PaymentPage> {
                     onPressed: fare == null ||
                             remaining == 0 ||
                             pending ||
-                            !const {
-                              'CONFIRMED',
-                              'ASSIGNED',
-                              'OTW',
-                              'WAITING',
-                              'PICKUP',
-                              'DROP',
-                              'COMPLETED',
-                            }.contains(widget.booking.status.toUpperCase())
+                            widget.booking.status.toUpperCase() != 'COMPLETED'
                         ? null
                         : () => _upload(remaining!),
                     icon: const Icon(Icons.upload_file_outlined),
@@ -207,9 +201,6 @@ class _PaymentRecord extends StatelessWidget {
             Text(_status(status),
                 style: TextStyle(color: color, fontWeight: FontWeight.w700)),
           ]),
-          if (payment.surchargeAmount > 0)
-            Text('Includes ${_money(payment.surchargeAmount)} card surcharge',
-                style: const TextStyle(color: AppTheme.secondaryText)),
           if (payment.rejectReason?.isNotEmpty == true) ...[
             const SizedBox(height: 6),
             Text('Admin note: ${payment.rejectReason}',

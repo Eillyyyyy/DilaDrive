@@ -4,8 +4,6 @@ import com.diladrive.entity.Notification;
 import com.diladrive.dto.NotificationCreateRequest;
 import com.diladrive.entity.NotificationStatusConverter;
 import com.diladrive.entity.Driver;
-import com.diladrive.entity.Admin;
-import com.diladrive.repository.AdminRepository;
 import com.diladrive.repository.DriverRepository;
 import com.diladrive.repository.NotificationRepository;
 import org.junit.jupiter.api.Test;
@@ -13,7 +11,6 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -30,15 +28,14 @@ import static org.mockito.Mockito.when;
 class NotificationServiceTest {
 
     private final NotificationRepository notifications = mock(NotificationRepository.class);
-    private final AdminRepository admins = mock(AdminRepository.class);
     private final NotificationService service = new NotificationService(
-            notifications, mock(DriverRepository.class), admins);
+            notifications, mock(DriverRepository.class));
 
     @Test
     void adminMessagePersistsInInboxAndSchedulesPushForTheDriver() {
         var drivers = mock(DriverRepository.class);
         var push = mock(BookingPushService.class);
-        var service = new NotificationService(notifications, drivers, admins);
+        var service = new NotificationService(notifications, drivers);
         ReflectionTestUtils.setField(service, "bookingPush", push);
         var driver = new Driver();
         driver.setDriverId(7L);
@@ -52,26 +49,26 @@ class NotificationServiceTest {
     }
 
     @Test
-    void newBookingCreatesNotificationForEachActiveAdmin() {
-        Admin active = new Admin();
-        active.setId(7L);
-        active.setStatus("ACTIVE");
-        Admin inactive = new Admin();
-        inactive.setId(8L);
-        inactive.setStatus("INACTIVE");
-        when(admins.findAll()).thenReturn(List.of(active, inactive));
+    void storesCustomerPaymentNoticesWithoutDispatchingPush() {
+        var push = mock(BookingPushService.class);
+        ReflectionTestUtils.setField(service, "bookingPush", push);
+        when(notifications.save(any(Notification.class))).thenAnswer(call -> call.getArgument(0));
 
+        service.createCustomerNotification(42L, "Payment verified", "Proof approved", "PAYMENT_VERIFIED");
+        service.createCustomerNotification(42L, "Document available", "REC-7 is available", "DOCUMENT");
+        service.createCustomerNotification(42L, "Document available", "INV-7 is available", "DOCUMENT");
+
+        verify(notifications, times(3)).save(any(Notification.class));
+        verify(push).notifyAfterCommit("CUSTOMER", 42L, "Document available", "INV-7 is available");
+        org.mockito.Mockito.verifyNoMoreInteractions(push);
+    }
+
+    @Test
+    void newBookingSuppliesAnInternalTargetAndStableEventKey() {
         service.notifyAdminsOfNewBooking(42L);
-
-        verify(notifications, times(1)).save(argThat(notification ->
-                "ADMIN".equals(notification.getRecipientRole())
-                        && Long.valueOf(7L).equals(notification.getRecipientId())
-                        && "New booking request".equals(notification.getTitle())
-                        && "BK-000042 is waiting for verification."
-                                .equals(notification.getMessage())
-                        && "BOOKING".equals(notification.getNotificationType())));
-        verify(notifications, never()).save(argThat(notification ->
-                Long.valueOf(8L).equals(notification.getRecipientId())));
+        verify(notifications).insertAdminEvent(eq("New booking request"),
+                eq("BK-000042 is waiting for verification and assignment."), eq("BOOKING"),
+                eq("BOOKING"), eq(42L), eq("/bookings/42"), eq("booking-created:42"), any());
     }
 
     @Test

@@ -10,6 +10,8 @@ class CustomerBooking {
     this.pickupAddress,
     this.destinationAddress,
     this.flightNumber,
+    this.flightDate,
+    this.flightTime,
     this.passengerCount,
     this.luggageCount,
     this.luggageSize,
@@ -32,6 +34,12 @@ class CustomerBooking {
     this.finalFare,
     this.payableFare,
     this.activeAssignment = false,
+    this.assignedDriver,
+    this.assignedVehicleModel,
+    this.assignedVehiclePlate,
+    this.assignedVehicleCategory,
+    this.assignedTripStatus,
+    this.reservationStatus,
   });
 
   final int? smallCount;
@@ -49,6 +57,12 @@ class CustomerBooking {
   final double? finalFare;
   final double? payableFare;
   final bool activeAssignment;
+  final String? assignedDriver;
+  final String? assignedVehicleModel;
+  final String? assignedVehiclePlate;
+  final String? assignedVehicleCategory;
+  final String? assignedTripStatus;
+  final String? reservationStatus;
   final int id;
   final String status;
   final String? type;
@@ -59,6 +73,8 @@ class CustomerBooking {
   final String? pickupAddress;
   final String? destinationAddress;
   final String? flightNumber;
+  final DateTime? flightDate;
+  final String? flightTime;
   final int? passengerCount;
   final int? luggageCount;
   final String? luggageSize;
@@ -92,7 +108,10 @@ class CustomerBooking {
         _ => tripType?.trim() ?? '',
       };
 
-  String get statusLabel => switch (normalizedStatus) {
+  String get statusLabel =>
+      switch (assignedTripStatus == null || assignedTripStatus == 'ASSIGNED'
+          ? normalizedStatus
+          : assignedTripStatus) {
         'PENDING' || 'PENDING_VERIFICATION' => 'Pending verification',
         'CONFIRMED' => 'Confirmed',
         'ASSIGNED' => 'Driver assigned',
@@ -121,11 +140,10 @@ class CustomerBooking {
 
   bool get isCompleted => normalizedStatus == 'COMPLETED';
 
-  bool get canCancel => !activeAssignment && const {
-        'PENDING',
-        'PENDING_VERIFICATION',
-        'CONFIRMED',
-      }.contains(normalizedStatus);
+  bool get canCancel => isPending
+      ? !activeAssignment
+      : normalizedStatus == 'CONFIRMED' &&
+          (assignedTripStatus == null || assignedTripStatus == 'ASSIGNED');
 
   factory CustomerBooking.fromJson(Map<String, dynamic> json) {
     final id = _integer(json['bookingId']);
@@ -136,7 +154,17 @@ class CustomerBooking {
       );
     }
 
+    final assignment = json['assignment'];
+    final confirmed = assignment is Map<String, dynamic>
+        ? assignment
+        : const <String, dynamic>{};
     return CustomerBooking(
+      assignedDriver: _string(confirmed['driverName']),
+      assignedVehicleModel: _string(confirmed['vehicleModel']),
+      assignedVehiclePlate: _string(confirmed['vehiclePlate']),
+      assignedVehicleCategory: _string(confirmed['vehicleCategory']),
+      assignedTripStatus: _string(confirmed['tripStatus']),
+      reservationStatus: _string(json['reservationStatus']),
       smallCount: _integer(json['smallCount']),
       mediumCount: _integer(json['mediumCount']),
       largeCount: _integer(json['largeCount']),
@@ -162,6 +190,8 @@ class CustomerBooking {
       pickupAddress: _string(json['pickupAddress']),
       destinationAddress: _string(json['destinationAddress']),
       flightNumber: _string(json['flightNo']),
+      flightDate: _date(json['flightDate']),
+      flightTime: _string(json['flightTime']),
       passengerCount: _integer(json['passengerCount']),
       luggageCount: _integer(json['luggageCount']),
       luggageSize: _string(json['luggageSize']),

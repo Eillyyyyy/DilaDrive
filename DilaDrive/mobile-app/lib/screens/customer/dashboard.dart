@@ -5,6 +5,7 @@ import '../../models/customer_booking_ordering.dart';
 import '../../models/mobile_user.dart';
 import '../../services/customer_booking_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/responsive_page.dart';
 import '../auth/login.dart';
 import 'booking_details.dart';
 
@@ -69,7 +70,7 @@ class _CustomerDashboardPageState extends State<CustomerDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -113,86 +114,81 @@ class _CustomerDashboardPageState extends State<CustomerDashboardPage> {
             ..sort(CustomerBookingOrdering.newestFirst);
           final latestBookings = recentBookings.take(3).toList(growable: false);
 
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: RefreshIndicator(
-                onRefresh: _refresh,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: pagePadding(context, bottom: 28),
+              children: [
+                _TransportHeroCard(
+                  customerName: widget.customer.name,
+                  onBook: widget.onCreateBooking,
+                ),
+                const SizedBox(height: 18),
+                Row(
                   children: [
-                    _TransportHeroCard(
-                      customerName: widget.customer.name,
-                      onBook: widget.onCreateBooking,
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _StatCard(
-                            label: 'Pending',
-                            value: pendingCount,
-                            color: Colors.orange,
-                            icon: Icons.hourglass_top_rounded,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _StatCard(
-                            label: 'Active',
-                            value: activeCount,
-                            color: AppTheme.secondarySkyBlue,
-                            icon: Icons.local_shipping_outlined,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _StatCard(
-                            label: 'Completed',
-                            value: completedCount,
-                            color: Colors.green,
-                            icon: Icons.task_alt_rounded,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 26),
-                    const _SectionHeading('Active booking'),
-                    const SizedBox(height: 12),
-                    if (activeBookings.isEmpty)
-                      const _EmptyCard(
-                        icon: Icons.route_outlined,
-                        title: 'No active bookings',
-                        message: 'Your confirmed trips will appear here.',
-                      )
-                    else
-                      _BookingSummaryCard(
-                        booking: activeBookings.first,
-                        onTap: () => _openBooking(activeBookings.first),
+                    Expanded(
+                      child: _StatCard(
+                        label: 'Pending',
+                        value: pendingCount,
+                        color: Colors.orange,
+                        icon: Icons.hourglass_top_rounded,
                       ),
-                    const SizedBox(height: 26),
-                    const _SectionHeading('Recent bookings'),
-                    const SizedBox(height: 12),
-                    if (latestBookings.isEmpty)
-                      const _EmptyCard(
-                        icon: Icons.event_note_outlined,
-                        title: 'No bookings yet',
-                        message: 'Create a booking to see it here.',
-                      )
-                    else
-                      ...latestBookings.map(
-                        (booking) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _RecentBookingCard(
-                            booking: booking,
-                            onTap: () => _openBooking(booking),
-                          ),
-                        ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _StatCard(
+                        label: 'Active',
+                        value: activeCount,
+                        color: AppTheme.secondarySkyBlue,
+                        icon: Icons.local_shipping_outlined,
                       ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _StatCard(
+                        label: 'Completed',
+                        value: completedCount,
+                        color: Colors.green,
+                        icon: Icons.task_alt_rounded,
+                      ),
+                    ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 26),
+                const _SectionHeading('Active booking'),
+                const SizedBox(height: 12),
+                if (activeBookings.isEmpty)
+                  const _EmptyCard(
+                    icon: Icons.route_outlined,
+                    title: 'No active bookings',
+                    message: 'Your confirmed trips will appear here.',
+                  )
+                else
+                  _BookingSummaryCard(
+                    booking: activeBookings.first,
+                    onTap: () => _openBooking(activeBookings.first),
+                  ),
+                const SizedBox(height: 26),
+                const _SectionHeading('Recent bookings'),
+                const SizedBox(height: 12),
+                if (latestBookings.isEmpty)
+                  const _EmptyCard(
+                    icon: Icons.event_note_outlined,
+                    title: 'No bookings yet',
+                    message: 'Create a booking to see it here.',
+                  )
+                else
+                  ...latestBookings.map(
+                    (booking) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _RecentBookingCard(
+                        booking: booking,
+                        onTap: () => _openBooking(booking),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           );
         },
@@ -266,7 +262,11 @@ class _TransportHeroCard extends StatelessWidget {
           const SizedBox(height: 15),
           const Text(
             'Where are you\ngoing?',
-            style: TextStyle(color: Colors.white, fontSize: 25, height: 1.12, fontWeight: FontWeight.w800),
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 25,
+                height: 1.12,
+                fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -362,7 +362,8 @@ class _PlaceHintRow extends StatelessWidget {
               ],
             ),
           ),
-          const Icon(Icons.chevron_right_rounded, color: AppTheme.secondaryText, size: 20),
+          const Icon(Icons.chevron_right_rounded,
+              color: AppTheme.secondaryText, size: 20),
         ],
       );
 }

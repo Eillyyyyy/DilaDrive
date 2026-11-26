@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+
 import '../../theme/app_theme.dart';
 
 class VerificationPage extends StatelessWidget {
   const VerificationPage({super.key});
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: const Text('Verification photos')),
         body: const Center(

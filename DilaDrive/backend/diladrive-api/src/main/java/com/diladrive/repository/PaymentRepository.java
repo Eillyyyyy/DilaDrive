@@ -14,6 +14,7 @@ import java.util.Optional;
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
     List<Payment> findAllByOrderBySubmittedAtDesc();
     List<Payment> findByBookingCustIdOrderBySubmittedAtDesc(Long customerId);
+    Optional<Payment> findByPaymentIdAndBookingCustId(Long paymentId, Long customerId);
     boolean existsByBookingBookingIdAndPaymentStatus(Long bookingId, String status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

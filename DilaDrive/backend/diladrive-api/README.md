@@ -1,9 +1,19 @@
 # DilaDrive Spring Boot API
 
-Run with Java 17+, Maven, and PostgreSQL:
-```bash
-mvn spring-boot:run
+Run with Java 17+, Maven, and PostgreSQL. From this directory in PowerShell:
+
+```powershell
+.\run-local.ps1
 ```
+
+The local launcher uses `postgres` for PostgreSQL. To launch with a custom
+password, set `DATABASE_PASSWORD` and run `./run-local.ps1 -UseConfiguredDatabasePassword`.
+Direct Maven runs use the password from the environment or the development default.
+
+Driver account creation requires `DRIVER_DATA_MASTER_KEY`. The local and development
+profiles can load it from the ignored `driver-data.env.local` file in this backend
+directory. Keep the same key across restarts. For a database with existing encrypted
+fleet records, use its original key.
 
 With no active profile, `development` allows credentialed HTTP requests from
 `localhost` and `127.0.0.1` on any port (Flutter Web and React Admin). The `local`
@@ -32,7 +42,7 @@ with environment variables rather than editing `application.properties`:
 | `DATABASE_PORT` | PostgreSQL port | `5432` |
 | `DATABASE_NAME` | PostgreSQL database name | `DilaDrive` |
 | `DATABASE_USERNAME` | PostgreSQL user | `postgres` |
-| `DATABASE_PASSWORD` | PostgreSQL password | `postgres` (local development only) |
+| `DATABASE_PASSWORD` | PostgreSQL password | `postgres` in local/development. Required in deployment. |
 | `JPA_DDL_AUTO` | Hibernate schema mode | `validate` |
 | `JPA_SHOW_SQL` | Log generated SQL | `true` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins; exact origins in production | Development/local: loopback on any port; other profiles: `http://localhost:5173` |

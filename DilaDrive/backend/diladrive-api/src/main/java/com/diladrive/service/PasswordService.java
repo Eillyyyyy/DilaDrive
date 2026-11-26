@@ -10,6 +10,7 @@ public class PasswordService {
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
+    // TODO: Remove legacy plaintext matching after all deployed databases report zero legacy accounts.
     public boolean matches(String rawPassword, String storedPassword) {
         if (rawPassword == null || storedPassword == null) {
             return false;

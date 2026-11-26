@@ -1,3 +1,10 @@
+import useModalScrollLock from "../components/useModalScrollLock";
+import useRecordFocus from "../services/useRecordFocus";
+import AssignmentSchedule from "../components/AssignmentSchedule";
+import UnavailablePeriods from "../components/UnavailablePeriods";
+import BootCapacityReference from "../components/BootCapacityReference";
+import DocumentUploadField from "../components/DocumentUploadField";
+import SecureDocumentPreview from "../components/SecureDocumentPreview";
 
 import { useMemo, useState, useEffect } from "react";
 import api from "../services/api";
@@ -31,15 +38,18 @@ const formatApiVehicle = (vehicle, drivers = []) => {
     plate: vehicle.vehiclePlateno || "",
     model: vehicle.vehicleModel || "",
     type: vehicle.vehicleType || "",
+    categoryId: vehicle.vehicleCategoryId ?? "",
+    ownership: vehicle.vehicleOwnership === "COMPANY_OWNED"
+      ? "Company-Owned" : vehicle.vehicleOwnership === "DRIVER_OWNED"
+        ? "Driver-Owned" : "",
+    roadTaxDocument: vehicle.roadTaxDocument || null,
     capacity: vehicle.vehicleCapacity ?? "",
-    luggageCapacity: vehicle.vehicleLuggageCapacity ?? "",
-    maxLargeLuggage: vehicle.maxLargeLuggage ?? "",
-    maxBackpacks: vehicle.maxBackpacks ?? "",
+    luggageCapacity: vehicle.bootCapacityUnits ?? vehicle.vehicleLuggageCapacity ?? "",
     roadTaxExpiry: vehicle.vehicleRoadtaxexpiry || "",
     serviceExpiry: vehicle.vehicleServiceexpiry || "",
     status:
-      status === "AVAILABLE"
-        ? "Available"
+      status === "AVAILABLE" || status === "ACTIVE"
+        ? "Active"
         : ["IN_USE", "UNAVAILABLE"].includes(status)
           ? "Inactive"
           : status === "MAINTENANCE"
@@ -57,7 +67,7 @@ const getErrorMessage = (error) => {
     || "The vehicle request could not be completed.";
 };
 
-export default function Vehicles() {
+export default function Vehicles({ recordFocus, onRecordOpened }) {
   const [vehicleList, setVehicleList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingVehicleId, setLoadingVehicleId] = useState(null);
@@ -66,15 +76,20 @@ export default function Vehicles() {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [error, setError] = useState("");
   const [drivers, setDrivers] = useState([]);
+  const [vehicleCategories, setVehicleCategories] = useState([]);
   const [editingVehicle, setEditingVehicle] = useState(null);
   const [savingVehicle, setSavingVehicle] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(-1);
   const [notice, setNotice] = useState("");
 
   async function fetchVehicles() {
     setLoading(true);
     try {
-      const [vehicles, driverResponse] = await Promise.all([api.get("/vehicles"), api.get("/drivers")]);
+      const [vehicles, driverResponse, categoryResponse] = await Promise.all([
+        api.get("/vehicles"), api.get("/drivers"), api.get("/vehicles/categories"),
+      ]);
       setDrivers(driverResponse.data);
+      setVehicleCategories(categoryResponse.data);
       setVehicleList(vehicles.data.map(vehicle => formatApiVehicle(vehicle, driverResponse.data)));
       setError("");
     } catch (requestError) {
@@ -86,6 +101,8 @@ export default function Vehicles() {
 
   useEffect(() => {
     fetchVehicles();
+    window.addEventListener("diladrive:fleet-changed", fetchVehicles);
+    return () => window.removeEventListener("diladrive:fleet-changed", fetchVehicles);
   }, []);
 
   const statuses = [...new Set(vehicleList.map(vehicle => vehicle.status))].sort();
@@ -129,6 +146,7 @@ export default function Vehicles() {
 
   const getStatusStyle = (status) => {
     switch (status) {
+      case "Active":
       case "Available":
         return "bg-emerald-50 text-emerald-700 ring-emerald-600/20";
       case "Inactive":
@@ -176,7 +194,10 @@ export default function Vehicles() {
     setError("");
     try {
       const { data } = await api.get(`/vehicles/${vehicle.vehicleId}`);
-      setSelectedVehicle(formatApiVehicle(data, drivers));
+      setSelectedVehicle({
+        ...formatApiVehicle(data, drivers),
+        roadTaxDocument: data.roadTaxDocument,
+      });
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
@@ -184,26 +205,54 @@ export default function Vehicles() {
     }
   };
 
+  useRecordFocus({ id: recordFocus, items: vehicleList, idKey: "vehicleId", loading,
+    error, open: viewVehicle, complete: onRecordOpened });
+
   const saveVehicle = async event => {
     event.preventDefault();
     setSavingVehicle(true);
+    setUploadProgress(0);
     setError("");
     setNotice("");
     try {
       const v = editingVehicle;
-      await api.put(`/vehicles/${v.vehicleId}`, {
-        vehicleModel: v.model.trim(), vehiclePlateno: v.plate.trim().toUpperCase(), vehicleType: v.type.trim(),
-        vehicleCapacity: Number(v.capacity), vehicleLuggageCapacity: Number(v.luggageCapacity),
-        maxLargeLuggage: v.maxLargeLuggage === "" ? null : Number(v.maxLargeLuggage),
-        maxBackpacks: v.maxBackpacks === "" ? null : Number(v.maxBackpacks),
+      const payload = {
+        vehicleModel: v.model.trim(), vehiclePlateno: v.plate.trim().toUpperCase(),
+        vehicleCategoryId: v.categoryId ? Number(v.categoryId) : null,
+        vehicleOwnership: v.ownership === "Company-Owned" ? "COMPANY_OWNED" : "DRIVER_OWNED",
         vehicleRoadtaxexpiry: v.roadTaxExpiry || null, vehicleServiceexpiry: v.serviceExpiry || null,
-        vehicleStatus: v.status.toUpperCase(),
+        vehicleStatus: ["Active", "Available"].includes(v.status) ? "AVAILABLE" : v.status.toUpperCase(),
+      };
+      const form = new FormData();
+      form.append("vehicle", new Blob([JSON.stringify(payload)], { type: "application/json" }));
+      if (v.roadTaxDocumentFile) form.append("roadTaxDocument", v.roadTaxDocumentFile);
+      await api.put(`/vehicles/${v.vehicleId}`, form, {
+        onUploadProgress: (event) => {
+          if (event.total) setUploadProgress(Math.round((event.loaded / event.total) * 100));
+        },
       });
       setEditingVehicle(null);
       setNotice("Vehicle updated successfully.");
+      window.dispatchEvent(new Event("diladrive:fleet-changed"));
       await fetchVehicles();
     } catch (requestError) { setError(getErrorMessage(requestError)); }
-    finally { setSavingVehicle(false); }
+    finally { setSavingVehicle(false); setUploadProgress(-1); }
+  };
+
+  const editVehicle = async (vehicle) => {
+    if (!vehicle.vehicleId) return;
+    setError("");
+    try {
+      const { data } = await api.get(`/vehicles/${vehicle.vehicleId}`);
+      setEditingVehicle({
+        ...formatApiVehicle(data, drivers),
+        roadTaxDocument: data.roadTaxDocument || null,
+        roadTaxDocumentFile: null,
+      });
+      setSelectedVehicle(null);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    }
   };
 
   const summaryCards = [
@@ -445,11 +494,11 @@ export default function Vehicles() {
                   </td>
 
                   <td className="px-6 py-4">
-                    <DateCell date={vehicle.roadTaxExpiry} formatDate={formatDate} />
+                    <DateCell date={vehicle.roadTaxExpiry} formatDate={formatDate} kind="Road tax" />
                   </td>
 
                   <td className="px-6 py-4">
-                    <DateCell date={vehicle.serviceExpiry} formatDate={formatDate} />
+                    <DateCell date={vehicle.serviceExpiry} formatDate={formatDate} kind="Service" />
                   </td>
 
                   <td className="px-6 py-4">
@@ -480,7 +529,7 @@ export default function Vehicles() {
                           : "View"}
                       </button>
                       <button type="button" title="Edit vehicle" aria-label={`Edit ${vehicle.plate}`}
-                        onClick={() => {setEditingVehicle({...vehicle}); setSelectedVehicle(null); setError(""); setNotice("");}}
+                        onClick={() => {setNotice(""); editVehicle(vehicle);}}
                         className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white hover:bg-teal-800">
                         <Pencil size={16} /> Edit
                       </button>
@@ -548,29 +597,68 @@ export default function Vehicles() {
           </section>
           <fieldset disabled={savingVehicle} className="grid gap-4 sm:grid-cols-2">
             {[["model", "Vehicle Model", "text", true], ["plate", "Plate Number", "text", true],
-              ["type", "Vehicle Type", "text", true], ["capacity", "Passenger Capacity", "number", true],
-              ["luggageCapacity", "Luggage Capacity (points)", "number", true],
-              ["maxLargeLuggage", "Maximum Large Luggage", "number", false],
-              ["maxBackpacks", "Maximum Backpacks", "number", false],
-              ["roadTaxExpiry", "Road Tax Expiry Date", "date", false],
-              ["serviceExpiry", "Next Service Date", "date", false]].map(([key, label, type, required]) => <label key={key} className="block text-sm font-medium text-slate-700">
+              ["roadTaxExpiry", "Road Tax Expiry Date", "date", true],
+              ["serviceExpiry", "Next Service Date", "date", true]].map(([key, label, type, required]) => <label key={key} className="block text-sm font-medium text-slate-700">
                 <span className="mb-2 block">{label}{required ? " *" : ""}</span>
-                <input type={type} required={required} min={key === "capacity" ? 1 : 0} step={type === "number" ? 1 : undefined}
+                <input type={type} required={required}
                   value={editingVehicle[key] ?? ""} onChange={event => setEditingVehicle(previous => ({...previous, [key]: event.target.value}))}
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm focus:border-teal-600" />
               </label>)}
+            <label className="block text-sm font-medium text-slate-700">
+              <span className="mb-2 block">Vehicle Category *</span>
+              <select required value={editingVehicle.categoryId} onChange={event => {
+                const category = vehicleCategories.find(item => String(item.vehicleCategoryId) === event.target.value);
+                setEditingVehicle(previous => ({
+                  ...previous, categoryId: event.target.value,
+                  type: category?.displayName || "",
+                  capacity: category?.maxPassengerCapacity ?? "",
+                  luggageCapacity: category?.bootCapacityUnits ?? "",
+                }));
+              }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select category</option>
+                {vehicleCategories.map(category => <option key={category.vehicleCategoryId} value={category.vehicleCategoryId}>
+                  {category.displayName} · up to {category.maxPassengerCapacity}
+                </option>)}
+              </select>
+            </label>
+            {[
+              ["Passenger Capacity", editingVehicle.capacity],
+              ["Boot Capacity (Luggage Units)", editingVehicle.luggageCapacity],
+            ].map(([label, value]) => (
+              <label key={label} className="block text-sm font-medium text-slate-700">
+                <span className="mb-2 block">{label}</span>
+                <input readOnly value={value} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              </label>
+            ))}
+            <label className="block text-sm font-medium text-slate-700">
+              <span className="mb-2 block">Vehicle Ownership *</span>
+              <select required value={editingVehicle.ownership} onChange={event => setEditingVehicle(previous => ({...previous, ownership: event.target.value}))}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select ownership</option>
+                <option value="Driver-Owned">Driver-Owned</option>
+                <option value="Company-Owned">Company-Owned</option>
+              </select>
+            </label>
             <label className="block text-sm font-medium text-slate-700"><span className="mb-2 block">Vehicle Status</span>
               <select value={editingVehicle.status} onChange={event => setEditingVehicle(previous => ({...previous, status: event.target.value}))}
                 className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">
-                {["Available", "Maintenance", "Inactive"].map(status => <option key={status}>{status}</option>)}
+                {["Active", "Maintenance", "Inactive"].map(status => <option key={status}>{status}</option>)}
               </select>
             </label>
+            <div className="sm:col-span-2">
+              <p className="mb-2 text-xs text-slate-600">Small bag = 1 unit · Medium bag = 2 units · Large bag = 3 units</p>
+              <BootCapacityReference />
+            </div>
+            <div className="sm:col-span-2">
+              <DocumentUploadField
+                label="Road Tax Document"
+                file={editingVehicle.roadTaxDocumentFile}
+                onChange={file => setEditingVehicle(previous => ({...previous, roadTaxDocumentFile: file}))}
+                currentDocument={editingVehicle.roadTaxDocument}
+                progress={uploadProgress}
+              />
+            </div>
           </fieldset>
-          {(editingVehicle.maxLargeLuggage === "" || editingVehicle.maxBackpacks === "") && (
-            <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
-              Enter both verified luggage limits for this vehicle. The combined points limit still applies.
-            </p>
-          )}
           {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
           <div className="flex justify-end gap-3 border-t pt-4">
             <button type="button" disabled={savingVehicle} onClick={() => {setEditingVehicle(null); setError("");}} className="rounded-xl border px-4 py-2">Cancel</button>
@@ -612,6 +700,7 @@ export default function Vehicles() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <DetailItem icon={<Users size={17} />} label="Assigned Driver" value={selectedVehicle.driverName || "No assigned driver"} />
+              <DetailItem icon={<Truck size={17} />} label="Vehicle Category" value={selectedVehicle.type} />
               <DetailItem
                 icon={<Users size={17} />}
                 label="Passenger Capacity"
@@ -619,15 +708,13 @@ export default function Vehicles() {
               />
               <DetailItem
                 icon={<Luggage size={17} />}
-                label="Luggage Capacity"
+                label="Boot Capacity (Luggage Units)"
                 value={selectedVehicle.luggageCapacity === ""
                   ? "Not recorded"
-                  : `${selectedVehicle.luggageCapacity} points`}
+                  : `${selectedVehicle.luggageCapacity} units`}
               />
-              <DetailItem icon={<Luggage size={17} />} label="Maximum Large Luggage"
-                value={selectedVehicle.maxLargeLuggage === "" ? "Not configured" : String(selectedVehicle.maxLargeLuggage)} />
-              <DetailItem icon={<Luggage size={17} />} label="Maximum Backpacks"
-                value={selectedVehicle.maxBackpacks === "" ? "Not configured" : String(selectedVehicle.maxBackpacks)} />
+              <DetailItem icon={<CarFront size={17} />} label="Vehicle Ownership"
+                value={selectedVehicle.ownership || "Not recorded"} />
               <DetailItem
                 icon={<Truck size={17} />}
                 label="Vehicle Model"
@@ -649,7 +736,19 @@ export default function Vehicles() {
                 value={selectedVehicle.status}
               />
             </div>
+            <p className="text-xs text-slate-600">Small bag = 1 unit · Medium bag = 2 units · Large bag = 3 units</p>
+            <section className="rounded-xl border border-slate-200 p-4">
+              <p className="mb-2 text-sm font-semibold text-slate-900">Road Tax Document</p>
+              <SecureDocumentPreview documentInfo={selectedVehicle.roadTaxDocument} />
+            </section>
+            {selectedVehicle.serviceExpiry && selectedVehicle.serviceExpiry < new Date().toISOString().slice(0, 10) && (
+              <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Vehicle service is overdue. Schedule maintenance; this warning does not automatically restrict bookings.
+              </p>
+            )}
 
+            <AssignmentSchedule vehicleId={selectedVehicle.vehicleId} />
+            <UnavailablePeriods resource="VEHICLE" resourceId={selectedVehicle.vehicleId} />
             <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
               <button
                 type="button"
@@ -668,9 +767,11 @@ export default function Vehicles() {
 }
 
 function Modal({ title, subtitle, icon, onClose, children }) {
+  useModalScrollLock();
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 !m-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -679,9 +780,9 @@ function Modal({ title, subtitle, icon, onClose, children }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="my-auto w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        className="modal-panel flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
       >
-        <div className="flex items-start justify-between border-b border-slate-100 px-5 py-5 sm:px-6">
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 px-5 py-5 sm:px-6">
           <div className="flex items-start gap-3">
             <div className="rounded-xl bg-teal-50 p-3 text-teal-700">
               {icon}
@@ -706,7 +807,7 @@ function Modal({ title, subtitle, icon, onClose, children }) {
           </button>
         </div>
 
-        <div className="max-h-[75vh] overflow-y-auto p-5 sm:p-6">
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-6">
           {children}
         </div>
       </div>
@@ -730,7 +831,7 @@ function DetailItem({ icon, label, value }) {
   );
 }
 
-function DateCell({ date, formatDate }) {
+function DateCell({ date, formatDate, kind }) {
   if (!date) {
     return <span className="text-sm text-slate-400">Not set</span>;
   }
@@ -770,7 +871,9 @@ function DateCell({ date, formatDate }) {
             isExpired ? "text-rose-500" : "text-amber-600"
           }`}
         >
-          {isExpired ? "Expired" : "Due within 30 days"}
+          {isExpired
+            ? kind === "Service" ? "Overdue · maintenance warning" : "Expired"
+            : "Due within 30 days"}
         </p>
       )}
     </div>

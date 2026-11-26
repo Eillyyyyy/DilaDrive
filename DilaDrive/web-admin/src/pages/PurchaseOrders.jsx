@@ -6,9 +6,6 @@ export default function PurchaseOrders() {
           Purchase Orders
         </h1>
 
-        <button className="rounded-xl bg-teal-500 px-4 py-2 text-white">
-          Generate PO
-        </button>
       </header>
 
       <section className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">

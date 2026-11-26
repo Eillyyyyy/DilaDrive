@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/notifications")
@@ -26,6 +28,50 @@ public class NotificationController {
         return notificationService.getAdminNotifications(requireAdmin(request));
     }
 
+    @GetMapping("/inbox")
+    public NotificationService.InboxPage inbox(HttpServletRequest request,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "ALL") String status, @RequestParam(defaultValue = "") String type,
+            @RequestParam(defaultValue = "") String search) {
+        Long adminId = requireAdmin(request);
+        validatePage(page, size);
+        Boolean read = switch (status.toUpperCase(Locale.ROOT)) {
+            case "ALL" -> null;
+            case "READ" -> true;
+            case "UNREAD" -> false;
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown notification status.");
+        };
+        if (type.length() > 50 || search.length() > 200) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Notification filter is too long.");
+        }
+        return notificationService.inbox(adminId, page, size, read,
+                type.trim().toUpperCase(Locale.ROOT), search.trim());
+    }
+
+    @GetMapping("/sent/driver")
+    public NotificationService.InboxPage sentDriverNotifications(HttpServletRequest request,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        requireAdmin(request);
+        validatePage(page, size);
+        return notificationService.sentDriverNotifications(page, size);
+    }
+
+    @GetMapping("/unread-count")
+    public Map<String, Long> unreadCount(HttpServletRequest request) {
+        return Map.of("count", notificationService.unreadCount(requireAdmin(request)));
+    }
+
+    @PatchMapping("/read-all")
+    public Map<String, Long> markAllRead(HttpServletRequest request) {
+        return Map.of("count", notificationService.markAllRead(requireAdmin(request)));
+    }
+
+    private static void validatePage(int page, int size) {
+        if (page < 0 || page > 100000 || size < 1 || size > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid notification page.");
+        }
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public NotificationResponse createNotification(
@@ -35,14 +81,26 @@ public class NotificationController {
         return notificationService.createNotification(request);
     }
 
+    @MobilePagination.Paged
     @GetMapping("/driver/{driverId}")
     public List<NotificationResponse> getDriverNotifications(
             @PathVariable Long driverId,
             HttpServletRequest request) {
-        requireMobileOwnerOrAdmin(request, "DRIVER", driverId);
-        return notificationService.getDriverNotifications(driverId);
+        var session = request.getSession(false);
+        if (session != null && session.getAttribute("adminId") instanceof Long) {
+            return notificationService.getDriverNotifications(driverId);
+        }
+        if (!"DRIVER".equals(mobileRole(request))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Driver sign-in is required.");
+        }
+        Long sessionDriver = mobileUserId(request);
+        if (!sessionDriver.equals(driverId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "These notifications are not available to this account.");
+        }
+        return notificationService.getDriverNotifications(sessionDriver);
     }
 
+    @MobilePagination.Paged
     @GetMapping("/customer/mine")
     public List<NotificationResponse> getMyCustomerNotifications(
             HttpServletRequest request) {
@@ -71,20 +129,6 @@ public class NotificationController {
                     "Please sign in as an admin.");
         }
         return id;
-    }
-
-    private static void requireMobileOwnerOrAdmin(
-            HttpServletRequest request, String expectedRole, Long expectedId) {
-        var session = request.getSession(false);
-        if (session != null && session.getAttribute("adminId") instanceof Long) {
-            return;
-        }
-        String role = mobileRole(request);
-        Long id = mobileUserId(request);
-        if (!expectedRole.equals(role) || !expectedId.equals(id)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "These notifications are not available to this account.");
-        }
     }
 
     private static String mobileRole(HttpServletRequest request) {

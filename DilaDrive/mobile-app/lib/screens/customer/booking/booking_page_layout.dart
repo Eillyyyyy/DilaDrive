@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../../theme/app_theme.dart';
 
 import '../../../widgets/booking_step_indicator.dart';
+import '../../../widgets/responsive_page.dart';
+import 'booking_map_sheet.dart';
 
 const bookingNavy = AppTheme.primaryNavy;
 const bookingBlue = AppTheme.secondarySkyBlue;
@@ -32,7 +34,30 @@ class BookingPageLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    if (BookingSheetScroll.isEmbedded(context)) {
+      return BookingSheetContent(
+        action: FilledButton(
+          onPressed: actionEnabled && !isLoading ? onAction : null,
+          child: isLoading
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(actionLabel),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(subtitle),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
+      );
+    }
+    return DilaDriveScaffold(
       backgroundColor: bookingBackground,
       appBar: AppBar(
         title: const Text('Create Booking'),
@@ -44,47 +69,25 @@ class BookingPageLayout extends StatelessWidget {
         top: false,
         child: Column(
           children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: BookingStepIndicator(currentStep: currentStep),
-              ),
+            Padding(
+              padding: pagePadding(context, top: 0, bottom: 0),
+              child: BookingStepIndicator(currentStep: currentStep),
             ),
             Expanded(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 760),
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            color: bookingNavy,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          subtitle,
-                          style: const TextStyle(
-                            color: AppTheme.secondaryText,
-                            height: 1.4,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        child,
-                      ],
-                    ),
-                  ),
-                ),
+              child: ListView(
+                padding: pagePadding(context, top: 0, bottom: 20),
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.headlineSmall),
+                  const SizedBox(height: 6),
+                  Text(subtitle,
+                      style: const TextStyle(color: AppTheme.secondaryText)),
+                  const SizedBox(height: 20),
+                  child,
+                ],
               ),
             ),
             Container(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              padding: pagePadding(context, top: 12, bottom: 16),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 boxShadow: [
@@ -95,40 +98,35 @@ class BookingPageLayout extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 760),
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton(
-                      onPressed: actionEnabled && !isLoading ? onAction : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: bookingNavy,
-                        disabledBackgroundColor: AppTheme.border,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                      ),
-                      child: isLoading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Text(
-                              actionLabel,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
+              child: SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: ElevatedButton(
+                  onPressed: actionEnabled && !isLoading ? onAction : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: bookingNavy,
+                    disabledBackgroundColor: AppTheme.border,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                   ),
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          actionLabel,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                 ),
               ),
             ),
@@ -208,4 +206,11 @@ String bookingDateLabel(DateTime? date) {
 String bookingTimeLabel(BuildContext context, DateTime? time) {
   if (time == null) return 'Select a time';
   return TimeOfDay.fromDateTime(time).format(context);
+}
+
+/// Preserve the routing provider's sub-metre precision for fare review.
+String bookingDistanceLabel(double kilometres) {
+  final distance = kilometres.toStringAsFixed(4).replaceFirstMapped(
+      RegExp(r'(\.\d{2}\d*?)0+$'), (match) => match.group(1)!);
+  return '$distance km';
 }

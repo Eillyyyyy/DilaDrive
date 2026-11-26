@@ -19,10 +19,6 @@ export default function Invoices() {
             Generate Invoice
           </button>
 
-          <button className="rounded-xl bg-orange-500 px-4 py-2 text-white hover:bg-orange-600">
-            Generate PO
-          </button>
-
           <button className="rounded-xl bg-green-600 px-4 py-2 text-white hover:bg-green-700">
             Generate Receipt
           </button>

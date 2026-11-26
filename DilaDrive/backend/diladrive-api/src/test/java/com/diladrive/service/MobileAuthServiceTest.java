@@ -37,7 +37,7 @@ class MobileAuthServiceTest {
     void driverSelfRegistrationRoleIsRejected() {
         try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
             var violations = factory.getValidator().validate(new MobileRegistrationRequest(
-                    "Driver", "driver@example.com", null, "DRIVER", null, null, "password123"));
+                    "Driver", "driver@example.com", null, "DRIVER", null, null, null, null, "Password123", "Password123"));
             assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("type")));
         }
     }
@@ -103,19 +103,21 @@ class MobileAuthServiceTest {
                 .thenReturn(Optional.empty());
 
         service.registerCustomer(new MobileRegistrationRequest(
-                "  Company Owner ", " owner@example.com ", " 0123 ", "company",
-                " Example Sdn Bhd ", " 123456-A ", "secure-pass-123"));
+                null, " OWNER@example.com ", " 0123456789 ", "company",
+                " Example Sdn Bhd ", " 123456-A ", " Example Address ", " Company Owner ", "Secure-pass-123", "Secure-pass-123"));
 
         var captor = org.mockito.ArgumentCaptor.forClass(Customer.class);
         verify(customerRepository).saveAndFlush(captor.capture());
         Customer saved = captor.getValue();
-        assertEquals("Company Owner", saved.getCustName());
+        assertEquals("Example Sdn Bhd", saved.getCustName());
+        assertEquals("Company Owner", saved.getContactPerson());
+        assertEquals("Example Address", saved.getCompanyAddress());
         assertEquals("owner@example.com", saved.getCustEmail());
         assertEquals("COMPANY", saved.getCustType());
         assertEquals("PENDING", saved.getCustStatus());
         assertEquals("Example Sdn Bhd", saved.getCompanyName());
         assertEquals("123456-A", saved.getCompanyRegistrationNumber());
-        assertTrue(new BCryptPasswordEncoder().matches("secure-pass-123", saved.getCustPassword()));
+        assertTrue(new BCryptPasswordEncoder().matches("Secure-pass-123", saved.getCustPassword()));
     }
 
     @Test
@@ -125,8 +127,8 @@ class MobileAuthServiceTest {
 
         var exception = assertThrows(org.springframework.web.server.ResponseStatusException.class,
                 () -> service.registerCustomer(new MobileRegistrationRequest(
-                        "Customer", "customer@example.com", null, "NORMAL", null, null,
-                        "secure-pass-123")));
+                        "Customer", "customer@example.com", null, "NORMAL", null, null, null, null,
+                        "Secure-pass-123", "Secure-pass-123")));
 
         assertEquals(409, exception.getStatusCode().value());
         verify(customerRepository, never()).saveAndFlush(any());
@@ -139,8 +141,8 @@ class MobileAuthServiceTest {
 
         assertThrows(org.springframework.web.server.ResponseStatusException.class,
                 () -> service.registerCustomer(new MobileRegistrationRequest(
-                        "Customer", "customer@example.com", null, "COMPANY", null, null,
-                        "secure-pass-123")));
+                        "Customer", "customer@example.com", null, "COMPANY", null, null, null, null,
+                        "Secure-pass-123", "Secure-pass-123")));
         verify(customerRepository, never()).saveAndFlush(any());
     }
 

@@ -29,14 +29,17 @@ public record CustomerBookingResponse(
         Long durationSeconds, Double pickupLatitude, Double pickupLongitude,
         Double destinationLatitude, Double destinationLongitude,
         String contactName, String contactPhone, String rejectionReason,
-        BigDecimal finalFare, BigDecimal payableFare, Boolean activeAssignment) {
+        BigDecimal finalFare, BigDecimal payableFare, Boolean activeAssignment,
+        LocalDate flightDate, LocalTime flightTime, ConfirmedAssignment assignment, String reservationStatus) {
+    public record ConfirmedAssignment(String driverName, String vehicleModel, String vehiclePlate,
+                                      String vehicleCategory, String tripStatus) { }
     public CustomerBookingResponse(Long bookingId,String bookingType,String tripType,String notes,
             LocalDate tripDate,LocalTime pickupTime,String pickupAddress,String destinationAddress,String flightNo,
             Integer passengerCount,Integer luggageCount,String luggageSize,Double distanceKm,Double waitingHour,
             BigDecimal tripFare,String status,LocalDateTime createdAt) {
         this(bookingId,bookingType,tripType,notes,tripDate,pickupTime,pickupAddress,destinationAddress,flightNo,
             passengerCount,luggageCount,luggageSize,distanceKm,waitingHour,tripFare,status,createdAt,
-            null,null,null,null,null,null,null,null,null,null,null,null,null,null,null);
+            null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null);
     }
 
     public static CustomerBookingResponse from(Booking booking) {
@@ -45,6 +48,11 @@ public record CustomerBookingResponse(
 
     public static CustomerBookingResponse from(Booking booking, BigDecimal finalFare, BigDecimal payableFare,
                                                Boolean activeAssignment) {
+        return from(booking, finalFare, payableFare, activeAssignment, null, null);
+    }
+
+    public static CustomerBookingResponse from(Booking booking, BigDecimal finalFare, BigDecimal payableFare,
+                                               Boolean activeAssignment, ConfirmedAssignment assignment, String reservationStatus) {
         return new CustomerBookingResponse(
                 booking.getBookingId(),
                 booking.getBookingType(),
@@ -67,6 +75,6 @@ public record CustomerBookingResponse(
                 booking.getDurationSeconds(),booking.getPickupLatitude(),booking.getPickupLongitude(),
                 booking.getDestinationLatitude(),booking.getDestinationLongitude(),
                 booking.getContactName(),booking.getContactPhone(),booking.getRejectionReason(),
-                finalFare,payableFare,activeAssignment);
+                finalFare,payableFare,activeAssignment,booking.getFlightDate(),booking.getFlightTime(),assignment,reservationStatus);
     }
 }

@@ -123,7 +123,7 @@ If driver creation, vehicle validation, or vehicle persistence fails, both write
 | `PUT /api/documents/{id}` | Update a draft or rejected quotation. |
 | `PUT /api/documents/{id}/approve` | Approve a draft quotation. |
 | `PUT /api/documents/{id}/reject` | Reject a draft quotation. |
-| `POST /api/documents/{id}/generate-po` | Generate a purchase order from an approved quotation. |
+| `POST /api/documents/{id}/record-po` | Record the client's purchase order reference against an approved quotation. |
 | `POST /api/documents/{id}/generate-invoice` | Generate an invoice from a purchase order or completed booking. Request body: `{"sourceType":"PURCHASE_ORDER"}` or `{"sourceType":"BOOKING"}`. |
 | `PUT /api/documents/{id}/mark-paid` | Mark an issued invoice as paid. |
 | `POST /api/documents/{id}/generate-receipt` | Generate a receipt for a paid invoice. |

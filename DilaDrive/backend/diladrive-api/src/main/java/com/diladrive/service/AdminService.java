@@ -24,12 +24,13 @@ public class AdminService {
     private PasswordService passwordService;
 
     public boolean login(String email, String password) {
-        if (email == null || password == null) {
+        if (email == null || email.length() > 254 || password == null
+                || password.getBytes(StandardCharsets.UTF_8).length > 72) {
             return false;
         }
 
         Admin admin = adminRepository
-                .findByEmailIgnoreCase(email.trim())
+                .findByEmailIgnoreCase(email.strip())
                 .orElse(null);
 
         if (admin == null) {
@@ -110,15 +111,18 @@ public class AdminService {
             if (imageBytes.length > 2 * 1024 * 1024) {
                 throw new IllegalArgumentException("The profile image must be PNG, JPG, or WebP up to 2 MB.");
             }
-        } else {
-            profileImage = null;
         }
 
+        if (!phone.isEmpty()) phone = ProfileUpdateValidation.phone(phone);
         admin.setName(name);
         admin.setEmail(updatedEmail);
-        admin.setPhone(phone);
-        admin.setAddress(address);
-        admin.setProfileImage(profileImage);
+        if (request.isClearPhone()) admin.setPhone(null);
+        else if (!phone.isEmpty()) admin.setPhone(phone);
+        if (request.isClearAddress()) admin.setAddress(null);
+        else if (!address.isEmpty()) admin.setAddress(address);
+        if (profileImage != null && (profileImage.isEmpty() || !profileImage.isBlank())) {
+            admin.setProfileImage(profileImage.isEmpty() ? null : profileImage);
+        }
         return new AdminProfileResponse(adminRepository.save(admin));
     }
 
@@ -145,7 +149,7 @@ public class AdminService {
     }
 
     private Admin findAdmin(String email) {
-        return adminRepository.findByEmailIgnoreCase(email.trim())
+        return adminRepository.findByEmailIgnoreCase(email.strip())
                 .orElseThrow(() -> new IllegalArgumentException("Admin profile was not found."));
     }
 

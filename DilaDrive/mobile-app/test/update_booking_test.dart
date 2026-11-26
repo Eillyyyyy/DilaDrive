@@ -22,6 +22,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(find.text('Flight number (optional)'), 120,
+        scrollable: find.byType(Scrollable).first);
     expect(find.text('Flight number (optional)'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

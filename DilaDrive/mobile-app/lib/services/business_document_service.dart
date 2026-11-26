@@ -24,7 +24,7 @@ class BusinessDocumentService {
     }
     late final http.Response response;
     try {
-      response = await _client.get(
+      response = await fetchMobilePages(_client,
         Uri.parse('${AppConfig.apiBaseUrl}/api/documents/customer/mine'),
         headers: {'Accept': 'application/json', ...MobileSession.headers},
       ).timeout(const Duration(seconds: 15));

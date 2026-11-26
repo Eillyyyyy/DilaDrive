@@ -108,6 +108,14 @@ public class DocumentPdfService {
     }
 
     public byte[] generate(DocumentDTO document) throws IOException {
+        return generate(document, false);
+    }
+
+    public byte[] generateForCustomer(DocumentDTO document) throws IOException {
+        return generate(document, true);
+    }
+
+    private byte[] generate(DocumentDTO document, boolean customerView) throws IOException {
         Booking booking = bookingRepository.findById(document.bookingId())
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
@@ -169,7 +177,7 @@ public class DocumentPdfService {
                                     assigned.getVehicle().getVehicleCapacity()))));
 
             layout.drawCard("DOCUMENT DETAILS", documentFields(
-                    document, sourceDocument));
+                    document, sourceDocument, customerView));
             layout.drawAmountTable(document, booking);
             layout.drawParagraph("REMARKS",
                     valueOr(document.remarks(), "No remarks provided."));
@@ -184,7 +192,7 @@ public class DocumentPdfService {
         }
     }
 
-    private List<PdfField> documentFields(DocumentDTO document, Document sourceDocument) {
+    private List<PdfField> documentFields(DocumentDTO document, Document sourceDocument, boolean customerView) {
         LocalDate issuedDate = document.createdAt() == null
                 ? LocalDate.now()
                 : document.createdAt().toLocalDate();
@@ -200,7 +208,8 @@ public class DocumentPdfService {
                                     : sourceDocument.getDocumentNumber()),
                     new PdfField("Purchase Order Reference",
                             valueOr(document.documentNumber(), "Not recorded")));
-            case INVOICE -> List.of(
+            case INVOICE -> customerView ? List.of(
+                    new PdfField("Invoice Due Date", formatDate(issuedDate.plusDays(invoiceDueDays)))) : List.of(
                     new PdfField("Invoice Due Date",
                             formatDate(issuedDate.plusDays(invoiceDueDays))),
                     new PdfField("Payment Status",

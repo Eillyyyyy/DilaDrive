@@ -49,6 +49,35 @@ void main() {
     service.dispose();
   });
 
+  test('customer inbox excludes payment and receipt notices only', () async {
+    MobileSession.storeResponseCookies(
+        {'set-cookie': 'JSESSIONID=customer-session'});
+    final service = CustomerNotificationService(client: MockClient((_) async {
+      final entries = [
+        ('PAYMENT_VERIFIED', 'Proof accepted'),
+        ('RECEIPT_ISSUED', 'Receipt ready'),
+        ('DOCUMENT', 'REC-17 is available in Business Documents.'),
+        ('DOCUMENT', 'INV-18 is available in Business Documents.'),
+        ('DRIVER_ASSIGNED', 'Your trip has been reassigned.'),
+      ];
+      return http.Response(
+          jsonEncode([
+            for (final (index, entry) in entries.indexed)
+              {
+                'notificationId': index,
+                'title': 'Update',
+                'message': entry.$2,
+                'notificationType': entry.$1,
+                'read': false
+              },
+          ]),
+          200);
+    }));
+    addTearDown(service.dispose);
+    expect((await service.getMyNotifications()).map((notice) => notice.id),
+        [3, 4]);
+  });
+
   test('marks a notification read through the owner-scoped endpoint', () async {
     MobileSession.storeResponseCookies({
       'set-cookie': 'JSESSIONID=customer-session; Path=/; HttpOnly',

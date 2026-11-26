@@ -14,14 +14,14 @@ import {
   LockKeyhole,
 } from "lucide-react";
 
-export default function Profile({ user, onSave, onChangePassword }) {
-  const getProfile = () => ({
-    name: user?.name || "DilaDrive Admin",
-    email: user?.email || "",
-    phone: user?.phone || "",
-    address: user?.address || "",
-    profileImage: user?.profileImage || "",
-    role: user?.role || "Administrator",
+export default function Profile({ user, onLoadEdit, onSave, onChangePassword }) {
+  const getProfile = (account = user) => ({
+    name: account?.name || "DilaDrive Admin",
+    email: account?.email || "",
+    phone: account?.phone || "",
+    address: account?.address || "",
+    profileImage: account?.profileImage || "",
+    role: account?.role || "Administrator",
   });
 
   const [form, setForm] = useState(getProfile);
@@ -37,15 +37,55 @@ export default function Profile({ user, onSave, onChangePassword }) {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const imageInputRef = useRef(null);
+  const editRequest = useRef(null);
+  const imageReader = useRef(null);
+  const saveInProgress = useRef(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [clearPhone, setClearPhone] = useState(false);
+  const [clearAddress, setClearAddress] = useState(false);
 
   useEffect(() => {
+    if (isEditing) return;
     const profile = getProfile();
     setForm(profile);
     setOriginalForm(profile);
   }, [user]);
 
+  useEffect(() => () => {
+    editRequest.current?.abort();
+    imageReader.current?.abort();
+  }, []);
+
+  async function openEditor() {
+    if (editRequest.current) return;
+    const request = new AbortController();
+    editRequest.current = request;
+    setEditLoading(true);
+    setMessage("");
+    setEditError("");
+    try {
+      const latest = getProfile(await onLoadEdit(request.signal));
+      if (request.signal.aborted) return;
+      setForm(latest);
+      setOriginalForm(latest);
+      setClearPhone(false);
+      setClearAddress(false);
+      setIsEditing(true);
+    } catch (error) {
+      if (!request.signal.aborted) {
+        setEditError(error.response?.data?.message || "Unable to load the latest profile. Please retry.");
+      }
+    } finally {
+      editRequest.current = null;
+      if (!request.signal.aborted) setEditLoading(false);
+    }
+  }
+
   function handleChange(e) {
     const { name, value } = e.target;
+    if (name === "phone") setClearPhone(false);
+    if (name === "address") setClearAddress(false);
 
     setForm((prev) => ({
       ...prev,
@@ -56,6 +96,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
   }
 
   function handleCancel() {
+    imageReader.current?.abort();
     setForm(originalForm);
     setIsEditing(false);
     if (imageInputRef.current) {
@@ -65,6 +106,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
   }
 
   function handleImageChange(e) {
+    imageReader.current?.abort();
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -84,6 +126,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
     }
 
     const reader = new FileReader();
+    imageReader.current = reader;
     reader.onload = () => {
       if (typeof reader.result === "string") {
         setForm((prev) => ({ ...prev, profileImage: reader.result }));
@@ -102,14 +145,19 @@ export default function Profile({ user, onSave, onChangePassword }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (saveInProgress.current || imageReader.current?.readyState === FileReader.LOADING) return;
 
     const updatedProfile = {
-      ...form,
       name: form.name.trim(),
       email: form.email.trim().toLowerCase(),
-      phone: form.phone.trim(),
-      address: form.address.trim(),
     };
+    const phone = form.phone.trim();
+    const address = form.address.trim();
+    if (clearPhone) updatedProfile.clearPhone = true;
+    else if (phone && phone !== originalForm.phone.trim()) updatedProfile.phone = phone;
+    if (clearAddress) updatedProfile.clearAddress = true;
+    else if (address && address !== originalForm.address.trim()) updatedProfile.address = address;
+    if (form.profileImage !== originalForm.profileImage) updatedProfile.profileImage = form.profileImage;
 
     if (!updatedProfile.name || !updatedProfile.email) {
       setMessage("Please enter your full name and email address.");
@@ -125,9 +173,10 @@ export default function Profile({ user, onSave, onChangePassword }) {
 
     if (
       updatedProfile.phone &&
-      !/^[0-9+\-\s()]{8,20}$/.test(updatedProfile.phone)
+      (phone.length > 30 || !/^\+?[0-9](?:[0-9 -]*[0-9])?$/.test(phone) ||
+        !/^(?:0|\+60|60)[1-9][0-9]{7,9}$/.test(phone.replace(/[ -]/g, "")))
     ) {
-      setMessage("Please enter a valid phone number.");
+      setMessage("Enter a valid Malaysian phone number.");
       setMessageType("error");
       return;
     }
@@ -139,6 +188,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
     }
 
     try {
+      saveInProgress.current = true;
       setSaving(true);
       setMessage("");
 
@@ -155,6 +205,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
       setMessage(error?.message || "Failed to update profile.");
       setMessageType("error");
     } finally {
+      saveInProgress.current = false;
       setSaving(false);
     }
   }
@@ -230,17 +281,21 @@ export default function Profile({ user, onSave, onChangePassword }) {
         {!isEditing && (
           <button
             type="button"
-            onClick={() => {
-              setMessage("");
-              setIsEditing(true);
-            }}
+            onClick={openEditor}
+            disabled={editLoading}
             className="flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-800"
           >
             <Pencil size={17} />
-            Edit Profile
+            {editLoading ? "Loading profile…" : "Edit Profile"}
           </button>
         )}
       </div>
+      {editError && (
+        <div role="alert" className="rounded-xl bg-red-50 p-4 text-red-700">
+          {editError}{" "}
+          <button type="button" onClick={openEditor} disabled={editLoading}>Retry</button>
+        </div>
+      )}
 
       {/* Profile Summary */}
       <div className="rounded-2xl bg-white p-5 shadow-sm sm:p-6">
@@ -265,12 +320,14 @@ export default function Profile({ user, onSave, onChangePassword }) {
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   onChange={handleImageChange}
+                  disabled={saving}
                   className="hidden"
                   aria-label="Choose profile image"
                 />
                 <button
                   type="button"
                   onClick={() => imageInputRef.current?.click()}
+                  disabled={saving}
                   className="absolute bottom-0 right-0 grid h-8 w-8 place-items-center rounded-full border-2 border-white bg-teal-700 text-white shadow-sm transition hover:bg-teal-800"
                   aria-label="Change profile image"
                   title="Change profile image"
@@ -299,6 +356,12 @@ export default function Profile({ user, onSave, onChangePassword }) {
         {isEditing && (
           <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-gray-500 sm:ml-24">
             <span>PNG, JPG or WebP (maximum 2 MB)</span>
+            {form.profileImage && (
+              <button type="button" disabled={saving} onClick={() => {
+                imageReader.current?.abort();
+                setForm((previous) => ({ ...previous, profileImage: "" }));
+              }}>Remove photo</button>
+            )}
           </div>
         )}
       </div>
@@ -347,7 +410,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
               name="name"
               value={form.name}
               onChange={handleChange}
-              editing={isEditing}
+              editing={isEditing && !saving}
               icon={UserRound}
               placeholder="Enter full name"
               required
@@ -358,7 +421,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
               name="email"
               value={form.email}
               onChange={handleChange}
-              editing={isEditing}
+              editing={isEditing && !saving}
               icon={Mail}
               type="email"
               placeholder="admin@example.com"
@@ -370,7 +433,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
               name="phone"
               value={form.phone}
               onChange={handleChange}
-              editing={isEditing}
+              editing={isEditing && !saving}
               icon={Phone}
               type="tel"
               placeholder="Enter phone number"
@@ -388,7 +451,7 @@ export default function Profile({ user, onSave, onChangePassword }) {
                 name="address"
                 value={form.address}
                 onChange={handleChange}
-                readOnly={!isEditing}
+                readOnly={!isEditing || saving}
                 maxLength={500}
                 rows={3}
                 placeholder="Enter your address"

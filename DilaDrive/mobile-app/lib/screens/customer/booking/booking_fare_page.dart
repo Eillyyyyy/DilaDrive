@@ -75,7 +75,8 @@ class _BookingFarePageState extends State<BookingFarePage> {
       onAction: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => BookingReviewPage(
-              draft: draft, bookingService: widget.bookingService,
+              draft: draft,
+              bookingService: widget.bookingService,
               requestDistanceReview: _distanceReviewAvailable),
         ),
       ),
@@ -130,10 +131,10 @@ class _BookingFarePageState extends State<BookingFarePage> {
             )
           else
             _FareBreakdown(estimate: estimate),
-            const Text(
-              'The estimate covers the road distance. Actual tolls, parking '
-              'and approved extra hours may be added to the final fare.',
-            ),
+          const Text(
+            'The estimate covers the road distance. Actual tolls, parking '
+            'and approved extra hours may be added to the final fare.',
+          ),
           const SizedBox(height: 14),
           BookingCard(
             child: Row(
@@ -143,13 +144,9 @@ class _BookingFarePageState extends State<BookingFarePage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    estimate != null
-                        ? 'Recommended Vehicle: '
-                            '${draft.recommendedVehicle!.type} Ã‚Â· '
-                            '${estimate.vehicleModel}'
-                        : 'Recommended vehicle: '
-                            '${draft.recommendedVehicle?.type ?? 'Pending'}'
-                            '${draft.recommendedVehicle == null ? '' : ' Ã‚Â· ${draft.recommendedVehicle!.model}'}',
+                    'Recommended Vehicle: '
+                    '${draft.recommendedVehicle?.type ?? 'Pending'}'
+                    '${draft.recommendedVehicle == null ? '' : ' \u00b7 ${draft.recommendedVehicle!.model}'}',
                     style: const TextStyle(
                       color: bookingNavy,
                       fontWeight: FontWeight.w600,
@@ -188,7 +185,7 @@ class _FareBreakdown extends StatelessWidget {
           const SizedBox(height: 16),
           _PriceRow(
             label: 'Distance (KM)',
-            value: '${estimate.distanceKm.toStringAsFixed(1)} km',
+            value: '${estimate.distanceKm.toStringAsFixed(2)} km',
           ),
           if (estimate.ratePerKm != null) ...[
             const SizedBox(height: 12),

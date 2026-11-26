@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
+import OperationsSummary from "../components/OperationsSummary";
+import DashboardSchedule from "../components/DashboardSchedule";
+import RecentIncidents from "../components/RecentIncidents";
+import { useEffect, useMemo, useState } from "react";
 import api from "../services/api";
+import useBookingSchedule from "../services/useBookingSchedule";
 import {
   ArrowRight,
   CalendarDays,
@@ -16,7 +19,7 @@ import DataTable from "../components/DataTable";
 const emptyStats = {
   totalBookings: null,
   pendingBookings: null,
-  activeDrivers: null,
+  availableDrivers: null,
   availableVehicles: null,
   activeAssignments: null,
   completedTrips: null,
@@ -68,71 +71,39 @@ const getSortDate = (booking) => {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 };
 
-export default function Dashboard({ onNavigate }) {
+export default function Dashboard({ onNavigate, onOpenCalendar, onOpenBooking }) {
   const [stats, setStats] = useState(emptyStats);
-  const [recentBookings, setRecentBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const schedule = useBookingSchedule();
+  const recentLoading = !schedule.data && schedule.loading;
+  const recentError = !schedule.data && schedule.error;
+  const recentBookings = useMemo(() => {
+    if (!schedule.data) return [];
+    const customerNames = new Map(schedule.data.customers.map(customer => [String(customer.custId), customer.custName]));
+    return schedule.data.bookings
+      .map(booking => ({
+        customer: booking.custName || booking.customerName || customerNames.get(String(booking.custId)) || "—",
+        route: `${booking.bookingPickupaddress || "—"} → ${booking.bookingDestinationaddress || "—"}`,
+        date: formatDate(getBookingDate(booking)),
+        status: formatStatus(booking.bookingStatus),
+        amount: formatCurrency(booking.bookingTripfare),
+        sortDate: getSortDate(booking),
+      }))
+      .sort((left, right) => right.sortDate - left.sortDate)
+      .slice(0, 5);
+  }, [schedule.data]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError("");
-
-    Promise.all([
-      api.get("/dashboard/stats", { signal: controller.signal }),
-      api.get("/bookings", { signal: controller.signal }),
-      api.get("/customers", { signal: controller.signal }),
-    ])
-      .then(([statsResponse, bookingsResponse, customersResponse]) => {
-        const customers = Array.isArray(customersResponse.data)
-          ? customersResponse.data
-          : [];
-        const customerNames = new Map(
-          customers.map((customer) => [
-            String(customer.custId),
-            customer.custName,
-          ])
-        );
-        const bookings = Array.isArray(bookingsResponse.data)
-          ? bookingsResponse.data
-          : [];
-
-        setStats({
-          totalBookings: statsResponse.data.totalBookings,
-          pendingBookings: statsResponse.data.pendingBookings,
-          activeDrivers: statsResponse.data.activeDrivers,
-          availableVehicles: statsResponse.data.availableVehicles,
-          activeAssignments: statsResponse.data.activeAssignments,
-          completedTrips: statsResponse.data.completedTrips,
-        });
-        setRecentBookings(
-          bookings
-            .map((booking) => ({
-              customer:
-                booking.custName ||
-                booking.customerName ||
-                customerNames.get(String(booking.custId)) ||
-                "—",
-              route: `${booking.bookingPickupaddress || "—"} → ${
-                booking.bookingDestinationaddress || "—"
-              }`,
-              date: formatDate(getBookingDate(booking)),
-              status: formatStatus(booking.bookingStatus),
-              amount: formatCurrency(booking.bookingTripfare),
-              sortDate: getSortDate(booking),
-            }))
-            .sort((left, right) => right.sortDate - left.sortDate)
-            .slice(0, 5)
-        );
-      })
-      .catch((requestError) => {
-        if (!axios.isCancel(requestError)) setError(getApiError(requestError));
+    api.get("/dashboard/stats", { signal: controller.signal })
+      .then(({ data }) => { if (!controller.signal.aborted) setStats(data); })
+      .catch(requestError => {
+        if (!controller.signal.aborted) setError(getApiError(requestError));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-
     return () => controller.abort();
   }, []);
 
@@ -154,17 +125,17 @@ export default function Dashboard({ onNavigate }) {
       bg: "bg-amber-50",
     },
     {
-      title: "Active Drivers",
-      value: stats.activeDrivers,
-      subtitle: "Active driver accounts",
+      title: "Available Drivers",
+      value: stats.availableDrivers,
+      subtitle: "Active drivers who are not on a trip",
       icon: Truck,
       color: "text-blue-600",
       bg: "bg-blue-50",
     },
     {
-      title: "Available Vehicles",
+      title: "Vehicles marked available",
       value: stats.availableVehicles,
-      subtitle: "Ready for assignment",
+      subtitle: "Operational status. Open Calendar for the schedule.",
       icon: Users,
       color: "text-violet-600",
       bg: "bg-violet-50",
@@ -172,7 +143,7 @@ export default function Dashboard({ onNavigate }) {
     {
       title: "Active Assignments",
       value: stats.activeAssignments,
-      subtitle: "Trips currently in progress",
+      subtitle: "Open assignments on confirmed and active bookings",
       icon: ClipboardList,
       color: "text-indigo-600",
       bg: "bg-indigo-50",
@@ -239,6 +210,7 @@ export default function Dashboard({ onNavigate }) {
         })}
       </div>
 
+      <DashboardSchedule schedule={schedule} onOpenCalendar={onOpenCalendar} onOpenBooking={onOpenBooking} />
       <section className="overflow-hidden rounded-2xl bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-gray-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
@@ -259,7 +231,7 @@ export default function Dashboard({ onNavigate }) {
         </div>
 
         <div className="p-4 sm:p-6">
-          {loading ? (
+          {recentLoading ? (
             <p className="py-12 text-center text-sm text-gray-500">
               Loading recent bookings…
             </p>
@@ -280,9 +252,9 @@ export default function Dashboard({ onNavigate }) {
                 <CalendarDays size={28} className="text-teal-700" />
               </div>
               <h3 className="mt-4 font-semibold text-gray-800">
-                {error ? "Bookings are unavailable" : "No bookings available"}
+                {recentError ? "Bookings are unavailable" : "No bookings available"}
               </h3>
-              {!error && (
+              {!recentError && (
                 <p className="mt-1 max-w-sm text-sm text-gray-500">
                   Booking records will appear here when available.
                 </p>
@@ -298,7 +270,7 @@ export default function Dashboard({ onNavigate }) {
           )}
         </div>
 
-        {!loading && recentBookings.length > 0 && (
+        {!recentLoading && recentBookings.length > 0 && (
           <div className="border-t border-gray-100 px-5 py-3 text-center sm:text-right">
             <button
               type="button"
@@ -310,6 +282,8 @@ export default function Dashboard({ onNavigate }) {
           </div>
         )}
       </section>
+      <OperationsSummary onNavigate={onNavigate} />
+      <RecentIncidents />
     </div>
   );
 }

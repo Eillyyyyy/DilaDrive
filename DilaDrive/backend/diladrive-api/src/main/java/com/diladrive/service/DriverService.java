@@ -9,11 +9,14 @@ import com.diladrive.dto.VehicleCreateRequest;
 import com.diladrive.entity.Driver;
 import com.diladrive.entity.Vehicle;
 import com.diladrive.repository.DriverRepository;
+import com.diladrive.dto.FleetDocumentMetadata;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
@@ -26,14 +29,25 @@ public class DriverService {
     private final DriverRepository driverRepository;
     private final VehicleService vehicleService;
     private final com.diladrive.repository.AssignmentRepository assignments;
+    private final FleetDataProtection dataProtection;
+    private final FleetDocumentService fleetDocuments;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public DriverService(
             DriverRepository driverRepository,
             VehicleService vehicleService, com.diladrive.repository.AssignmentRepository assignments) {
+        this(driverRepository, vehicleService, assignments, null, null);
+    }
+
+    @Autowired
+    public DriverService(DriverRepository driverRepository, VehicleService vehicleService,
+            com.diladrive.repository.AssignmentRepository assignments,
+            FleetDataProtection dataProtection, FleetDocumentService fleetDocuments) {
         this.driverRepository = driverRepository;
         this.vehicleService = vehicleService;
         this.assignments = assignments;
+        this.dataProtection = dataProtection;
+        this.fleetDocuments = fleetDocuments;
     }
 
     public List<Driver> getAllDrivers() {
@@ -43,6 +57,19 @@ public class DriverService {
     public List<Driver> getAvailableDrivers() {
         return driverRepository.findByDriverAvailabilityIgnoreCaseAndDriverStatusIgnoreCase(
                 "AVAILABLE", "ACTIVE");
+    }
+
+    @Transactional(readOnly = true)
+    public String maskedIc(Driver driver) {
+        String normalized = null;
+        if (driver.getDriverIcnoCiphertext() != null && dataProtection != null) {
+            normalized = dataProtection.decryptIc(driver.getDriverIcnoCiphertext());
+        } else if (driver.getDriverIcno() != null) {
+            normalized = normalizeLegacyIc(driver.getDriverIcno());
+        }
+        if (normalized == null || normalized.length() < 4) return null;
+        String digits = normalized.replaceAll("\\D", "");
+        return digits.length() < 4 ? null : "******-**-" + digits.substring(digits.length() - 4);
     }
 
     @Transactional(readOnly = true)
@@ -66,10 +93,10 @@ public class DriverService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This email address already exists.");
         }
-        if (request.profileImage() != null) driver.setProfileImage(validateProfileImage(request.profileImage()));
+        if (request.profileImage() != null) driver.setProfileImage(ProfileUpdateValidation.mobileImage(request.profileImage()));
         driver.setDriverName(request.name().trim());
         driver.setDriverEmail(email);
-        driver.setDriverPhoneno(request.phone().trim());
+        driver.setDriverPhoneno(ProfileUpdateValidation.phone(request.phone()));
         return profileResponse(driverRepository.save(driver));
     }
 
@@ -100,27 +127,6 @@ public class DriverService {
         driverRepository.save(driver);
     }
 
-    private String validateProfileImage(String image) {
-        if (image.isEmpty()) return null;
-        String message = "Choose a valid PNG, JPEG or WebP image smaller than 900 KB.";
-        if (image.length() > 1300000 || !image.matches("^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
-        }
-        try {
-            byte[] bytes = java.util.Base64.getDecoder().decode(image.substring(image.indexOf(',') + 1));
-            boolean png = bytes.length >= 8 && bytes[0] == (byte)137 && bytes[1] == 80 && bytes[2] == 78 && bytes[3] == 71;
-            boolean jpeg = bytes.length >= 3 && bytes[0] == (byte)255 && bytes[1] == (byte)216 && bytes[2] == (byte)255;
-            boolean webp = bytes.length >= 12 && new String(bytes, 0, 4, StandardCharsets.US_ASCII).equals("RIFF")
-                    && new String(bytes, 8, 4, StandardCharsets.US_ASCII).equals("WEBP");
-            boolean matches = (image.startsWith("data:image/png;") && png) || (image.startsWith("data:image/jpeg;") && jpeg)
-                    || (image.startsWith("data:image/webp;") && webp);
-            if (bytes.length > 900 * 1024 || !matches) throw new IllegalArgumentException();
-        } catch (IllegalArgumentException exception) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
-        }
-        return image;
-    }
-
     @Transactional
     public Driver createDriver(DriverCreateRequest request) {
         if (request == null || request.vehicle() == null) {
@@ -132,12 +138,14 @@ public class DriverService {
         driver.setDriverEmail(request.driverEmail());
         driver.setDriverPassword(request.driverPassword());
         driver.setDriverPhoneno(request.driverPhoneno());
-        driver.setDriverIcno(request.driverIcno());
         driver.setDriverLicenseno(request.driverLicenseno());
         driver.setDriverLicenseExpiry(request.driverLicenseExpiry());
         driver.setDriverType(request.driverType());
         driver.setDriverAvailability(request.driverAvailability());
         driver.setDriverStatus(request.driverStatus());
+        if (request.driverIcno() != null && !request.driverIcno().isBlank()) {
+            setEncryptedIc(driver, request.driverIcno(), null);
+        }
 
         validateProfile(driver);
         driver.setDriverName(driver.getDriverName().trim());
@@ -163,6 +171,72 @@ public class DriverService {
     }
 
     @Transactional
+    public DriverDetailsResponse createDriverWithDocuments(DriverCreateRequest request,
+            MultipartFile icDocument, MultipartFile licenseDocument,
+            MultipartFile roadTaxDocument, Long adminId) {
+        if (request == null) throw new IllegalArgumentException("Driver details are required.");
+        if (request.driverLicenseno() == null || request.driverLicenseno().isBlank()
+                || request.driverLicenseExpiry() == null || request.driverLicenseExpiry().isBlank()) {
+            throw new IllegalArgumentException("Driving licence number and expiry date are required.");
+        }
+        validateLicenseExpiry(request.driverLicenseExpiry());
+        if (request.driverType() == null
+                || !List.of("Company Driver", "Associate Driver").contains(request.driverType())) {
+            throw new IllegalArgumentException("Choose a valid driver type.");
+        }
+        if (licenseDocument == null || licenseDocument.isEmpty()
+                || roadTaxDocument == null || roadTaxDocument.isEmpty()) {
+            throw new IllegalArgumentException("Driving licence and road tax documents are required.");
+        }
+        if (request.vehicle() == null) {
+            throw new IllegalArgumentException("Vehicle details are required.");
+        }
+        Vehicle newVehicle = toVehicle(request.vehicle());
+        vehicleService.validateNewVehicleCategory(newVehicle);
+        if (!java.util.Objects.equals(request.vehicle().vehicleCapacity(), newVehicle.getVehicleCapacity())) {
+            throw new IllegalArgumentException("Passenger capacity must match the selected category. Refresh and select it again.");
+        }
+        if (!java.util.Objects.equals(request.vehicle().vehicleLuggageCapacity(), newVehicle.getBootCapacityUnits())) {
+            throw new IllegalArgumentException("Luggage capacity must match the selected category. Refresh and select it again.");
+        }
+        if (newVehicle.getVehicleRoadtaxexpiry() == null
+                || newVehicle.getVehicleServiceexpiry() == null) {
+            throw new IllegalArgumentException("Road tax expiry and next service dates are required.");
+        }
+        if (!dataProtection.isConfigured()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Encrypted fleet identity storage is not configured.");
+        }
+
+        Driver driver = createDriver(request);
+        Vehicle vehicle = vehicleService.getAssignedVehicle(driver.getDriverId());
+        if (vehicle == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "The driver's vehicle could not be linked.");
+        }
+        if (icDocument != null && !icDocument.isEmpty()) {
+            uploadDocument("IC document", () ->
+                    fleetDocuments.uploadDriverDocument(driver.getDriverId(), "DRIVER_IC", icDocument, adminId));
+        }
+        uploadDocument("Driving licence document", () ->
+                fleetDocuments.uploadDriverDocument(driver.getDriverId(), "DRIVER_LICENSE", licenseDocument, adminId));
+        uploadDocument("Road tax document", () ->
+                fleetDocuments.uploadVehicleRoadTax(vehicle.getVehicleId(), roadTaxDocument, adminId));
+        return getDriver(driver.getDriverId());
+    }
+
+    private void uploadDocument(String field, Runnable upload) {
+        try {
+            upload.run();
+        } catch (ResponseStatusException error) {
+            if (error.getStatusCode().value() == 400) {
+                throw new IllegalArgumentException(field + ": " + error.getReason(), error);
+            }
+            throw error;
+        }
+    }
+
+    @Transactional
     public Vehicle registerMissingVehicle(Long driverId, VehicleCreateRequest request) {
         driverRepository.findByIdForUpdate(driverId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Driver not found."));
@@ -173,7 +247,16 @@ public class DriverService {
     public DriverDetailsResponse getDriver(Long id) {
         Driver driver = driverRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Driver not found."));
-        return new DriverDetailsResponse(driver, vehicleService.getAssignedVehicle(id));
+        Vehicle vehicle = vehicleService.getAssignedVehicle(id);
+        List<FleetDocumentMetadata> metadata = fleetDocuments == null
+                ? List.of() : fleetDocuments.currentDriverDocuments(id);
+        FleetDocumentMetadata ic = metadata.stream()
+                .filter(item -> "DRIVER_IC".equals(item.type())).findFirst().orElse(null);
+        FleetDocumentMetadata license = metadata.stream()
+                .filter(item -> "DRIVER_LICENSE".equals(item.type())).findFirst().orElse(null);
+        FleetDocumentMetadata roadTax = fleetDocuments == null || vehicle == null
+                ? null : fleetDocuments.currentVehicleRoadTax(vehicle.getVehicleId());
+        return new DriverDetailsResponse(driver, vehicle, maskedIc(driver), ic, license, roadTax);
     }
 
     @Transactional
@@ -183,11 +266,39 @@ public class DriverService {
         if (request.isRegisterMissingVehicle() && request.getVehicle() == null) {
             throw new IllegalArgumentException("Vehicle details are required to complete registration.");
         }
-        Vehicle vehicle = request.getVehicle() == null ? null
-                : request.isRegisterMissingVehicle()
-                    ? vehicleService.createVehicleForDriver(toVehicle(request.getVehicle()), id)
-                    : vehicleService.updateAssignedVehicle(id, toVehicle(request.getVehicle()));
-        return new DriverDetailsResponse(updateDriver(id, request), vehicle);
+        if (request.getVehicle() != null) {
+            if (request.isRegisterMissingVehicle()) {
+                vehicleService.createVehicleForDriver(toVehicle(request.getVehicle()), id);
+            } else {
+                vehicleService.updateAssignedVehicle(id, toVehicle(request.getVehicle()));
+            }
+        }
+        Driver updated = updateDriver(id, request);
+        if (request.getIcNumber() != null && !request.getIcNumber().isBlank()) {
+            setEncryptedIc(updated, request.getIcNumber(), id);
+            updated = driverRepository.save(updated);
+        }
+        return getDriver(id);
+    }
+
+    @Transactional
+    public DriverDetailsResponse updateDriverWithDocuments(Long id, DriverUpdateRequest request,
+            MultipartFile icDocument, MultipartFile licenseDocument,
+            MultipartFile roadTaxDocument, Long adminId) {
+        DriverDetailsResponse updated = updateDriverDetails(id, request);
+        if (fleetDocuments != null) {
+            if (icDocument != null && !icDocument.isEmpty()) {
+                fleetDocuments.uploadDriverDocument(id, "DRIVER_IC", icDocument, adminId);
+            }
+            if (licenseDocument != null && !licenseDocument.isEmpty()) {
+                fleetDocuments.uploadDriverDocument(id, "DRIVER_LICENSE", licenseDocument, adminId);
+            }
+            if (roadTaxDocument != null && !roadTaxDocument.isEmpty() && updated.vehicle() != null) {
+                fleetDocuments.uploadVehicleRoadTax(
+                        updated.vehicle().getVehicleId(), roadTaxDocument, adminId);
+            }
+        }
+        return getDriver(id);
     }
 
     @Transactional
@@ -215,8 +326,10 @@ public class DriverService {
                 || driver.getDriverStatus().isBlank()
                 ? existing.getDriverStatus()
                 : normalizeStatus(driver.getDriverStatus()));
-        existing.setDriverIcno(driver.getDriverIcno());
         existing.setDriverLicenseno(driver.getDriverLicenseno());
+        if (driver.getDriverLicenseExpiry() != null && !driver.getDriverLicenseExpiry().isBlank()) {
+            validateLicenseExpiry(driver.getDriverLicenseExpiry());
+        }
         existing.setDriverLicenseExpiry(driver.getDriverLicenseExpiry());
         existing.setDriverType(driver.getDriverType());
         existing.setDriverAvailability(driver.getDriverAvailability() == null
@@ -284,7 +397,46 @@ public class DriverService {
         vehicle.setVehicleRoadtaxexpiry(request.vehicleRoadtaxexpiry());
         vehicle.setVehicleServiceexpiry(request.vehicleServiceexpiry());
         vehicle.setVehicleStatus(request.vehicleStatus());
+        vehicle.setVehicleCategoryId(request.vehicleCategoryId());
+        vehicle.setVehicleOwnership(request.vehicleOwnership());
         return vehicle;
+    }
+
+    private void setEncryptedIc(Driver driver, String rawIc, Long currentId) {
+        String normalized = normalizeIc(rawIc);
+        if (dataProtection == null || !dataProtection.isConfigured()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Encrypted driver identity storage is not configured.");
+        }
+        String lookup = dataProtection.icLookup(normalized);
+        boolean duplicate = currentId == null
+                ? driverRepository.findByDriverIcnoLookup(lookup).isPresent()
+                : driverRepository.existsByDriverIcnoLookupAndDriverIdNot(lookup, currentId);
+        if (duplicate) throw new IllegalArgumentException("This IC number already exists.");
+        driver.setDriverIcnoCiphertext(dataProtection.encryptIc(normalized));
+        driver.setDriverIcnoLookup(lookup);
+        driver.setDriverIcno(null);
+    }
+
+    private String normalizeIc(String rawIc) {
+        if (rawIc == null) throw new IllegalArgumentException("IC number is required.");
+        String candidate = rawIc.trim().replaceAll("\\s+", "");
+        if (!candidate.matches("\\d{12}|\\d{6}-\\d{2}-\\d{4}")) {
+            throw new IllegalArgumentException("Enter a Malaysian IC number as XXXXXX-XX-XXXX or 12 digits.");
+        }
+        return candidate.replace("-", "");
+    }
+
+    private static String normalizeLegacyIc(String rawIc) {
+        return rawIc.trim().replace("-", "").replaceAll("\\s+", "");
+    }
+
+    private void validateLicenseExpiry(String expiry) {
+        try {
+            java.time.LocalDate.parse(expiry);
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("Enter a valid driving licence expiry date.");
+        }
     }
 
     private String encodePassword(String password) {

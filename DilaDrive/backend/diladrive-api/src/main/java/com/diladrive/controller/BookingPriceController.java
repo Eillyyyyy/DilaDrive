@@ -16,6 +16,7 @@ public class BookingPriceController {
     private final BookingPriceService prices;
     public BookingPriceController(BookingPriceService prices) {this.prices=prices;}
     public record Proposal(@NotBlank @Size(max=30) String vehicleCategory) {}
+    @MobilePagination.Paged
     @GetMapping public List<Map<String,Object>> history(@PathVariable Long bookingId,HttpServletRequest request) {
         var session=request.getSession(false);
         if(session!=null && session.getAttribute("adminId")!=null) {AdminSession.requireAdminId(request);return prices.history(bookingId,null);}

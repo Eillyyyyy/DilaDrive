@@ -51,3 +51,40 @@ class _SessionAwareClient extends http.BaseClient {
   @override
   void close() => _client.close();
 }
+
+Future<http.Response> fetchMobilePages(
+  http.Client client,
+  Uri uri, {
+  Map<String, String>? headers,
+}) async {
+  http.Response response = await client.get(uri, headers: headers);
+  if (response.statusCode != 200 || !response.headers.containsKey('x-next-page')) {
+    return response;
+  }
+
+  final items = <dynamic>[];
+  int page = int.tryParse(uri.queryParameters['page'] ?? '') ?? 0;
+  while (true) {
+    if (response.statusCode != 200) return response;
+    final Object? data;
+    try {
+      data = jsonDecode(response.body);
+    } on FormatException {
+      return response;
+    }
+    if (data is! List) return response;
+    items.addAll(data);
+
+    final next = response.headers['x-next-page'];
+    if (next == null) break;
+    if (int.tryParse(next) != page + 1 || data.isEmpty) {
+      throw http.ClientException('Invalid pagination response', uri);
+    }
+    page++;
+    response = await client.get(
+      uri.replace(queryParameters: {...uri.queryParameters, 'page': next}),
+      headers: headers,
+    );
+  }
+  return http.Response(jsonEncode(items), 200, headers: response.headers);
+}

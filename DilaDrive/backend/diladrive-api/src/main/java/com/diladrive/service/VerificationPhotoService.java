@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import javax.imageio.ImageIO;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -55,40 +54,15 @@ public class VerificationPhotoService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Photo type must be PICKUP or DROP.");
         }
-        if (file == null || file.isEmpty() || file.getSize() > 10 * 1024 * 1024) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Choose an image smaller than 10 MB.");
-        }
         Path savedPath = null;
         try {
-            byte[] bytes = file.getBytes();
-            String format;
-            try (var input = ImageIO.createImageInputStream(
-                    new java.io.ByteArrayInputStream(bytes))) {
-                if (input == null || !ImageIO.getImageReaders(input).hasNext()) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "The selected file is not a valid JPEG or PNG image.");
-                }
-                var reader = ImageIO.getImageReaders(input).next();
-                try {
-                    reader.setInput(input);
-                    format = reader.getFormatName().toLowerCase(Locale.ROOT);
-                } finally {
-                    reader.dispose();
-                }
-            }
-            String extension = "jpeg".equals(format) || "jpg".equals(format)
-                    ? ".jpg" : "png".equals(format) ? ".png" : null;
-            if (extension == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Only JPEG and PNG images are supported.");
-            }
-            savedPath = storageDirectory.resolve(UUID.randomUUID() + extension).normalize();
+            ImageUpload image = ImageUpload.read(file);
+            savedPath = storageDirectory.resolve(UUID.randomUUID() + image.extension()).normalize();
             if (!savedPath.startsWith(storageDirectory)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid image path.");
             }
             Files.createDirectories(storageDirectory);
-            Files.write(savedPath, bytes);
+            Files.write(savedPath, image.bytes(), java.nio.file.StandardOpenOption.CREATE_NEW);
             VerificationPhoto photo = new VerificationPhoto();
             photo.setAssignment(assignment);
             photo.setPhotoType(type);

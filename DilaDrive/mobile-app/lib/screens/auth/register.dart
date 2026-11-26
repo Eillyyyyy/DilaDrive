@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 
@@ -22,6 +24,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final _email = TextEditingController();
   final _phone = TextEditingController();
   final _companyName = TextEditingController();
+  final _companyAddress = TextEditingController();
   final _companyNumber = TextEditingController();
   final _password = TextEditingController();
   final _confirmPassword = TextEditingController();
@@ -37,6 +40,7 @@ class _RegisterPageState extends State<RegisterPage> {
     _email.dispose();
     _phone.dispose();
     _companyName.dispose();
+    _companyAddress.dispose();
     _companyNumber.dispose();
     _password.dispose();
     _confirmPassword.dispose();
@@ -48,13 +52,19 @@ class _RegisterPageState extends State<RegisterPage> {
     setState(() => isLoading = true);
     try {
       await _authService.registerCustomer(
-        name: _name.text,
+        name: isCorporate ? null : _name.text,
         email: _email.text,
         phone: _phone.text,
         type: isCorporate ? 'COMPANY' : 'NORMAL',
         companyName: isCorporate ? _companyName.text : null,
-        companyRegistrationNumber: isCorporate ? _companyNumber.text : null,
+        companyRegistrationNumber:
+            isCorporate && _companyNumber.text.trim().isNotEmpty
+                ? _companyNumber.text
+                : null,
+        companyAddress: isCorporate ? _companyAddress.text : null,
+        contactPerson: isCorporate ? _name.text : null,
         password: _password.text,
+        confirmPassword: _confirmPassword.text,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -120,11 +130,12 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   IconData _iconFor(String label) => switch (label) {
-        'Full Name' => Icons.person_outline,
+        'Full Name' || 'Contact Person' => Icons.person_outline,
+        'Company Address' => Icons.location_on_outlined,
         'Email Address' => Icons.email_outlined,
         'Phone Number' => Icons.phone_outlined,
         'Company Name' => Icons.business_outlined,
-        'Company Registration Number' => Icons.badge_outlined,
+        'Company Registration Number (optional)' => Icons.badge_outlined,
         _ => Icons.lock_outline,
       };
 
@@ -166,7 +177,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return DilaDriveScaffold(
       appBar: AppBar(title: const Text('Create Account')),
       body: SafeArea(
         child: Form(
@@ -202,9 +213,9 @@ class _RegisterPageState extends State<RegisterPage> {
                 onTap: () => setState(() => isCorporate = true),
               ),
               const SizedBox(height: 20),
-              _field('Full Name', _name,
-                  maxLength: 120,
-                  validator: (value) => _required(value, 'Full name')),
+              _field(isCorporate ? 'Contact Person' : 'Full Name', _name,
+                  maxLength: isCorporate ? 100 : 120,
+                  validator: (value) => _required(value, isCorporate ? 'Contact person' : 'Full name')),
               _field(
                 'Email Address',
                 _email,
@@ -220,16 +231,20 @@ class _RegisterPageState extends State<RegisterPage> {
                 },
               ),
               _field('Phone Number', _phone,
-                  maxLength: 30, keyboardType: TextInputType.phone),
+                  maxLength: 30,
+                  keyboardType: TextInputType.phone,
+                  validator: (value) => _required(value, 'Phone number')),
               if (isCorporate) ...[
+                _field('Company Address', _companyAddress,
+                    maxLength: 500,
+                    validator: (value) => _required(value, 'Company address')),
                 _field('Company Name', _companyName,
                     maxLength: 150,
                     validator: (value) => _required(value, 'Company name')),
                 _field(
-                  'Company Registration Number',
+                  'Company Registration Number (optional)',
                   _companyNumber,
                   maxLength: 30,
-                  validator: (value) => _required(value, 'Registration number'),
                 ),
               ],
               _field(

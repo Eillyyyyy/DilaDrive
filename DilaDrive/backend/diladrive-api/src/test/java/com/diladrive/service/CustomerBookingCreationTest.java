@@ -38,6 +38,35 @@ class CustomerBookingCreationTest {
             bookings, customers, drivers, vehicles, notifications, assignments,
             idempotency);
 
+    @org.junit.jupiter.api.BeforeEach
+    void wireConflictChecker() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "customerTripService", mock(CustomerTripService.class));
+    }
+
+    @Test
+    void legacyEditRejectsSharedScheduleConflict() {
+        Customer customer = new Customer();
+        customer.setCustStatus("ACTIVE");
+        when(customers.findById(42L)).thenReturn(Optional.of(customer));
+        Booking booking = new Booking();
+        booking.setBookingId(17L);
+        booking.setCustId(42L);
+        booking.setBookingStatus("PENDING");
+        when(bookings.findByIdForUpdate(17L)).thenReturn(Optional.of(booking));
+        when(vehicles.findAll()).thenReturn(java.util.List.of(vehicle("Sedan")));
+        arrangeAvailableVehicle("Sedan");
+        var trips = (CustomerTripService) org.springframework.test.util.ReflectionTestUtils
+                .getField(service, "customerTripService");
+        when(trips.conflictReason(anyLong(), anyLong(), any(), any(), eq(17L)))
+                .thenReturn("Overlapping resource reservation");
+
+        assertEquals(409, assertThrows(ResponseStatusException.class,
+                () -> service.updateCustomerBooking(42L, 17L, request())).getStatusCode().value());
+        verify(trips).conflictReason(anyLong(), anyLong(), any(), any(), eq(17L));
+        verify(bookings, never()).save(any());
+    }
+
     @Test
     void createsPendingBookingForVerifiedCustomerWithoutTrustingClientFareOrOwnership() {
         Customer customer = new Customer();
@@ -374,15 +403,12 @@ class CustomerBookingCreationTest {
     }
 
     @Test
-    void customerCannotCancelBookingWithAnActiveAssignment() {
+    void confirmedBookingWithoutPickupTimeCannotBeCancelledByCustomer() {
         Booking booking = new Booking();
         booking.setBookingId(17L);
         booking.setCustId(42L);
         booking.setBookingStatus("CONFIRMED");
         when(bookings.findByIdForUpdate(17L)).thenReturn(Optional.of(booking));
-        when(assignments.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                17L, java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
-                .thenReturn(true);
 
         ResponseStatusException error = assertThrows(
                 ResponseStatusException.class,

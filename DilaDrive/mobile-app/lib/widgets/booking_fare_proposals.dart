@@ -32,8 +32,7 @@ class _BookingFareProposalsState extends State<BookingFareProposals> {
 
   Future<void> _load() async {
     try {
-      final response = await _client
-          .get(
+      final response = await fetchMobilePages(_client,
               Uri.parse(
                   '${AppConfig.apiBaseUrl}/api/bookings/${widget.bookingId}/fare-proposals'),
               headers: MobileSession.headers)

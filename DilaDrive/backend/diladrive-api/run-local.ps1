@@ -1,5 +1,6 @@
 param(
     [int]$Port = 8080,
+    [switch]$UseConfiguredDatabasePassword,
     [switch]$UseWindowsTrust,
     [switch]$EnablePush,
     [string]$FirebaseCredentials
@@ -8,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $previousCredentials = $env:GOOGLE_APPLICATION_CREDENTIALS
 $previousProject = $env:FIREBASE_PROJECT_ID
 $previousPush = $env:BOOKING_PUSH_ENABLED
+$previousDatasourcePassword = $env:SPRING_DATASOURCE_PASSWORD
 $credentials = if ($FirebaseCredentials) { $FirebaseCredentials } else { $previousCredentials }
 if ($credentials) {
     $credentials = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($credentials)
@@ -37,6 +39,9 @@ try {
     $maven = Get-Command mvn -ErrorAction SilentlyContinue
     $mavenPath = if ($maven) { $maven.Source } else { Join-Path $env:USERPROFILE '.maven\maven-3.9.15\bin\mvn.cmd' }
     if (!(Test-Path -LiteralPath $mavenPath)) { throw 'Install Maven and add mvn to PATH.' }
+    if (!$UseConfiguredDatabasePassword) {
+        $env:SPRING_DATASOURCE_PASSWORD = 'postgres'
+    }
     $launchArgs = @('spring-boot:run', '-Dspring-boot.run.profiles=local', "-Dspring-boot.run.arguments=--server.port=$Port")
     if ($UseWindowsTrust) {
         $launchArgs += '-Dspring-boot.run.jvmArguments=-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'
@@ -44,6 +49,7 @@ try {
     & $mavenPath @launchArgs
     if ($LASTEXITCODE -ne 0) { throw "Backend exited with code $LASTEXITCODE" }
 } finally {
+    $env:SPRING_DATASOURCE_PASSWORD = $previousDatasourcePassword
     $env:GOOGLE_APPLICATION_CREDENTIALS = $previousCredentials
     $env:FIREBASE_PROJECT_ID = $previousProject
     $env:BOOKING_PUSH_ENABLED = $previousPush

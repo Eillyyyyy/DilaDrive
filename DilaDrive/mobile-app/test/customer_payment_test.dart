@@ -50,7 +50,7 @@ void main() {
     expect(find.text('RM 80.00'), findsOneWidget);
     expect(find.text('RM 120.00'), findsOneWidget);
     expect(find.text('Verified'), findsOneWidget);
-    expect(find.textContaining('RM 4.80 card surcharge'), findsOneWidget);
+    expect(find.textContaining('card surcharge'), findsNothing);
     await tester.dragUntilVisible(
       find.text('Upload payment proof'),
       find.byType(ListView),

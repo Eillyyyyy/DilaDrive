@@ -5,6 +5,7 @@ import '../../models/customer_profile.dart';
 import '../../models/mobile_user.dart';
 import '../../services/customer_profile_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/responsive_page.dart';
 import '../auth/login.dart';
 import 'booking/booking_location_page.dart';
 
@@ -67,7 +68,8 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
               final error = snapshot.error;
               final requiresLogin =
                   error is CustomerProfileException && error.requiresLogin;
-              return _AccessMessage(
+              return DilaDrivePageLayout(
+                  child: _AccessMessage(
                 icon: Icons.cloud_off_outlined,
                 title: 'Booking access could not be checked',
                 message: error is CustomerProfileException
@@ -75,19 +77,21 @@ class _CreateBookingPageState extends State<CreateBookingPage> {
                     : 'Check your connection and try again.',
                 actionLabel: requiresLogin ? 'Sign in' : 'Retry',
                 onAction: requiresLogin ? _openLogin : _retry,
-              );
+              ));
             }
 
             final profile = snapshot.data!;
             if (profile.status?.trim().toUpperCase() != 'ACTIVE') {
-              return _VerificationRequired(
+              return DilaDrivePageLayout(
+                  child: _VerificationRequired(
                 status: profile.status,
                 onRetry: _retry,
-              );
+              ));
             }
 
             return BookingLocationPage(
               draft: _draft ??= BookingDraft(
+                customerId: widget.customer.id,
                 customerName: profile.name,
                 phoneNumber: profile.phone ?? '',
               ),
@@ -109,6 +113,7 @@ class _VerificationRequired extends StatelessWidget {
     final pending =
         normalized == 'PENDING' || normalized == 'PENDING_VERIFICATION';
     final unknown = normalized == null || normalized.isEmpty;
+    final rejected = normalized == 'REJECTED';
 
     return Center(
       child: Padding(
@@ -136,7 +141,9 @@ class _VerificationRequired extends StatelessWidget {
                       ? 'Admin verification required'
                       : unknown
                           ? 'Verification status unavailable'
-                          : 'Booking is unavailable for this account',
+                          : rejected
+                              ? 'Verification Rejected'
+                              : 'Booking is unavailable for this account',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: AppTheme.primaryNavy,
@@ -161,7 +168,7 @@ class _VerificationRequired extends StatelessWidget {
                     height: 1.4,
                   ),
                 ),
-                if (unknown) ...[
+                if (unknown || pending || rejected) ...[
                   const SizedBox(height: 14),
                   FilledButton.tonal(
                     onPressed: onRetry,

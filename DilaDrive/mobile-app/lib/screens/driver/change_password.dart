@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import '../../services/driver_profile_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/driver_profile_widgets.dart';
@@ -58,12 +60,12 @@ class _DriverChangePasswordPageState extends State<DriverChangePasswordPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: const Text('Change password')),
         body: Form(
             key: _formKey,
-            child: ListView(padding: const EdgeInsets.all(18), children: [
+            child: ListView(padding: pagePadding(context), children: [
               for (final field in [
                 (_current, 'Current password'),
                 (_next, 'New password'),

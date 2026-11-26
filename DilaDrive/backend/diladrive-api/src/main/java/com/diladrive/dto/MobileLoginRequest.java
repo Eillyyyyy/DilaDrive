@@ -3,7 +3,9 @@ package com.diladrive.dto;
 public class MobileLoginRequest {
 
     private String email;
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
     private String password;
+    @jakarta.validation.constraints.Pattern(regexp = "(?i)CUSTOMER|DRIVER")
     private String role;
 
     public String getEmail() {
@@ -11,7 +13,7 @@ public class MobileLoginRequest {
     }
 
     public void setEmail(String email) {
-        this.email = email;
+        this.email = email == null ? null : email.strip().toLowerCase(java.util.Locale.ROOT);
     }
 
     public String getPassword() {

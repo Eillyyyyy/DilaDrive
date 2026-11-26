@@ -85,19 +85,51 @@ class DriverServiceTest {
     }
 
     @Test
+    void normalizesAndEncryptsDriverIcBeforePersistence() {
+        var protection = new FleetDataProtection(
+                java.util.Base64.getEncoder().encodeToString(new byte[32]));
+        var protectedService = protectedDriverService(protection);
+        when(driverRepository.save(any(Driver.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Driver saved = protectedService.createDriver(createRequest("900101-14-1234"));
+
+        assertEquals(null, saved.getDriverIcno());
+        assertEquals("900101141234", protection.decryptIc(saved.getDriverIcnoCiphertext()));
+        assertEquals(protection.icLookup("900101141234"), saved.getDriverIcnoLookup());
+        assertNotEquals("900101-14-1234", saved.getDriverIcnoCiphertext());
+    }
+
+    @Test
+    void rejectsDuplicateIcNumbersAcrossFormattedAndUnformattedInput() {
+        var protection = new FleetDataProtection(
+                java.util.Base64.getEncoder().encodeToString(new byte[32]));
+        var protectedService = protectedDriverService(protection);
+        String lookup = protection.icLookup("900101141234");
+        when(driverRepository.findByDriverIcnoLookup(lookup)).thenReturn(Optional.of(new Driver()));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> protectedService.createDriver(createRequest("900101141234")));
+
+        assertEquals("This IC number already exists.", error.getMessage());
+        verify(driverRepository, never()).save(any());
+    }
+
+    @Test
     void updatesUnassignedDriverAndAvailabilityWithoutTouchingVehicles() {
         Driver existing = new Driver();
         existing.setDriverId(17L);
         existing.setDriverPassword("original-hash");
+        existing.setDriverIcno("IC-original");
         existing.setDriverStatus("ACTIVE");
         when(driverRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(existing));
         when(driverRepository.findById(17L)).thenReturn(Optional.of(existing));
         when(driverRepository.save(existing)).thenReturn(existing);
+        when(vehicleService.getAssignedVehicle(17L)).thenReturn(null);
         var update = new com.diladrive.dto.DriverUpdateRequest();
         update.setDriverName("Updated Driver");
         update.setDriverEmail("updated@example.com");
         update.setDriverPhoneno("0123456789");
-        update.setDriverIcno("IC-original");
+        update.setDriverIcno("attempted-new-value");
         update.setDriverLicenseno("DL-original");
         update.setDriverAvailability("Busy");
         var result = service.updateDriverDetails(17L, update);
@@ -107,7 +139,8 @@ class DriverServiceTest {
         assertEquals("original-hash", result.driver().getDriverPassword());
         assertEquals("IC-original", result.driver().getDriverIcno());
         assertEquals(null, result.vehicle());
-        verifyNoInteractions(vehicleService);
+        verify(vehicleService, never()).updateAssignedVehicle(any(), any());
+        verify(vehicleService, never()).createVehicleForDriver(any(), any());
     }
 
     @Test
@@ -130,6 +163,7 @@ class DriverServiceTest {
         assigned.setVehicleId(7L);
         assigned.setDriverId(17L);
         when(vehicleService.updateAssignedVehicle(eq(17L), any())).thenReturn(assigned);
+        when(vehicleService.getAssignedVehicle(17L)).thenReturn(assigned);
         var update = new com.diladrive.dto.DriverUpdateRequest();
         update.setDriverName(" Updated Driver ");
         update.setDriverEmail("UPDATED@example.com");
@@ -194,7 +228,8 @@ class DriverServiceTest {
             return driver;
         });
 
-        Driver created = service.createDriver(request());
+        Driver created = protectedDriverService(new FleetDataProtection(
+                java.util.Base64.getEncoder().encodeToString(new byte[32]))).createDriver(request());
 
         assertEquals(17L, created.getDriverId());
         assertEquals("Driver Name", created.getDriverName());
@@ -218,8 +253,10 @@ class DriverServiceTest {
         when(driverRepository.findByDriverEmailIgnoreCase("driver@example.com"))
                 .thenReturn(Optional.of(existing));
 
+        var protectedService = protectedDriverService(new FleetDataProtection(
+                java.util.Base64.getEncoder().encodeToString(new byte[32])));
         IllegalArgumentException error = assertThrows(
-                IllegalArgumentException.class, () -> service.createDriver(request()));
+                IllegalArgumentException.class, () -> protectedService.createDriver(request()));
 
         assertEquals("This email address already exists.", error.getMessage());
         verify(driverRepository, never()).save(any());
@@ -278,7 +315,7 @@ class DriverServiceTest {
                 "DRIVER@example.com",
                 "password123",
                 "0123456789",
-                "IC123",
+                "900101141234",
                 "DL123",
                 "2028-01-01",
                 "Company Driver",
@@ -289,6 +326,34 @@ class DriverServiceTest {
                         "mca1234",
                         " MPV ",
                         7,
+                        null,
+                        null,
+                        "Available",
+                        8));
+    }
+
+    private DriverService protectedDriverService(FleetDataProtection protection) {
+        return new DriverService(driverRepository, vehicleService,
+                mock(com.diladrive.repository.AssignmentRepository.class), protection, null);
+    }
+
+    private static DriverCreateRequest createRequest(String icNumber) {
+        return new DriverCreateRequest(
+                "Driver Name",
+                "driver@example.com",
+                "password123",
+                "0123456789",
+                icNumber,
+                "DL123",
+                "2028-01-01",
+                "Company Driver",
+                null,
+                null,
+                new VehicleCreateRequest(
+                        "Toyota Hiace",
+                        "MCA1234",
+                        "Sedan",
+                        4,
                         null,
                         null,
                         "Available",

@@ -27,6 +27,7 @@ public class PaymentController {
         this.paymentService = paymentService;
     }
 
+    @MobilePagination.Paged
     @GetMapping("/mine")
     public List<PaymentResponse> getMyPayments(HttpServletRequest request) {
         return paymentService.getCustomerPayments(requireCustomerId(request));

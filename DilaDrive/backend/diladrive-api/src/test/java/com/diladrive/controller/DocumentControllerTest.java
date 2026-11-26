@@ -55,7 +55,7 @@ class DocumentControllerTest {
                 new DocumentDTO(81L, "INV-0081", DocumentType.INVOICE,
                         13L, null, null, 42L, "Company", null, null,
                         BigDecimal.TEN, "ISSUED", null, null));
-        when(documentPdfService.generate(org.mockito.ArgumentMatchers.any()))
+        when(documentPdfService.generateForCustomer(org.mockito.ArgumentMatchers.any()))
                 .thenReturn("%PDF-test".getBytes());
 
         var response = controller.getCustomerPdf(81L, request);

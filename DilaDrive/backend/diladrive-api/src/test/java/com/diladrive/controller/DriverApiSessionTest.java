@@ -6,6 +6,7 @@ import com.diladrive.entity.Admin;
 import com.diladrive.entity.Driver;
 import com.diladrive.service.AdminService;
 import com.diladrive.service.DriverService;
+import com.diladrive.service.FleetDocumentService;
 import com.diladrive.service.MobileAuthService;
 import com.diladrive.service.VehicleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +36,7 @@ class DriverApiSessionTest {
     @Autowired MockMvc mvc;
     @MockBean DriverService drivers;
     @MockBean VehicleService vehicles;
+    @MockBean FleetDocumentService fleetDocuments;
     @MockBean AdminService admins;
     @MockBean MobileAuthService mobileAuth;
 

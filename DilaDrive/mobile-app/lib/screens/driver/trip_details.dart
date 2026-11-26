@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+import '../../widgets/trip_timeline.dart';
+
 import '../../models/driver_trip.dart';
 import '../../services/driver_trip_service.dart';
 import '../../services/money_validation.dart';
@@ -97,6 +100,71 @@ class _DriverTripDetailsPageState extends State<DriverTripDetailsPage> {
     super.dispose();
   }
 
+  Future<void> _reportIncident() async {
+    String description = '';
+    String category = 'OTHER';
+    final submitted = await showDialog<({String category, String description})>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Report incident'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: category,
+                decoration: const InputDecoration(labelText: 'Category'),
+                items: const [
+                  DropdownMenuItem(value: 'BREAKDOWN', child: Text('Breakdown')),
+                  DropdownMenuItem(value: 'EMERGENCY', child: Text('Emergency')),
+                  DropdownMenuItem(value: 'DELAY', child: Text('Delay')),
+                  DropdownMenuItem(value: 'OTHER', child: Text('Other')),
+                ],
+                onChanged: (value) => setDialogState(() => category = value ?? 'OTHER'),
+              ),
+              TextField(
+                maxLength: 1970,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Describe what happened'),
+                onChanged: (value) => description = value,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (description.trim().isNotEmpty) {
+                  Navigator.pop(dialog, (category: category, description: description.trim()));
+                }
+              },
+              child: const Text('Send report'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (submitted == null || !mounted || _saving) return;
+    setState(() => _saving = true);
+    try {
+      await _service.reportIncident(widget.trip.assignmentId, submitted.category, submitted.description);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Incident reported to Admin.')));
+      }
+    } on DriverTripException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _advanceStatus() async {
     final next = widget.trip.nextStatus;
     if (next == null || _saving) return;
@@ -133,12 +201,18 @@ class _DriverTripDetailsPageState extends State<DriverTripDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final trip = widget.trip;
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(title: const Text('Trip Details')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: pagePadding(context),
         children: [
+          TripTimeline(id: trip.assignmentId),
+          if (trip.isActive || trip.isCompleted)
+            OutlinedButton.icon(
+                onPressed: _saving ? null : _reportIncident,
+                icon: const Icon(Icons.report_problem_outlined),
+                label: const Text('Report incident')),
           _InfoCard(items: {
             'Booking': trip.bookingReference,
             'Customer': trip.customer ?? 'Not provided',
@@ -154,7 +228,7 @@ class _DriverTripDetailsPageState extends State<DriverTripDetailsPage> {
               'Flight number': trip.flightNo!.trim(),
             'Passengers': trip.passengerCount?.toString() ?? 'Not provided',
             if (trip.luggageUnits != null)
-              'Luggage points': '${trip.luggageUnits}',
+              'Boot usage (luggage units)': '${trip.luggageUnits}',
             if (trip.smallCount != null)
               'Small / medium / large':
                   '${trip.smallCount} / ${trip.mediumCount ?? 0} / ${trip.largeCount ?? 0}',
@@ -164,6 +238,10 @@ class _DriverTripDetailsPageState extends State<DriverTripDetailsPage> {
                 if (trip.luggageSize?.trim().isNotEmpty == true)
                   trip.luggageSize!.trim(),
               ].join(' · '),
+            if (trip.vehicleModel != null || trip.vehicleCategory != null)
+              'Assigned vehicle': [trip.vehicleModel, trip.vehicleCategory]
+                  .whereType<String>()
+                  .join(' / '),
             'Vehicle plate': trip.vehiclePlate ?? 'Not provided',
           }),
           const SizedBox(height: 16),

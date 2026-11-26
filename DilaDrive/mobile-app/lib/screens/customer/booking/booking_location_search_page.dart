@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+
+import '../../../widgets/responsive_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../services/booking_location_service.dart';
 import '../../../theme/app_theme.dart';
@@ -111,7 +113,7 @@ class _BookingLocationSearchPageState extends State<BookingLocationSearchPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         resizeToAvoidBottomInset: true,
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: Text(widget.title)),

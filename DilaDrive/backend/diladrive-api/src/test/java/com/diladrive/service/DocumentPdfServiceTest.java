@@ -107,6 +107,14 @@ class DocumentPdfServiceTest {
         assertDocumentContains(service, document(DocumentType.RECEIPT, 12L, "PAID",
                 "Invoice: INV-16"), "RECEIPT DATE", "PAYMENT REFERENCE",
                 "INVOICE REFERENCE", "PAID AMOUNT");
+        try (PDDocument pdf = Loader.loadPDF(service.generateForCustomer(
+                document(DocumentType.INVOICE, 12L, "PAID", null)))) {
+            String text = new PDFTextStripper().getText(pdf);
+            assertTrue(text.contains("INVOICE DUE DATE"));
+            assertTrue(text.contains("RM 125.50"));
+            org.junit.jupiter.api.Assertions.assertFalse(text.contains("PAYMENT STATUS"));
+            org.junit.jupiter.api.Assertions.assertFalse(text.contains("PAYMENT METHOD"));
+        }
     }
 
     @Test

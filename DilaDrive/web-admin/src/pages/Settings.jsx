@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, Save } from "lucide-react";
 import api from "../services/api";
-import { TripPricingSettings } from "./DriverEarnings";
+import { TripPricingSettings } from "../components/TripPricing";
 
 export default function Settings() {
   const [data, setData] = useState({ categories: [], pricing: [] });

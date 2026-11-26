@@ -192,11 +192,11 @@ class AssignmentServiceTest {
     }
 
     @Test
-    void rejectsVehicleExpiredBeforeTheTripDate() {
+    void rejectsRoadTaxThatExpiresBeforeTheScheduledTripEnds() {
         Booking booking = confirmedBooking();
         Driver driver = driver(21L, "AVAILABLE");
         Vehicle vehicle = vehicle(31L, "AVAILABLE");
-        vehicle.setVehicleServiceexpiry(LocalDate.of(2026, 11, 11));
+        vehicle.setVehicleRoadtaxexpiry(LocalDate.of(2026, 11, 11));
         when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
                 .thenReturn(Optional.of(booking));
         when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
@@ -214,6 +214,65 @@ class AssignmentServiceTest {
 
         assertEquals(409, error.getStatusCode().value());
         verify(assignmentRepository, never()).save(any());
+    }
+
+    @Test
+    void rejectsDriverLicenceThatExpiresBeforeTheScheduledTripEnds() {
+        Booking booking = confirmedBooking();
+        Driver driver = driver(21L, "AVAILABLE");
+        driver.setDriverLicenseExpiry("2026-11-11");
+        Vehicle vehicle = vehicle(31L, "AVAILABLE");
+        when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
+                .thenReturn(Optional.of(booking));
+        when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
+                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
+                .thenReturn(false);
+        when(driverRepository.findByIdForUpdate(driver.getDriverId()))
+                .thenReturn(Optional.of(driver));
+        when(vehicleRepository.findByIdForUpdate(vehicle.getVehicleId()))
+                .thenReturn(Optional.of(vehicle));
+
+        ResponseStatusException error = assertThrows(
+                ResponseStatusException.class,
+                () -> service.createAssignment(new AssignmentRequest(
+                        booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId(),
+                        LocalDateTime.of(2026, 11, 12, 11, 0))));
+
+        assertEquals(409, error.getStatusCode().value());
+        org.junit.jupiter.api.Assertions.assertTrue(error.getReason().contains("licence expires before the trip ends"));
+        verify(assignmentRepository, never()).save(any());
+    }
+
+    @Test
+    void serviceDateAloneDoesNotBlockAssignment() {
+        Booking booking = confirmedBooking();
+        Driver driver = driver(21L, "AVAILABLE");
+        Vehicle vehicle = vehicle(31L, "AVAILABLE");
+        vehicle.setVehicleServiceexpiry(LocalDate.of(2026, 11, 11));
+        when(bookingRepository.findByIdForUpdate(booking.getBookingId()))
+                .thenReturn(Optional.of(booking));
+        when(assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
+                booking.getBookingId(), java.util.List.of("COMPLETED", "CANCELLED", "SUPERSEDED")))
+                .thenReturn(false);
+        when(driverRepository.findByIdForUpdate(driver.getDriverId()))
+                .thenReturn(Optional.of(driver));
+        when(vehicleRepository.findByIdForUpdate(vehicle.getVehicleId()))
+                .thenReturn(Optional.of(vehicle));
+        when(assignmentRepository.save(any(Assignment.class))).thenAnswer(invocation -> {
+            Assignment saved = invocation.getArgument(0);
+            saved.setAssignmentId(41L);
+            return saved;
+        });
+        AssignmentSummaryProjection createdSummary = summary(41L, "Aina Logistics");
+        when(assignmentRepository.findAssignmentSummaryById(41L))
+                .thenReturn(Optional.of(createdSummary));
+
+        var result = service.createAssignment(new AssignmentRequest(
+                booking.getBookingId(), driver.getDriverId(), vehicle.getVehicleId(),
+                LocalDateTime.of(2026, 11, 12, 11, 0)));
+
+        assertEquals(41L, result.assignmentId());
+        verify(assignmentRepository).save(any(Assignment.class));
     }
 
     @Test
@@ -240,6 +299,7 @@ class AssignmentServiceTest {
     @Test
     void reassignsResourcesReleasesPreviousOnesAndNotifiesNewDriver() {
         Booking booking = confirmedBooking();
+        booking.setBookingTripdate(LocalDate.of(2035, 1, 1));
         Driver previousDriver = driver(21L, "UNAVAILABLE");
         Driver newDriver = driver(22L, "AVAILABLE");
         Vehicle previousVehicle = vehicle(31L, "UNAVAILABLE");
@@ -264,7 +324,7 @@ class AssignmentServiceTest {
                 .thenReturn(Optional.of(reassignedSummary));
 
         service.reassign(41L, new AssignmentRequest(
-                booking.getBookingId(), newDriver.getDriverId(), newVehicle.getVehicleId(), LocalDateTime.of(2026, 11, 12, 11, 0)));
+                booking.getBookingId(), newDriver.getDriverId(), newVehicle.getVehicleId(), LocalDateTime.of(2035, 1, 1, 11, 0), "Vehicle maintenance"));
 
         assertEquals("UNAVAILABLE", previousDriver.getDriverAvailability());
         assertEquals("AVAILABLE", newDriver.getDriverAvailability());
@@ -280,6 +340,7 @@ class AssignmentServiceTest {
     @Test
     void supportsDriverOnlyReassignment() {
         Booking booking = confirmedBooking();
+        booking.setBookingTripdate(LocalDate.of(2035, 1, 1));
         Driver previousDriver = driver(21L, "UNAVAILABLE");
         Driver newDriver = driver(22L, "AVAILABLE");
         Vehicle vehicle = vehicle(31L, "UNAVAILABLE");
@@ -299,7 +360,7 @@ class AssignmentServiceTest {
         when(assignmentRepository.findAssignmentSummaryById(41L))
                 .thenReturn(Optional.of(reassignedSummary));
 
-        service.reassign(41L, new AssignmentRequest(null, newDriver.getDriverId(), null, LocalDateTime.of(2026, 11, 12, 11, 0)));
+        service.reassign(41L, new AssignmentRequest(null, newDriver.getDriverId(), null, LocalDateTime.of(2035, 1, 1, 11, 0), "Vehicle maintenance"));
 
         assertEquals("UNAVAILABLE", previousDriver.getDriverAvailability());
         assertEquals("AVAILABLE", newDriver.getDriverAvailability());
@@ -329,6 +390,10 @@ class AssignmentServiceTest {
         when(assignmentRepository.findAssignmentSummaryById(41L))
                 .thenReturn(Optional.of(completedSummary));
 
+        var early = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> service.completeAssignment(41L));
+        assertEquals(409, early.getStatusCode().value());
+        assignment.setAssignmentStatus("DROP");
         var result = service.completeAssignment(41L);
 
         assertEquals("COMPLETED", result.assignmentStatus());
@@ -427,6 +492,7 @@ class AssignmentServiceTest {
     void legacyDriverWithoutVehicleCannotBeConfirmedAndReceivesRegistrationGuidance() {
         Booking booking = confirmedBooking(); booking.setBookingStatus("PENDING");
         Driver driver = driver(21L, "AVAILABLE");
+        booking.setBookingTripfare(java.math.BigDecimal.TEN);
         when(bookingRepository.findByIdForUpdate(booking.getBookingId())).thenReturn(Optional.of(booking));
         when(driverRepository.findByIdForUpdate(driver.getDriverId())).thenReturn(Optional.of(driver));
         when(vehicleRepository.findByDriverId(driver.getDriverId())).thenReturn(java.util.List.of());
@@ -515,5 +581,48 @@ class AssignmentServiceTest {
         when(vehicleRepository.findByDriverId(id - 10)).thenReturn(java.util.List.of(vehicle));
         when(vehicleRepository.findByIdForUpdate(id)).thenReturn(Optional.of(vehicle));
         return vehicle;
+    }
+
+    @Test
+    void driverDetailOnlyUsesTheSessionScopedQuery() {
+        AssignmentSummaryProjection own = summary(41L, "Customer", "ASSIGNED");
+        when(assignmentRepository.findDriverAssignmentDetail(41L, 21L)).thenReturn(Optional.of(own));
+        assertEquals(41L, service.getDriverAssignment(41L, 21L).assignmentId());
+        assertEquals(404, assertThrows(ResponseStatusException.class,
+                () -> service.getDriverAssignment(41L, 22L)).getStatusCode().value());
+        verify(assignmentRepository, never()).findAssignmentSummaryById(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"WAITING,PICKUP", "PICKUP,DROP"})
+    void driverCannotReachProofMilestoneWithoutPhoto(String previous, String next) {
+        Booking booking = confirmedBooking();
+        Assignment assignment = assignment(booking, driver(21L, "UNAVAILABLE"), vehicle(31L, "UNAVAILABLE"));
+        assignment.setAssignmentStatus(previous);
+        when(assignmentRepository.findByIdForUpdate(41L)).thenReturn(Optional.of(assignment));
+        when(bookingRepository.findByIdForUpdate(booking.getBookingId())).thenReturn(Optional.of(booking));
+        var photos = mock(com.diladrive.repository.VerificationPhotoRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "verificationPhotos", photos);
+
+        assertEquals(409, assertThrows(ResponseStatusException.class,
+                () -> service.updateDriverStatus(41L, 21L, next)).getStatusCode().value());
+        assertEquals(409, assertThrows(ResponseStatusException.class,
+                () -> service.updateStatus(41L, next)).getStatusCode().value());
+        verify(photos, times(2)).existsByAssignmentAssignmentIdAndPhotoType(41L, next);
+        assertEquals(previous, assignment.getAssignmentStatus());
+        verify(assignmentRepository, never()).save(any());
+    }
+
+    @Test
+    void driverCannotReverseButRepeatIsIdempotent() {
+        Assignment assignment = assignment(confirmedBooking(), driver(21L, "UNAVAILABLE"), vehicle(31L, "UNAVAILABLE"));
+        assignment.setAssignmentStatus("WAITING");
+        when(assignmentRepository.findByIdForUpdate(41L)).thenReturn(Optional.of(assignment));
+        assertEquals(409, assertThrows(ResponseStatusException.class,
+                () -> service.updateDriverStatus(41L, 21L, "OTW")).getStatusCode().value());
+        var unchanged = summary(41L, "Customer", "WAITING");
+        when(assignmentRepository.findAssignmentSummaryById(41L)).thenReturn(Optional.of(unchanged));
+        assertEquals("WAITING", service.updateDriverStatus(41L, 21L, "WAITING").assignmentStatus());
+        verify(assignmentRepository, never()).save(any());
     }
 }

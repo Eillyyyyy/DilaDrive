@@ -29,7 +29,17 @@ public class Driver {
     private String driverStatus;
 
     @Column(name = "driver_icno")
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String driverIcno;
+
+    @Column(name = "driver_icno_ciphertext")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String driverIcnoCiphertext;
+
+    @org.hibernate.annotations.JdbcTypeCode(java.sql.Types.CHAR)
+    @Column(name = "driver_icno_lookup", length = 64)
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String driverIcnoLookup;
 
     @Column(name = "driver_licenseno")
     private String driverLicenseno;
@@ -112,6 +122,11 @@ public class Driver {
     public void setDriverIcno(String driverIcno) {
         this.driverIcno = driverIcno;
     }
+
+    public String getDriverIcnoCiphertext() { return driverIcnoCiphertext; }
+    public void setDriverIcnoCiphertext(String value) { driverIcnoCiphertext = value; }
+    public String getDriverIcnoLookup() { return driverIcnoLookup; }
+    public void setDriverIcnoLookup(String value) { driverIcnoLookup = value; }
 
     public String getDriverLicenseno() {
         return driverLicenseno;

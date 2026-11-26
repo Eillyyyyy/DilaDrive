@@ -53,6 +53,24 @@ void main() {
     expect(find.text('Where are you going?'), findsOneWidget);
   });
 
+  testWidgets('rejected customer can recheck status without opening booking',
+      (tester) async {
+    MobileSession.storeResponseCookies({'set-cookie': 'JSESSIONID=rejected'});
+    final client = _ProfileClient(status: 'REJECTED');
+    final service = CustomerProfileService(client: client);
+    addTearDown(service.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: CreateBookingPage(customer: _customer(status: 'REJECTED'), profileService: service),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Verification Rejected'), findsOneWidget);
+    expect(find.byType(BookingLocationPage), findsNothing);
+    await tester.tap(find.text('Check again'));
+    await tester.pumpAndSettle();
+    expect(client.requestCount, 2);
+    expect(find.byType(BookingLocationPage), findsNothing);
+  });
+
   testWidgets('missing verification status can be checked again',
       (tester) async {
     MobileSession.storeResponseCookies({'set-cookie': 'JSESSIONID=unknown'});

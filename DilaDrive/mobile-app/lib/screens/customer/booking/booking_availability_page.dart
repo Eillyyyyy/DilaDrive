@@ -161,7 +161,7 @@ class _BookingAvailabilityPageState extends State<BookingAvailabilityPage> {
                   children: [
                     CircularProgressIndicator(color: bookingBlue),
                     SizedBox(height: 14),
-                    Text('Requesting live availability from DilaDrive…'),
+                    Text('Requesting live availability from DilaDrive...'),
                   ],
                 ),
               ),
@@ -171,7 +171,7 @@ class _BookingAvailabilityPageState extends State<BookingAvailabilityPage> {
                 style: TextStyle(
                     color: Colors.green, fontWeight: FontWeight.w700)),
             Text(
-                'Your trip: ${widget.draft.passengerCount} passengers, ${widget.draft.luggageUnits} luggage points'),
+                'Your trip: ${widget.draft.passengerCount} passengers, ${widget.draft.totalBagCount} bags'),
             const SizedBox(height: 8),
             _RecommendedVehicleCard(vehicle: _result!.vehicle!),
           ] else
@@ -267,7 +267,7 @@ class _RecommendedVehicleCard extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
-                  vehicle.model,
+                  vehicle.type,
                   style: const TextStyle(
                     color: bookingNavy,
                     fontSize: 18,
@@ -284,10 +284,10 @@ class _RecommendedVehicleCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _CapacityLine(
-            label: 'Luggage points capacity',
+            label: 'Boot capacity',
             value: vehicle.luggageCapacity == null
-                ? 'Not recorded'
-                : '${vehicle.luggageCapacity} points',
+                ? 'Fits your luggage'
+                : '${vehicle.luggageCapacity} units',
           ),
           const SizedBox(height: 12),
           const Text(

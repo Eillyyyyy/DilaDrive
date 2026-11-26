@@ -9,6 +9,7 @@ class CustomerProfile {
     this.companyName,
     this.companyRegistrationNumber,
     this.profileImage,
+    this.rejectionReason,
   });
 
   final int id;
@@ -20,6 +21,7 @@ class CustomerProfile {
   final String? companyName;
   final String? companyRegistrationNumber;
   final String? profileImage;
+  final String? rejectionReason;
 
   factory CustomerProfile.fromJson(Map<String, dynamic> json) {
     final id = json['id'];
@@ -42,6 +44,8 @@ class CustomerProfile {
           ? json['companyRegistrationNumber'] as String
           : null,
       profileImage: json['profileImage'] is String ? json['profileImage'] as String : null,
+      rejectionReason: json['rejectionReason'] is String
+          ? json['rejectionReason'] as String : null,
     );
   }
 }

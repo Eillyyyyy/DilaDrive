@@ -1,7 +1,10 @@
 package com.diladrive.service;
 
 import com.diladrive.entity.Vehicle;
+import com.diladrive.entity.VehicleCategory;
 import com.diladrive.repository.VehicleRepository;
+import com.diladrive.repository.VehicleCategoryRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -10,21 +13,39 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 @Service
 public class VehicleService {
 
     private final VehicleRepository vehicleRepository;
     private final com.diladrive.repository.AssignmentRepository assignmentRepository;
+    private final VehicleCategoryRepository categoryRepository;
 
+    @Autowired
     public VehicleService(
-            VehicleRepository vehicleRepository, com.diladrive.repository.AssignmentRepository assignmentRepository) {
+            VehicleRepository vehicleRepository,
+            com.diladrive.repository.AssignmentRepository assignmentRepository,
+            VehicleCategoryRepository categoryRepository) {
         this.vehicleRepository = vehicleRepository;
         this.assignmentRepository = assignmentRepository;
+        this.categoryRepository = categoryRepository;
+    }
+
+    public VehicleService(VehicleRepository vehicleRepository,
+            com.diladrive.repository.AssignmentRepository assignmentRepository) {
+        this(vehicleRepository, assignmentRepository, null);
     }
 
     public List<Vehicle> getAllVehicles() {
         return vehicleRepository.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public List<VehicleCategory> getVehicleCategories() {
+        return categoryRepository == null
+                ? List.of()
+                : categoryRepository.findByActiveTrueOrderByDisplayNameAsc();
     }
 
     @Transactional(readOnly = true)
@@ -70,6 +91,8 @@ public class VehicleService {
         }
         String plate = normalizeRequired(vehicle.getVehiclePlateno(), "Registration number");
         String model = normalizeRequired(vehicle.getVehicleModel(), "Vehicle model");
+        VehicleCategory category = resolveCategory(vehicle, categoryRepository != null);
+        if (category != null) vehicle.applyCategory(category);
         String type = normalizeRequired(vehicle.getVehicleType(), "Vehicle type");
         if (vehicle.getVehicleCapacity() == null || vehicle.getVehicleCapacity() < 1) {
             throw new ResponseStatusException(
@@ -77,6 +100,7 @@ public class VehicleService {
                     "Passenger capacity must be a whole number greater than zero.");
         }
         String status = normalizeStatus(vehicle.getVehicleStatus());
+        vehicle.setVehicleOwnership(normalizeOwnership(vehicle.getVehicleOwnership(), false));
 
         if (vehicleRepository.existsByVehiclePlatenoIgnoreCase(plate)) {
             throw new ResponseStatusException(
@@ -108,14 +132,15 @@ public class VehicleService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The linked driver cannot be changed here.");
         }
         String plate = normalizeRequired(request.getVehiclePlateno(), "Registration number");
-        String type = normalizeRequired(request.getVehicleType(), "Vehicle type");
-        Integer capacity = request.getVehicleCapacity();
-        if (capacity == null || capacity < 1) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Passenger capacity must be a whole number greater than zero.");
-        }
         String status = normalizeStatus(request.getVehicleStatus());
+        VehicleCategory category = resolveCategory(request, false);
+        if (category == null && vehicle.getVehicleCategoryId() != null) {
+            category = resolveCategory(vehicle, true);
+        }
+        if (category == null && categoryRepository != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Choose a vehicle category from the fleet categories.");
+        }
 
         if (vehicleRepository.existsByVehiclePlatenoIgnoreCaseAndVehicleIdNot(
                 plate, vehicleId)) {
@@ -125,15 +150,23 @@ public class VehicleService {
 
         vehicle.setVehiclePlateno(plate);
         vehicle.setVehicleModel(normalizeOptional(request.getVehicleModel()));
-        vehicle.setVehicleType(type);
-        vehicle.setVehicleCapacity(capacity);
+        if (category != null) {
+            vehicle.applyCategory(category);
+        } else {
+            vehicle.setVehicleType(normalizeRequired(request.getVehicleType(), "Vehicle type"));
+            if (request.getVehicleCapacity() == null || request.getVehicleCapacity() < 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Passenger capacity must be a whole number greater than zero.");
+            }
+            vehicle.setVehicleCapacity(request.getVehicleCapacity());
+        }
         if ((request.getMaxLargeLuggage() != null && request.getMaxLargeLuggage() < 0)
                 || (request.getMaxBackpacks() != null && request.getMaxBackpacks() < 0)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Vehicle luggage limits must be zero or greater.");
         }
         if (request.getMaxLargeLuggage() != null) vehicle.setMaxLargeLuggage(request.getMaxLargeLuggage());
         if (request.getMaxBackpacks() != null) vehicle.setMaxBackpacks(request.getMaxBackpacks());
-        if (request.getVehicleLuggageCapacity() != null) {
+        if (category == null && request.getVehicleLuggageCapacity() != null) {
             if (request.getVehicleLuggageCapacity() < 0) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Luggage capacity must be zero or greater.");
             }
@@ -141,6 +174,9 @@ public class VehicleService {
         }
         vehicle.setVehicleRoadtaxexpiry(request.getVehicleRoadtaxexpiry());
         vehicle.setVehicleServiceexpiry(request.getVehicleServiceexpiry());
+        if (request.getVehicleOwnership() != null) {
+            vehicle.setVehicleOwnership(normalizeOwnership(request.getVehicleOwnership(), false));
+        }
         vehicle.setVehicleStatus(status);
         return vehicleRepository.save(vehicle);
     }
@@ -182,6 +218,50 @@ public class VehicleService {
                     HttpStatus.BAD_REQUEST, "Vehicle type must be 60 characters or fewer.");
         }
         return normalized;
+    }
+
+    private VehicleCategory resolveCategory(Vehicle vehicle, boolean required) {
+        if (categoryRepository == null) return null;
+        if (vehicle.getVehicleCategoryId() != null) {
+            return categoryRepository.findById(vehicle.getVehicleCategoryId())
+                    .filter(VehicleCategory::isActive)
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST, "Choose an active vehicle category."));
+        }
+        if (vehicle.getVehicleType() != null && !vehicle.getVehicleType().isBlank()) {
+            Optional<VehicleCategory> found = categoryRepository
+                    .findByCategoryKeyIgnoreCaseAndActiveTrue(vehicle.getVehicleType().trim())
+                    .or(() -> categoryRepository.findByDisplayNameIgnoreCaseAndActiveTrue(
+                            vehicle.getVehicleType().trim()));
+            if (found.isPresent()) return found.get();
+        }
+        if (required) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Choose a vehicle category from the fleet categories.");
+        }
+        return null;
+    }
+
+    public void validateNewVehicleCategory(Vehicle vehicle) {
+        VehicleCategory category = resolveCategory(vehicle, true);
+        if (category != null) vehicle.applyCategory(category);
+        vehicle.setVehicleOwnership(normalizeOwnership(vehicle.getVehicleOwnership(), true));
+    }
+
+    private String normalizeOwnership(String value, boolean required) {
+        if (value == null || value.isBlank()) {
+            if (required) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Vehicle ownership is required.");
+            }
+            return null;
+        }
+        return switch (value.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_')) {
+            case "DRIVER_OWNED" -> "DRIVER_OWNED";
+            case "COMPANY_OWNED" -> "COMPANY_OWNED";
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Choose Driver-Owned or Company-Owned vehicle ownership.");
+        };
     }
 
     private String normalizeOptional(String value) {

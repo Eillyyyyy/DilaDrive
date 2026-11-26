@@ -1,5 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import 'dart:typed_data';
 
 import '../../models/customer_booking.dart';
@@ -46,7 +48,7 @@ class _UploadReceiptPageState extends State<UploadReceiptPage> {
   Future<void> _pickProof() async {
     final result = await FilePicker.pickFile(
       type: FileType.custom,
-      allowedExtensions: const ['jpg', 'jpeg', 'png', 'pdf'],
+      allowedExtensions: const ['jpg', 'jpeg', 'png'],
     );
     if (result == null || !mounted) return;
     final bytes = await result.readAsBytes();
@@ -103,11 +105,11 @@ class _UploadReceiptPageState extends State<UploadReceiptPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: const Text('Submit payment proof')),
         body: ListView(
-          padding: const EdgeInsets.all(18),
+          padding: pagePadding(context),
           children: [
             Card(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -155,7 +157,7 @@ class _UploadReceiptPageState extends State<UploadReceiptPage> {
                 child: ListTile(
                   leading: Icon(Icons.info_outline,
                       color: AppTheme.secondarySkyBlue),
-                  title: Text('Card surcharge: 6%'),
+                  title: Text('Card payment'),
                   subtitle: Text(
                       'Card payment happens outside this app. Do not enter card details here.'),
                 ),
@@ -165,7 +167,7 @@ class _UploadReceiptPageState extends State<UploadReceiptPage> {
             OutlinedButton.icon(
               onPressed: _submitting ? null : _pickProof,
               icon: const Icon(Icons.attach_file),
-              label: Text(_proofName ?? 'Choose JPEG, PNG or PDF proof'),
+              label: Text(_proofName ?? 'Choose JPEG or PNG proof'),
             ),
             const SizedBox(height: 8),
             const Text('Maximum file size: 10 MB.',

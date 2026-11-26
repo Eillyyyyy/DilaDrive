@@ -4,6 +4,7 @@ import com.diladrive.security.AdminSession;
 
 import com.diladrive.dto.DriverCreateRequest;
 import com.diladrive.dto.DriverDetailsResponse;
+import com.diladrive.dto.DriverListResponse;
 import com.diladrive.dto.DriverUpdateRequest;
 import com.diladrive.dto.DriverProfileResponse;
 import com.diladrive.dto.DriverProfileUpdateRequest;
@@ -13,7 +14,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
@@ -55,9 +58,11 @@ public class DriverController {
     }
 
     @GetMapping
-    public List<Driver> getAllDrivers(HttpServletRequest request) {
+    public List<DriverListResponse> getAllDrivers(HttpServletRequest request) {
         requireAdminId(request);
-        return driverService.getAllDrivers();
+        return driverService.getAllDrivers().stream()
+                .map(driver -> new DriverListResponse(driver, driverService.maskedIc(driver)))
+                .toList();
     }
 
     @GetMapping("/available")
@@ -66,19 +71,32 @@ public class DriverController {
         return driverService.getAvailableDrivers();
     }
 
-    @PostMapping
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> createDriver(
             @Valid @RequestBody DriverCreateRequest request,
             HttpServletRequest servletRequest) {
         requireAdminId(servletRequest);
+        return ResponseEntity.badRequest()
+                .body("Driving licence and road tax documents are required for new driver accounts.");
+    }
+
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> createDriverWithDocuments(
+            @Valid @RequestPart("driver") DriverCreateRequest request,
+            @RequestPart(value = "icDocument", required = false) MultipartFile icDocument,
+            @RequestPart("licenseDocument") MultipartFile licenseDocument,
+            @RequestPart("roadTaxDocument") MultipartFile roadTaxDocument,
+            HttpServletRequest servletRequest) {
+        Long adminId = requireAdminId(servletRequest);
         try {
             return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(driverService.createDriver(request));
+                    .body(driverService.createDriverWithDocuments(
+                            request, icDocument, licenseDocument, roadTaxDocument, adminId));
         } catch (IllegalArgumentException exception) {
             return ResponseEntity.badRequest().body(exception.getMessage());
         } catch (DataIntegrityViolationException exception) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body("Driver email or vehicle registration number already exists.");
+                    .body("Driver email, IC number or vehicle registration number already exists.");
         }
     }
 
@@ -125,6 +143,26 @@ public class DriverController {
         } catch (DataIntegrityViolationException exception) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body("Driver email or vehicle registration number already exists.");
+        }
+    }
+
+    @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> updateDriverWithDocuments(
+            @PathVariable Long id,
+            @Valid @RequestPart("driver") DriverUpdateRequest driver,
+            @RequestPart(value = "icDocument", required = false) MultipartFile icDocument,
+            @RequestPart(value = "licenseDocument", required = false) MultipartFile licenseDocument,
+            @RequestPart(value = "roadTaxDocument", required = false) MultipartFile roadTaxDocument,
+            HttpServletRequest request) {
+        Long adminId = requireAdminId(request);
+        try {
+            return ResponseEntity.ok(driverService.updateDriverWithDocuments(
+                    id, driver, icDocument, licenseDocument, roadTaxDocument, adminId));
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.badRequest().body(exception.getMessage());
+        } catch (DataIntegrityViolationException exception) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body("Driver email, IC number or vehicle registration number already exists.");
         }
     }
 

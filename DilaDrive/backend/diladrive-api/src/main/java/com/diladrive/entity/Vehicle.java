@@ -21,11 +21,21 @@ public class Vehicle {
     @Column(name = "vehicle_type")
     private String vehicleType;
 
+    @Column(name = "vehicle_category_id")
+    private Long vehicleCategoryId;
+
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "vehicle_category_id", insertable = false, updatable = false)
+    private VehicleCategory category;
+
+    @Column(name = "vehicle_ownership")
+    private String vehicleOwnership;
+
     @Column(name = "vehicle_capacity")
     private Integer vehicleCapacity;
 
     @Column(name = "vehicle_luggagecapacity")
-    private Integer vehicleLuggageCapacity;
+    private Integer storedBootCapacityUnits;
 
     @Column(name = "max_large_luggage")
     private Integer maxLargeLuggage;
@@ -39,23 +49,46 @@ public class Vehicle {
     public void setMaxBackpacks(Integer value) { maxBackpacks = value; }
 
     public boolean fitsSeparateLuggage(int largeLuggage, int backpacks) {
-        return (maxLargeLuggage == null || largeLuggage <= maxLargeLuggage)
-                && (maxBackpacks == null || backpacks <= maxBackpacks);
+        return category != null || ((maxLargeLuggage == null || largeLuggage <= maxLargeLuggage)
+                && (maxBackpacks == null || backpacks <= maxBackpacks));
     }
 
     public int passengerLimit() {
-        int recordedCapacity = vehicleCapacity == null ? 0 : vehicleCapacity;
-        String category = vehicleType == null ? "" : vehicleType.toUpperCase(java.util.Locale.ROOT)
-                .replaceAll("[^A-Z0-9]", "");
-        int categoryLimit = switch (category) {
+        Integer capacity = getVehicleCapacity();
+        if (capacity == null) return 0;
+        int limit = scopedPassengerLimit(vehicleType);
+        return limit == 0 ? capacity : Math.min(capacity, limit);
+    }
+
+    public Integer getBootCapacityUnits() {
+        return category != null ? category.getBootCapacityUnits() : storedBootCapacityUnits;
+    }
+
+    public void applyCategory(VehicleCategory value) {
+        category = value;
+        vehicleCategoryId = value.getVehicleCategoryId();
+        vehicleType = value.getDisplayName();
+        vehicleCapacity = value.getMaxPassengerCapacity();
+        storedBootCapacityUnits = value.getBootCapacityUnits();
+    }
+
+    public static int scheduledCategoryRank(String type) {
+        return "PREMIUMMPV".equals(normalizedCategory(type)) ? 7 : scopedPassengerLimit(type);
+    }
+
+    private static String normalizedCategory(String type) {
+        return type == null ? "" : type.toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+    }
+
+    private static int scopedPassengerLimit(String type) {
+        return switch (normalizedCategory(type)) {
             case "SEDAN" -> 3;
             case "MPV" -> 5;
-            case "10SEATERVAN", "10SEATER", "VAN10" -> 8;
-            case "14SEATERVAN", "14SEATER", "VAN14" -> 11;
-            case "18SEATERVAN", "18SEATER", "VAN18" -> 15;
-            default -> recordedCapacity;
+            case "10SEATERVAN", "10SEATER", "VAN10", "VAN10SEATER" -> 8;
+            case "14SEATERVAN", "14SEATER", "VAN14", "VAN14SEATER" -> 11;
+            case "18SEATERVAN", "18SEATER", "VAN18", "VAN18SEATER" -> 15;
+            default -> 0;
         };
-        return Math.min(recordedCapacity, categoryLimit);
     }
 
     @Column(name = "vehicle_roadtaxexpiry")
@@ -110,8 +143,14 @@ public class Vehicle {
         this.vehicleType = vehicleType;
     }
 
+    public Long getVehicleCategoryId() { return vehicleCategoryId; }
+    public void setVehicleCategoryId(Long value) { vehicleCategoryId = value; }
+    public VehicleCategory getCategory() { return category; }
+    public String getVehicleOwnership() { return vehicleOwnership; }
+    public void setVehicleOwnership(String value) { vehicleOwnership = value; }
+
     public Integer getVehicleCapacity() {
-        return vehicleCapacity;
+        return category != null ? category.getMaxPassengerCapacity() : vehicleCapacity;
     }
 
     public void setVehicleCapacity(Integer vehicleCapacity) {
@@ -119,11 +158,11 @@ public class Vehicle {
     }
 
     public Integer getVehicleLuggageCapacity() {
-        return vehicleLuggageCapacity;
+        return getBootCapacityUnits();
     }
 
     public void setVehicleLuggageCapacity(Integer vehicleLuggageCapacity) {
-        this.vehicleLuggageCapacity = vehicleLuggageCapacity;
+        this.storedBootCapacityUnits = vehicleLuggageCapacity;
     }
 
     public LocalDate getVehicleRoadtaxexpiry() {

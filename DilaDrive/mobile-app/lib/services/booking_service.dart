@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../models/booking_draft.dart';
+import '../models/booking_schedule.dart';
 import 'api_http_client.dart';
 import 'mobile_session.dart';
 
@@ -65,7 +66,11 @@ class BookingService {
         final vehicle = RecommendedVehicle.fromJson(rawVehicle);
         draft.recommendedVehicle = vehicle;
         draft.availabilityCheckedFor = key;
-        return AvailabilityResult.available(vehicle);
+        final categories = payload['suitableVehicleTypes'];
+        return AvailabilityResult.available(vehicle,
+            categories: categories is List
+                ? categories.whereType<String>().toList(growable: false)
+                : const []);
       } on FormatException catch (exception) {
         throw BookingException(exception.message.toString());
       }
@@ -73,7 +78,8 @@ class BookingService {
       if (version == draft.availabilityRequestVersion) {
         draft.clearAvailability();
       }
-      if (error.requiresLogin || error.code == 'ROAD_DISTANCE_REVIEW_AVAILABLE') {
+      if (error.requiresLogin ||
+          error.code == 'ROAD_DISTANCE_REVIEW_AVAILABLE') {
         rethrow;
       }
       return AvailabilityResult.unavailable(error.message,
@@ -127,6 +133,25 @@ class BookingService {
     }
   }
 
+  Future<BookingVehicleQuote> quoteVehicle(
+      BookingDraft draft, String category) async {
+    final payload = await _quote(draft, category: category);
+    if (payload['available'] != true) {
+      throw BookingException(
+          payload['message'] as String? ?? 'No vehicles available.');
+    }
+    final vehicle = payload['vehicle'];
+    if (vehicle is! Map<String, dynamic>) {
+      throw const BookingException('Vehicle details are unavailable.');
+    }
+    try {
+      return BookingVehicleQuote(
+          RecommendedVehicle.fromJson(vehicle), FareEstimate.fromJson(payload));
+    } on FormatException catch (error) {
+      throw BookingException(error.message.toString());
+    }
+  }
+
   Map<String, dynamic> tripPayload(BookingDraft draft,
       {bool routeOnly = false}) {
     final pickup = draft.pickupCoordinates;
@@ -143,15 +168,18 @@ class BookingService {
       'destinationLatitude': destination!.latitude,
       'destinationLongitude': destination.longitude,
       'scheduledAt': (routeOnly
-              ? DateTime.now().add(const Duration(days: 1))
+              ? malaysiaNow().add(const Duration(days: 1))
               : draft.scheduledAt)
-          ?.toIso8601String(),
+          ?.toIso8601String()
+          .replaceFirst(RegExp(r'Z$'), ''),
       'passengerCount': draft.passengerCount,
       'smallCount': draft.smallCount,
       'mediumCount': draft.mediumCount,
       'largeCount': draft.largeCount,
       'tripType': _tripTypeValue(draft),
       'flightNumber': draft.flightNumber,
+      if (draft.flightDate case final date?) 'flightDate': bookingIsoDate(date),
+      if (draft.flightTime case final time?) 'flightTime': time,
       'additionalNotes': draft.additionalNotes,
       if (!routeOnly && draft.recommendedVehicle != null)
         'vehicleCategory': draft.recommendedVehicle!.type,
@@ -172,20 +200,25 @@ class BookingService {
   }
 
   Future<Map<String, dynamic>> _quote(BookingDraft draft,
-      {bool availabilityOnly = false}) async {
+      {bool availabilityOnly = false, String? category}) async {
     final endpoint = availabilityOnly ? 'availability' : 'estimate';
     final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/$endpoint')
         .replace(
             queryParameters: draft.existingBookingId == null
                 ? null
                 : {'bookingId': '${draft.existingBookingId}'});
+    final payload = tripPayload(draft);
+    if (category != null) {
+      payload['vehicleCategory'] = category;
+      payload.remove('acceptedQuoteToken');
+    }
     return _decodeObject(await _request(() => _client.post(
           uri,
           headers: {
             'Content-Type': 'application/json',
             ...MobileSession.headers
           },
-          body: jsonEncode(tripPayload(draft)),
+          body: jsonEncode(payload),
         )));
   }
 
@@ -209,20 +242,23 @@ class BookingService {
     required String idempotencyKey,
   }) {
     if (draft.existingBookingId != null || draft.bookingDate == null) {
-      throw const BookingException('Only a new booking can request distance review.');
+      throw const BookingException(
+          'Only a new booking can request distance review.');
     }
-    return _submitBooking(draft, idempotencyKey: idempotencyKey, distanceReview: true);
+    return _submitBooking(draft,
+        idempotencyKey: idempotencyKey, distanceReview: true);
   }
 
-  Future<String> _submitBooking(BookingDraft draft, {
+  Future<String> _submitBooking(
+    BookingDraft draft, {
     required String idempotencyKey,
     bool distanceReview = false,
   }) async {
     final uri = Uri.parse(distanceReview
         ? '${AppConfig.apiBaseUrl}/api/bookings/customer/road-distance-review'
         : draft.existingBookingId == null
-        ? '${AppConfig.apiBaseUrl}/api/bookings/customer/complete'
-        : '${AppConfig.apiBaseUrl}/api/bookings/${draft.existingBookingId}/customer/complete');
+            ? '${AppConfig.apiBaseUrl}/api/bookings/customer/complete'
+            : '${AppConfig.apiBaseUrl}/api/bookings/${draft.existingBookingId}/customer/complete');
     final headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -381,10 +417,17 @@ class BookingService {
 
 enum AvailabilityStatus {
   available('AVAILABLE', 'Available when checked'),
-  capacityUnavailable('CAPACITY_UNAVAILABLE',
-      'No suitable vehicle is currently available. Please contact the administrator.'),
-  scheduleUnavailable('SCHEDULE_UNAVAILABLE',
-      'No suitable vehicle is currently available. Please contact the administrator.'),
+  capacityUnavailable(
+      'CAPACITY_UNAVAILABLE', 'No ride fits your trip details.'),
+  passengerCapacityUnavailable('PASSENGER_CAPACITY_UNAVAILABLE',
+      'No ride can accommodate this many passengers.'),
+  luggageCapacityUnavailable('LUGGAGE_CAPACITY_UNAVAILABLE',
+      'No ride can accommodate the selected passengers and luggage.'),
+  scheduleUnavailable(
+      'SCHEDULE_UNAVAILABLE', 'No rides available for this time.'),
+  driverUnavailable(
+      'DRIVER_UNAVAILABLE', 'No drivers are available for this ride.'),
+  noVehicles('NO_VEHICLES', 'No vehicles are currently listed.'),
   fleetNotConfigured('FLEET_NOT_CONFIGURED',
       'Vehicle availability is not configured. Please retry later or contact DilaDrive.'),
   serviceError('SERVICE_ERROR',
@@ -399,14 +442,17 @@ class AvailabilityResult {
   const AvailabilityResult._({
     required this.isAvailable,
     this.vehicle,
+    this.categories = const [],
     this.message,
     required this.status,
   });
 
-  factory AvailabilityResult.available(RecommendedVehicle vehicle) =>
+  factory AvailabilityResult.available(RecommendedVehicle vehicle,
+          {List<String> categories = const []}) =>
       AvailabilityResult._(
           isAvailable: true,
           vehicle: vehicle,
+          categories: categories,
           status: AvailabilityStatus.available);
 
   factory AvailabilityResult.unavailable(String message,
@@ -418,7 +464,15 @@ class AvailabilityResult {
   final bool isAvailable;
   final AvailabilityStatus status;
   final RecommendedVehicle? vehicle;
+  final List<String> categories;
   final String? message;
+}
+
+class BookingVehicleQuote {
+  const BookingVehicleQuote(this.vehicle, this.fare);
+
+  final RecommendedVehicle vehicle;
+  final FareEstimate fare;
 }
 
 class BookingException implements Exception {

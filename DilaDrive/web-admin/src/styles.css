@@ -7,6 +7,19 @@
 body { margin: 0; }
 button, input, select { font: inherit; }
 
+html { scrollbar-gutter: stable; }
+
+html.modal-scroll-locked,
+html.modal-scroll-locked body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.modal-panel {
+  max-height: min(90vh, 100%);
+  max-height: min(90dvh, 100%);
+}
+
 @layer components {
   .admin-page { @apply space-y-6; }
   .admin-page-header {

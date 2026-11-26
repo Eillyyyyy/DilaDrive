@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 
 import '../../models/driver_trip.dart';
 import '../../models/mobile_user.dart';
 import '../../services/driver_trip_service.dart';
+import '../../services/push_notification_service.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login.dart';
 import 'trip_details.dart';
@@ -26,15 +31,20 @@ class _DriverTripsPageState extends State<DriverTripsPage> {
   late final DriverTripService _service =
       widget.tripService ?? DriverTripService();
   late Future<List<DriverTrip>> _trips;
+  late final StreamSubscription<void> _assignmentUpdates;
 
   @override
   void initState() {
     super.initState();
     _trips = _service.getMyTrips();
+    _assignmentUpdates = PushNotificationService.updates.listen((_) {
+      if (mounted) unawaited(_refresh().catchError((Object _) {}));
+    });
   }
 
   @override
   void dispose() {
+    unawaited(_assignmentUpdates.cancel());
     if (_ownsService) _service.dispose();
     super.dispose();
   }
@@ -79,7 +89,7 @@ class _DriverTripsPageState extends State<DriverTripsPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(
           title: const Text('Assigned Trips'),
@@ -127,7 +137,7 @@ class _DriverTripsPageState extends State<DriverTripsPage> {
             return RefreshIndicator(
               onRefresh: () => _refresh().catchError(_showError),
               child: ListView.separated(
-                padding: const EdgeInsets.all(16),
+                padding: pagePadding(context),
                 itemCount: trips.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (context, index) => _TripCard(

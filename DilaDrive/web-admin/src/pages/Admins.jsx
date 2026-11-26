@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import useModalScrollLock from "../components/useModalScrollLock";
 import api from "../services/api";
 import {
   ChevronLeft,
@@ -61,6 +62,7 @@ function AdminFormModal({
   onSave,
 }) {
   const isEditing = Boolean(admin);
+  useModalScrollLock();
   const [form, setForm] = useState(() => ({
     ...emptyForm,
     ...(admin || {}),
@@ -133,7 +135,7 @@ function AdminFormModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+      className="fixed inset-0 !m-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !saving) onClose();
       }}
@@ -142,7 +144,7 @@ function AdminFormModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-form-title"
-        className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+        className="modal-panel w-full max-w-2xl overflow-y-auto overscroll-contain rounded-2xl bg-white shadow-2xl"
       >
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white px-6 py-5">
           <div>
@@ -323,6 +325,8 @@ function AdminFormModal({
 }
 
 function AdminViewModal({ admin, onClose }) {
+  useModalScrollLock();
+
   const details = [
     ["Email address", admin.email],
     ["Phone number", admin.phone],
@@ -334,7 +338,7 @@ function AdminViewModal({ admin, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+      className="fixed inset-0 !m-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -343,7 +347,7 @@ function AdminViewModal({ admin, onClose }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-view-title"
-        className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="modal-panel w-full max-w-lg overflow-y-auto overscroll-contain rounded-2xl bg-white shadow-2xl"
       >
         <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
           <div>

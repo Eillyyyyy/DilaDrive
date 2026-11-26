@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
@@ -63,7 +64,14 @@ class AuthService {
       throw const AuthException(
         'The server took too long to respond. Please try again.',
       );
-    } on http.ClientException {
+    } on http.ClientException catch (error) {
+      if (kDebugMode) {
+        final reason = error.message.toLowerCase();
+        final details = RegExp(
+          r'errno = \d+|connection refused|connection reset|permission denied|failed host lookup|cleartext|insecure http|connection closed',
+        ).allMatches(reason).map((match) => match.group(0)).join(', ');
+        debugPrint('DilaDrive login transport: ${Uri.parse(AppConfig.apiBaseUrl).authority}; ${error.runtimeType}; $details');
+      }
       throw const AuthException(
         'Cannot connect to DilaDrive. Check that the API and database are running and verify the API URL.',
       );
@@ -99,12 +107,15 @@ class AuthService {
   }
 
   Future<void> registerCustomer({
-    required String name,
+    String? name,
     required String email,
     required String phone,
     required String type,
     String? companyName,
     String? companyRegistrationNumber,
+    String? companyAddress,
+    String? contactPerson,
+    required String confirmPassword,
     required String password,
   }) async {
     late final http.Response response;
@@ -114,10 +125,13 @@ class AuthService {
             Uri.parse('${AppConfig.apiBaseUrl}/api/auth/mobile/register'),
             headers: const {'Content-Type': 'application/json'},
             body: jsonEncode({
-              'name': name.trim(),
-              'email': email.trim(),
+              'name': name?.trim(),
+              'email': email.trim().toLowerCase(),
               'phone': phone.trim().isEmpty ? null : phone.trim(),
               'type': type,
+              'companyAddress': companyAddress?.trim(),
+              'contactPerson': contactPerson?.trim(),
+              'confirmPassword': confirmPassword,
               'companyName': companyName?.trim(),
               'companyRegistrationNumber': companyRegistrationNumber?.trim(),
               'password': password,

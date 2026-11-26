@@ -49,6 +49,7 @@ public class DocumentController {
         return documentService.getAllDocuments();
     }
 
+    @MobilePagination.Paged
     @GetMapping("/customer/mine")
     public List<DocumentDTO> getMyDocuments(HttpServletRequest request) {
         return documentService.getCustomerDocuments(requireCustomerId(request));
@@ -120,6 +121,15 @@ public class DocumentController {
                 .body(documentService.generatePurchaseOrder(id));
     }
 
+    public record PurchaseOrderInput(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max=100) String clientReference) {}
+
+    @PostMapping("/{id}/record-po")
+    public ResponseEntity<DocumentDTO> recordPurchaseOrder(@PathVariable Long id,
+            @Valid @RequestBody PurchaseOrderInput input, HttpServletRequest request) {
+        requireAdminId(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(documentService.recordPurchaseOrder(id, input.clientReference()));
+    }
+
     @PostMapping("/{id}/generate-invoice")
     public ResponseEntity<DocumentDTO> generateInvoice(
             @PathVariable Long id,
@@ -178,10 +188,24 @@ public class DocumentController {
             @PathVariable Long id,
             HttpServletRequest request) {
         Long customerId = requireCustomerId(request);
-        DocumentDTO document = documentService.getCustomerDocument(customerId, id);
+        return customerPdf(documentService.getCustomerDocument(customerId, id));
+    }
+
+    @MobilePagination.Paged
+    @GetMapping("/customer/receipts")
+    public List<DocumentDTO> getCustomerReceipts(HttpServletRequest request) {
+        return documentService.getCustomerReceipts(requireCustomerId(request));
+    }
+
+    @GetMapping("/customer/receipts/{id}/pdf")
+    public ResponseEntity<byte[]> getCustomerReceiptPdf(@PathVariable Long id, HttpServletRequest request) {
+        return customerPdf(documentService.getCustomerReceipt(requireCustomerId(request), id));
+    }
+
+    private ResponseEntity<byte[]> customerPdf(DocumentDTO document) {
         byte[] pdf;
         try {
-            pdf = documentPdfService.generate(document);
+            pdf = documentPdfService.generateForCustomer(document);
         } catch (IOException exception) {
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,

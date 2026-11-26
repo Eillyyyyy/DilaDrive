@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -10,10 +12,12 @@ class BookingRouteMap extends StatefulWidget {
       {super.key,
       required this.draft,
       required this.onSelect,
-      this.tileProvider});
+      this.tileProvider,
+      this.cameraPadding = const EdgeInsets.all(42)});
   final BookingDraft draft;
   final ValueChanged<BookingCoordinates> onSelect;
   final TileProvider? tileProvider;
+  final EdgeInsets cameraPadding;
 
   @override
   State<BookingRouteMap> createState() => _BookingRouteMapState();
@@ -21,14 +25,51 @@ class BookingRouteMap extends StatefulWidget {
 
 class _BookingRouteMapState extends State<BookingRouteMap> {
   final _controller = MapController();
+  final _tileReset = StreamController<void>.broadcast();
+  late final _tileProvider = widget.tileProvider ?? NetworkTileProvider();
+  bool _tileUnavailable = false;
+  bool _tileNoticeScheduled = false;
+
+  static const _tileUrl = String.fromEnvironment(
+    'MAP_TILE_URL',
+    defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  );
+  static const _providerCredit = String.fromEnvironment('MAP_TILE_ATTRIBUTION');
   bool _ready = false;
   String? _cameraSignature;
+  Timer? _cameraResize;
   BookingDraft get draft => widget.draft;
 
   @override
+  void didUpdateWidget(BookingRouteMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cameraPadding != widget.cameraPadding) {
+      _cameraResize?.cancel();
+      _cameraResize = Timer(const Duration(milliseconds: 140), _fitCamera);
+    }
+  }
+
+  @override
   void dispose() {
+    _cameraResize?.cancel();
+    _tileReset.close();
     _controller.dispose();
     super.dispose();
+  }
+
+  void _onTileError(TileImage tile, Object error, StackTrace? stackTrace) {
+    if (_tileUnavailable || _tileNoticeScheduled) return;
+    _tileNoticeScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _tileNoticeScheduled = false;
+      if (mounted) setState(() => _tileUnavailable = true);
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _retryTiles() {
+    setState(() => _tileUnavailable = false);
+    _tileReset.add(null);
   }
 
   void _fitCamera() {
@@ -38,9 +79,15 @@ class _BookingRouteMapState extends State<BookingRouteMap> {
         .where((p) => p.isValid)
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList();
-    if (points.isEmpty) return;
+    if (points.isEmpty ||
+        context.size == null ||
+        context.size!.height <= widget.cameraPadding.vertical + 8) {
+      return;
+    }
     if (points.length == 1) {
-      _controller.move(points.first, 15);
+      _controller.move(points.first, 15,
+          offset: Offset(
+              0, (widget.cameraPadding.top - widget.cameraPadding.bottom) / 2));
       return;
     }
     final geometry = draft.roadRoute?['geometry'] as List?;
@@ -50,7 +97,7 @@ class _BookingRouteMapState extends State<BookingRouteMap> {
     }
     _controller.fitCamera(CameraFit.bounds(
         bounds: LatLngBounds.fromPoints(points),
-        padding: const EdgeInsets.all(42),
+        padding: widget.cameraPadding,
         maxZoom: 16));
   }
 
@@ -60,8 +107,6 @@ class _BookingRouteMapState extends State<BookingRouteMap> {
         .whereType<BookingCoordinates>()
         .toList();
     final geometry = (draft.roadRoute?['geometry'] as List?) ?? [];
-    const tileUrl = String.fromEnvironment('MAP_TILE_URL',
-        defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png');
     final signature =
         '${pins.map((p) => '${p.latitude},${p.longitude}').join(';')}|${identityHashCode(draft.roadRoute)}';
     if (signature != _cameraSignature) {
@@ -80,20 +125,16 @@ class _BookingRouteMapState extends State<BookingRouteMap> {
               ? const LatLng(3.139, 101.6869)
               : LatLng(pins.first.latitude, pins.first.longitude),
           initialZoom: 11,
-          initialCameraFit: pins.length < 2
-              ? null
-              : CameraFit.bounds(
-                  bounds: LatLngBounds.fromPoints(pins
-                      .map((p) => LatLng(p.latitude, p.longitude))
-                      .toList()),
-                  padding: const EdgeInsets.all(42)),
           onTap: (_, p) => widget.onSelect(
               BookingCoordinates(latitude: p.latitude, longitude: p.longitude)),
         ),
         children: [
           TileLayer(
-              urlTemplate: tileUrl,
-              tileProvider: widget.tileProvider,
+              urlTemplate: _tileUrl,
+              tileProvider: _tileProvider,
+              reset: _tileReset.stream,
+              errorTileCallback: _onTileError,
+              evictErrorTileStrategy: EvictErrorTileStrategy.dispose,
               // NetworkTileProvider uses flutter_map's persistent, HTTP-header-aware
               // native cache by default. Chrome uses the browser HTTP cache.
               // Do not override freshness, disable caches, or bulk-prefetch tiles.
@@ -120,19 +161,37 @@ class _BookingRouteMapState extends State<BookingRouteMap> {
           ]),
         ],
       ),
+      if (_tileUnavailable)
+        Positioned(
+          left: 10,
+          bottom: (widget.cameraPadding.bottom - 18).clamp(2, double.infinity),
+          child: Material(
+            borderRadius: BorderRadius.circular(20),
+            child: IconButton(
+              tooltip: 'Map tiles unavailable. Retry map tiles',
+              onPressed: _retryTiles,
+              icon: const Icon(Icons.refresh),
+            ),
+          ),
+        ),
       Positioned(
-          bottom: 2,
+          bottom: (widget.cameraPadding.bottom - 18).clamp(2, double.infinity),
           right: 4,
           child: Material(
               color: Colors.white,
               child: InkWell(
                   onTap: () => launchUrl(
                       Uri.parse('https://www.openstreetmap.org/copyright')),
-                  child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-                      child: Text(
-                          '© OpenStreetMap contributors · Routing: OSRM',
-                          style: TextStyle(fontSize: 11)))))),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                    child: Text(
+                      _providerCredit.isEmpty
+                          ? '\u00a9 OpenStreetMap contributors'
+                          : '\u00a9 OpenStreetMap contributors \u00b7 $_providerCredit',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  )))),
     ]);
   }
 

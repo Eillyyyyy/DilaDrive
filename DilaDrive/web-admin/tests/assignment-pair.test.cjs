@@ -25,9 +25,10 @@ test('reassignment form selects a linked pair and requires an end time', async (
     busy:false,error:'',onClose:()=>{},onSubmit:()=>{}};
   for(const component of [compiled.exports.ReassignModal]) {
     const html=renderToStaticMarkup(React.createElement(component,{...common,title:'Assignment',subtitle:'Schedule',
-      bookings:[],assignment:{driverName:'Old driver',vehiclePlate:'Old plate'}}));
-    assert.match(html,/name="vehicleId"/);
-    assert.match(html,/name="driverId"/);
+      bookings:[],assignment:{assignmentId:15,bookingId:7,driverName:'Old driver',vehiclePlate:'Old plate'}}));
+    assert.doesNotMatch(html,/name="vehicleId"|name="driverId"/);
+    assert.match(html,/Eligible replacement pairs/);
+    assert.match(html,/name="reason" required/);
     assert.doesNotMatch(html,/Legacy missing vehicle/);
     assert.match(html,/name="scheduledEndAt"/);
     assert.match(html,/type="datetime-local"/);

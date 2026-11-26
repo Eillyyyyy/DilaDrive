@@ -2,18 +2,21 @@ package com.diladrive.service;
 
 import com.diladrive.dto.NotificationResponse;
 import com.diladrive.dto.NotificationCreateRequest;
-import com.diladrive.entity.Admin;
+import com.diladrive.dto.NotificationTarget;
 import com.diladrive.entity.Notification;
-import com.diladrive.repository.AdminRepository;
 import com.diladrive.repository.DriverRepository;
 import com.diladrive.repository.NotificationRepository;
 import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Locale;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Service
 public class NotificationService {
@@ -22,40 +25,65 @@ public class NotificationService {
     private BookingPushService bookingPush;
     private final NotificationRepository notificationRepository;
     private final DriverRepository driverRepository;
-    private final AdminRepository adminRepository;
+    private static final ZoneId MALAYSIA = ZoneId.of("Asia/Kuala_Lumpur");
 
     public NotificationService(
             NotificationRepository notificationRepository,
-            DriverRepository driverRepository,
-            AdminRepository adminRepository) {
+            DriverRepository driverRepository) {
         this.notificationRepository = notificationRepository;
         this.driverRepository = driverRepository;
-        this.adminRepository = adminRepository;
     }
 
     @Transactional(readOnly = true)
     public List<NotificationResponse> getAdminNotifications(Long adminId) {
-        return notificationRepository.findAllByOrderBySentAtDesc().stream()
-                .filter(notification -> notification.getDriver() != null
-                        || ("ADMIN".equalsIgnoreCase(notification.getRecipientRole())
-                                && adminId.equals(notification.getRecipientId())))
+        return notificationRepository.findByRecipientRoleIgnoreCaseAndRecipientIdOrderBySentAtDesc(
+                        "ADMIN", adminId).stream()
                 .map(NotificationResponse::from)
                 .toList();
+    }
+
+    public record InboxPage(List<NotificationResponse> items, long total, List<String> types) {}
+
+    @Transactional(readOnly = true)
+    public InboxPage inbox(Long adminId, int page, int size, Boolean read, String type, String search) {
+        return pageResponse(notificationRepository.inbox(adminId, read, type, search,
+                PageRequest.of(page, size)), notificationRepository.inboxTypes(adminId));
+    }
+
+    @Transactional(readOnly = true)
+    public InboxPage sentDriverNotifications(int page, int size) {
+        return pageResponse(notificationRepository.findByDriverIsNotNullOrderBySentAtDescNotificationIdDesc(
+                PageRequest.of(page, size)), List.of());
+    }
+
+    private InboxPage pageResponse(Page<Notification> page, List<String> types) {
+        return new InboxPage(page.getContent().stream().map(NotificationResponse::from).toList(),
+                page.getTotalElements(), types);
+    }
+
+    @Transactional(readOnly = true)
+    public long unreadCount(Long adminId) {
+        return notificationRepository.countByRecipientRoleIgnoreCaseAndRecipientIdAndReadFalse("ADMIN", adminId);
+    }
+
+    @Transactional
+    public long markAllRead(Long adminId) {
+        notificationRepository.markAdminInboxRead(adminId, LocalDateTime.now(MALAYSIA));
+        return unreadCount(adminId);
     }
 
     @Transactional
     public void notifyAdminsOfNewBooking(Long bookingId) {
         String reference = "BK-%06d".formatted(bookingId);
-        for (Admin admin : adminRepository.findAll()) {
-            if (!"ACTIVE".equalsIgnoreCase(admin.getStatus())) continue;
-            Notification notification = new Notification();
-            notification.setRecipientRole("ADMIN");
-            notification.setRecipientId(admin.getId());
-            notification.setTitle("New booking request");
-            notification.setMessage(reference + " is waiting for verification.");
-            notification.setNotificationType("BOOKING");
-            notificationRepository.save(notification);
-        }
+        notifyAdmins("New booking request", reference + " is waiting for verification and assignment.",
+                "BOOKING", NotificationTarget.BOOKING, bookingId, "booking-created:" + bookingId);
+    }
+
+    @Transactional
+    public void notifyAdmins(String title, String message, String type,
+            NotificationTarget target, Long entityId, String eventKey) {
+        notificationRepository.insertAdminEvent(title, message, type, target.name(), entityId,
+                target.route(entityId), eventKey, LocalDateTime.now(MALAYSIA));
     }
 
     @Transactional
@@ -110,30 +138,28 @@ public class NotificationService {
         notification.setTitle(title);
         notification.setMessage(message);
         notification.setNotificationType(notificationType);
-        if (bookingPush != null) bookingPush.notifyAfterCommit("CUSTOMER",customerId,title,message);
+        if (bookingPush != null && !isCustomerPaymentNotice(notificationType, message)) {
+            String pushMessage = "ACCOUNT_VERIFICATION".equals(notificationType)
+                    ? "Open DilaDrive to view your account verification result." : message;
+            bookingPush.notifyAfterCommit("CUSTOMER", customerId, title, pushMessage);
+        }
         return NotificationResponse.from(notificationRepository.save(notification));
     }
 
-    @Transactional
-    public NotificationResponse markAsRead(Long notificationId) {
-        Notification notification = notificationRepository.findByIdForUpdate(notificationId)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Notification not found."));
-        notification.setRead(true);
-        return NotificationResponse.from(notificationRepository.save(notification));
+    private static boolean isCustomerPaymentNotice(String notificationType, String message) {
+        String type = notificationType == null ? "" : notificationType.trim().toUpperCase(java.util.Locale.ROOT);
+        return type.startsWith("PAYMENT") || type.startsWith("RECEIPT")
+                || ("DOCUMENT".equals(type) && message != null && message.startsWith("REC-"));
+    }
+
+    boolean hasCustomerNotification(Long customerId, String title, String message) {
+        return notificationRepository.existsByRecipientRoleAndRecipientIdAndTitleAndMessage(
+                "CUSTOMER", customerId, title, message);
     }
 
     @Transactional
     public NotificationResponse markAdminNotificationAsRead(Long notificationId, Long adminId) {
-        Notification notification = notificationRepository.findByIdForUpdate(notificationId)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Notification not found."));
-        boolean isAdminNotification = "ADMIN".equalsIgnoreCase(notification.getRecipientRole());
-        if (isAdminNotification && !adminId.equals(notification.getRecipientId())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Notification not found.");
-        }
-        notification.setRead(true);
-        return NotificationResponse.from(notificationRepository.save(notification));
+        return markAsReadByOwner(notificationId, "ADMIN", adminId);
     }
 
     @Transactional
@@ -147,14 +173,15 @@ public class NotificationService {
         boolean recipientColumnsMatch = recipientRole.equalsIgnoreCase(
                 notification.getRecipientRole())
                 && recipientId.equals(notification.getRecipientId());
-        boolean legacyDriverLinkMatches = "DRIVER".equalsIgnoreCase(recipientRole)
+        boolean legacyDriverLinkMatches = notification.getRecipientRole() == null
+                && "DRIVER".equalsIgnoreCase(recipientRole)
                 && notification.getDriver() != null
                 && recipientId.equals(notification.getDriver().getDriverId());
         if (!recipientColumnsMatch && !legacyDriverLinkMatches) {
             throw new ResponseStatusException(
                     HttpStatus.NOT_FOUND, "Notification not found.");
         }
-        notification.setRead(true);
+        notification.markRead(LocalDateTime.now(MALAYSIA));
         return NotificationResponse.from(notificationRepository.save(notification));
     }
 

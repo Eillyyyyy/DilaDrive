@@ -1,5 +1,7 @@
 package com.diladrive.service;
 
+import com.diladrive.dto.NotificationTarget;
+
 import com.diladrive.entity.Booking;
 import com.diladrive.dto.CustomerBookingResponse;
 import com.diladrive.dto.CustomerBookingRequest;
@@ -35,8 +37,15 @@ import java.util.stream.Stream;
 
 @Service
 public class BookingService {
+    @org.springframework.beans.factory.annotation.Autowired private CustomerTripService customerTripService;
     @org.springframework.beans.factory.annotation.Autowired
     private TripFinanceService tripFinance;
+
+    @org.springframework.beans.factory.annotation.Value("${booking.legacy-edit-window-minutes:240}")
+    private long legacyEditWindowMinutes = 240;
+    @org.springframework.beans.factory.annotation.Value("${booking.cancellation.min-notice-hours:24}")
+    private long cancellationNoticeHours = 24;
+    @Autowired private TripMonitoringService tripMonitoring;
 
     private final BookingRepository bookingRepository;
     private final CustomerRepository customerRepository;
@@ -79,17 +88,37 @@ public class BookingService {
         return bookingRepository.findAll();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public List<CustomerBookingResponse> getCustomerBookings(Long customerId) {
-        var reservations = bookingRepository.findCustomerBookingsNewestFirst(customerId);
+        return customerBookingResponses(customerId, bookingRepository.findCustomerBookingsNewestFirst(customerId));
+    }
+
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public CustomerBookingResponse getCustomerBooking(Long customerId, Long bookingId) {
+        Booking booking = bookingRepository.findByBookingIdAndCustId(bookingId, customerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Booking not found."));
+        return customerBookingResponses(customerId, List.of(booking)).get(0);
+    }
+
+    private List<CustomerBookingResponse> customerBookingResponses(Long customerId, List<Booking> reservations) {
         if (tripFinance == null || reservations.isEmpty()) {
             return reservations.stream().map(CustomerBookingResponse::from).toList();
         }
         var totals = tripFinance.customerTotals(customerId);
+        var reservationStatuses = customerTripService == null ? java.util.Map.<Long, String>of()
+                : customerTripService.customerReservationStatuses(customerId);
+        var confirmed = new java.util.HashMap<Long, CustomerBookingResponse.ConfirmedAssignment>();
+        for (var assignment : assignmentRepository.findCustomerConfirmedAssignments(customerId)) {
+            var vehicle = assignment.getVehicle();
+            confirmed.putIfAbsent(assignment.getBooking().getBookingId(), new CustomerBookingResponse.ConfirmedAssignment(
+                    assignment.getDriver().getDriverName(), vehicle.getVehicleModel(), vehicle.getVehiclePlateno(),
+                    vehicle.getVehicleType(), assignment.getAssignmentStatus()));
+        }
         return reservations.stream().map(booking -> {
             var summary = totals.get(booking.getBookingId());
-            return summary == null ? CustomerBookingResponse.from(booking) : CustomerBookingResponse.from(
-                    booking, summary.finalFare(), summary.payableFare(), summary.activeAssignment());
+            return CustomerBookingResponse.from(booking, summary == null ? null : summary.finalFare(),
+                    summary == null ? null : summary.payableFare(), summary == null ? null : summary.activeAssignment(),
+                    confirmed.get(booking.getBookingId()), reservationStatuses.get(booking.getBookingId()));
         }).toList();
     }
 
@@ -169,15 +198,15 @@ public class BookingService {
         var suitable = suitableVehicles(scheduledAt, passengerCount, luggageCount)
                 .sorted((left, right) -> {
                     int byPassengers = Integer.compare(
-                            left.getVehicleCapacity(), right.getVehicleCapacity());
+                            left.passengerLimit(), right.passengerLimit());
                     if (byPassengers != 0) {
                         return byPassengers;
                     }
                     return Integer.compare(
-                            left.getVehicleLuggageCapacity() == null
-                                    ? Integer.MAX_VALUE : left.getVehicleLuggageCapacity(),
-                            right.getVehicleLuggageCapacity() == null
-                                    ? Integer.MAX_VALUE : right.getVehicleLuggageCapacity());
+                            left.getBootCapacityUnits() == null
+                                    ? Integer.MAX_VALUE : left.getBootCapacityUnits(),
+                            right.getBootCapacityUnits() == null
+                                    ? Integer.MAX_VALUE : right.getBootCapacityUnits());
                 })
                 .findFirst();
 
@@ -195,8 +224,8 @@ public class BookingService {
                         vehicle.getVehicleId(),
                         vehicle.getVehicleModel(),
                         vehicle.getVehicleType(),
-                        vehicle.getVehicleCapacity(),
-                        vehicle.getVehicleLuggageCapacity()));
+                        vehicle.passengerLimit(),
+                        vehicle.getBootCapacityUnits()));
     }
 
     private Stream<Vehicle> suitableVehicles(
@@ -206,20 +235,28 @@ public class BookingService {
         return vehicleRepository.findByVehicleStatusIgnoreCase("AVAILABLE").stream()
                 .filter(vehicle -> vehicle.getVehicleId() != null)
                 .filter(vehicle -> !isBlank(vehicle.getVehicleType()))
-                .filter(vehicle -> vehicle.getVehicleCapacity() != null
-                        && vehicle.getVehicleCapacity() >= passengerCount)
+                .filter(vehicle -> vehicle.passengerLimit() > 0
+                        && vehicle.passengerLimit() >= passengerCount)
                 .filter(vehicle -> luggageCount == 0
-                        || (vehicle.getVehicleLuggageCapacity() != null
-                        && vehicle.getVehicleLuggageCapacity() >= luggageCount))
+                        || (vehicle.getBootCapacityUnits() != null
+                        && vehicle.getBootCapacityUnits() >= luggageCount))
                 .filter(vehicle -> vehicle.getVehicleRoadtaxexpiry() == null
                         || !vehicle.getVehicleRoadtaxexpiry().isBefore(scheduledAt.toLocalDate()))
-                .filter(vehicle -> vehicle.getVehicleServiceexpiry() == null
-                        || !vehicle.getVehicleServiceexpiry().isBefore(scheduledAt.toLocalDate()))
                 .filter(vehicle -> vehicle.getDriverId() != null)
                 .filter(vehicle -> driverRepository.findById(vehicle.getDriverId())
                         .map(driver -> isActive(driver.getDriverStatus())
-                                && isAvailable(driver.getDriverAvailability()))
+                                && isAvailable(driver.getDriverAvailability())
+                                && licenseValidThrough(driver.getDriverLicenseExpiry(), scheduledAt.toLocalDate()))
                         .orElse(false));
+    }
+
+    private boolean licenseValidThrough(String expiryValue, LocalDate tripDate) {
+        if (expiryValue == null || expiryValue.isBlank()) return true;
+        try {
+            return !LocalDate.parse(expiryValue).isBefore(tripDate);
+        } catch (java.time.format.DateTimeParseException exception) {
+            return false;
+        }
     }
 
     public java.util.Map<String, Object> unavailableFareEstimate() {
@@ -337,8 +374,9 @@ public class BookingService {
         }
 
         LocalDateTime scheduledAt = LocalDateTime.of(request.bookingDate(), scheduledTime);
+        int bootUsage = Booking.legacyBootUsage(request.luggageCount(), request.luggageSize());
         boolean selectedTypeAvailable = suitableVehicles(
-                scheduledAt, request.passengerCount(), request.luggageCount())
+                scheduledAt, request.passengerCount(), bootUsage)
                 .anyMatch(vehicle -> vehicle.getVehicleType().equalsIgnoreCase(vehicleType));
         if (!selectedTypeAvailable) {
             throw new ResponseStatusException(
@@ -358,6 +396,7 @@ public class BookingService {
                 ? null : normalizeOptional(request.flightNumber()));
         booking.setBookingPassengercount(request.passengerCount());
         booking.setBookingLuggagecount(request.luggageCount());
+        booking.setLuggageUnits(bootUsage);
         booking.setBookingLuggagesize(
                 request.luggageCount() == 0 ? null : normalizeOptional(request.luggageSize()));
         booking.setBookingNotes(normalizeOptional(request.additionalNotes()));
@@ -440,6 +479,8 @@ public class BookingService {
 
     @Transactional
     public CustomerBookingResponse cancelCustomerBooking(Long customerId, Long bookingId) {
+        // Driver status changes and reassignments also lock the assignment before the booking.
+        var active = assignmentRepository.lockCustomerActiveAssignments(bookingId, customerId);
         Booking booking = bookingRepository.findByIdForUpdate(bookingId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Booking not found."));
@@ -448,28 +489,54 @@ public class BookingService {
                     HttpStatus.NOT_FOUND, "Booking not found.");
         }
 
-        String status = booking.getBookingStatus() == null
-                ? ""
-                : booking.getBookingStatus().trim().toUpperCase(Locale.ROOT);
-        if (!Set.of("PENDING", "PENDING_VERIFICATION", "CONFIRMED").contains(status)) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "This booking can no longer be cancelled by the customer.");
+        String reference = bookingReference(bookingId);
+        String message = "Your booking " + reference + " has been cancelled.";
+        String confirmedTitle = "Confirmed booking cancelled";
+        if ("CANCELLED".equalsIgnoreCase(booking.getBookingStatus())
+                && notificationService.hasCustomerNotification(customerId, confirmedTitle, message)) {
+            return CustomerBookingResponse.from(booking);
         }
-        if (assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                bookingId, List.of("COMPLETED", "CANCELLED", "SUPERSEDED"))) {
+
+        String notice = BookingTransitions.noticeMessage("cancel", cancellationNoticeHours);
+        BookingTransitions.require(booking.getBookingStatus(), BookingTransitions.Action.CANCEL, notice);
+        boolean confirmed = "CONFIRMED".equalsIgnoreCase(booking.getBookingStatus());
+        if (confirmed) {
+            BookingTransitions.requireNotice(booking, cancellationNoticeHours, "cancel",
+                    LocalDateTime.now(java.time.ZoneId.of("Asia/Kuala_Lumpur")));
+        }
+        boolean hasActiveAssignment = assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
+                bookingId, List.of("COMPLETED", "CANCELLED", "SUPERSEDED"));
+        if (hasActiveAssignment && (!confirmed || active.size() != 1
+                || !"ASSIGNED".equalsIgnoreCase(active.get(0).getAssignmentStatus()))) {
             throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "A booking with an active driver assignment cannot be cancelled here.");
+                    HttpStatus.CONFLICT, confirmed ? notice : "A booking with an active driver assignment cannot be cancelled here.");
+        }
+        if (hasActiveAssignment) {
+            var assignment = active.get(0);
+            Long driverId = assignment.getDriver().getDriverId();
+            Long vehicleId = assignment.getVehicle().getVehicleId();
+            driverRepository.findByIdForUpdate(driverId).orElseThrow();
+            vehicleRepository.findByIdForUpdate(vehicleId).orElseThrow();
+            assignment.setAssignmentStatus("CANCELLED");
+            assignmentRepository.save(assignment);
+            tripMonitoring.record(assignment.getAssignmentId(), "CANCELLED");
+            booking.setDriverId(null);
+            booking.setVehicleId(null);
+            notificationService.createNotification(new com.diladrive.dto.NotificationCreateRequest(
+                    driverId, "Booking cancelled", reference + " was cancelled by the customer.", "BOOKING_CANCELLED"));
         }
 
         booking.setBookingStatus("CANCELLED");
         Booking saved = bookingRepository.save(booking);
+        if (customerTripService != null) customerTripService.releaseReservation(bookingId, confirmed);
         notificationService.createCustomerNotification(
                 customerId,
-                "Booking cancelled",
-                "Your booking " + bookingReference(bookingId) + " has been cancelled.",
+                confirmed ? confirmedTitle : "Booking cancelled",
+                message,
                 "BOOKING_CANCELLED");
+        notificationService.notifyAdmins("Booking cancelled", bookingReference(bookingId)
+                + " was cancelled by the customer.", "BOOKING_CANCELLED",
+                NotificationTarget.BOOKING, bookingId, "booking-cancelled:" + bookingId);
         return CustomerBookingResponse.from(saved);
     }
 
@@ -493,11 +560,13 @@ public class BookingService {
         if (booking.getDurationSeconds() != null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Use the complete booking editor to refresh road routing, availability and fare.");
-        }        String status = booking.getBookingStatus() == null
+        }
+        String status = booking.getBookingStatus() == null
                 ? "" : booking.getBookingStatus().trim().toUpperCase(Locale.ROOT);
-        if (!Set.of("PENDING", "PENDING_VERIFICATION").contains(status)
-                || assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
-                        bookingId, List.of("COMPLETED", "CANCELLED", "SUPERSEDED"))) {
+        BookingTransitions.require(status, BookingTransitions.Action.EDIT,
+                "Only a pending booking without an active driver assignment can be edited.");
+        if (assignmentRepository.existsByBookingBookingIdAndAssignmentStatusNotIn(
+                bookingId, List.of("COMPLETED", "CANCELLED", "SUPERSEDED"))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Only a pending booking without an active driver assignment can be edited.");
         }
@@ -549,9 +618,13 @@ public class BookingService {
         }
 
         LocalDateTime scheduledAt = LocalDateTime.of(request.bookingDate(), scheduledTime);
+        LocalDateTime provisionalEnd = scheduledAt.plusMinutes(legacyEditWindowMinutes);
+        int bootUsage = Booking.legacyBootUsage(request.luggageCount(), request.luggageSize());
         boolean selectedTypeAvailable = suitableVehicles(
-                scheduledAt, request.passengerCount(), request.luggageCount())
-                .anyMatch(vehicle -> vehicle.getVehicleType().equalsIgnoreCase(vehicleType));
+                scheduledAt, request.passengerCount(), bootUsage)
+                .filter(vehicle -> vehicle.getVehicleType().equalsIgnoreCase(vehicleType))
+                .anyMatch(vehicle -> customerTripService.conflictReason(vehicle.getVehicleId(), vehicle.getDriverId(),
+                        scheduledAt, provisionalEnd, bookingId) == null);
         if (!selectedTypeAvailable) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "The selected vehicle type is no longer available for this trip. Check availability again.");
@@ -567,6 +640,7 @@ public class BookingService {
                 ? null : normalizeOptional(request.flightNumber()));
         booking.setBookingPassengercount(request.passengerCount());
         booking.setBookingLuggagecount(request.luggageCount());
+        booking.setLuggageUnits(bootUsage);
         booking.setBookingLuggagesize(request.luggageCount() == 0
                 ? null : normalizeOptional(request.luggageSize()));
         booking.setBookingNotes(normalizeOptional(request.additionalNotes()));

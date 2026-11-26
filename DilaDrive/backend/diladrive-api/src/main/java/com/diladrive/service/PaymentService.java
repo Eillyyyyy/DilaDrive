@@ -87,15 +87,12 @@ public class PaymentService {
         var booking = bookings.findByIdForUpdate(bookingId)
                 .filter(item -> customerId.equals(item.getCustId()))
                 .orElseThrow(() -> notFound("Booking not found."));
+        if (!"COMPLETED".equalsIgnoreCase(booking.getBookingStatus())) {
+            throw conflict("Payment can only be submitted after the trip is completed.");
+        }
         BigDecimal fare = payableFare(booking);
         if (fare == null || fare.signum() <= 0) {
             throw conflict("Admin must set the final fare before payment can be submitted.");
-        }
-        String bookingStatus = booking.getBookingStatus() == null ? ""
-                : booking.getBookingStatus().trim().toUpperCase(Locale.ROOT);
-        if (Set.of("PENDING", "PENDING_VERIFICATION", "CANCELLED", "REJECTED")
-                .contains(bookingStatus)) {
-            throw conflict("Payment is available after Admin confirms the booking and fare.");
         }
         if (amount == null || amount.scale() > 2 || amount.signum() <= 0) {
             throw badRequest("Enter a payment amount greater than zero with at most two decimals.");
@@ -117,9 +114,7 @@ public class PaymentService {
         payment.setBooking(booking);
         payment.setAmount(amount.setScale(2, RoundingMode.UNNECESSARY));
         payment.setPaymentMethod(paymentMethod);
-        payment.setSurchargeAmount("CARD".equals(paymentMethod)
-                ? amount.multiply(new BigDecimal("0.06")).setScale(2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO.setScale(2));
+        payment.setSurchargeAmount(BigDecimal.ZERO.setScale(2));
         payment.setReceiptFileUrl(proof.path().getFileName().toString());
         try {
             Payment saved = payments.saveAndFlush(payment);
@@ -236,11 +231,9 @@ public class PaymentService {
 
     @Transactional(readOnly = true)
     public StoredProof readProof(Long paymentId, Long customerId, boolean admin) {
-        Payment payment = payments.findById(paymentId)
+        Payment payment = (admin ? payments.findById(paymentId)
+                : payments.findByPaymentIdAndBookingCustId(paymentId, customerId))
                 .orElseThrow(() -> notFound("Payment not found."));
-        if (!admin && !customerId.equals(payment.getBooking().getCustId())) {
-            throw notFound("Payment not found.");
-        }
         if (payment.getReceiptFileUrl() == null || payment.getReceiptFileUrl().isBlank()) {
             throw notFound("No uploaded proof is attached to this payment.");
         }
@@ -259,31 +252,13 @@ public class PaymentService {
     }
 
     private StoredProof validateAndStore(MultipartFile file) {
-        if (file == null || file.isEmpty() || file.getSize() > 10 * 1024 * 1024) {
-            throw badRequest("Choose a JPEG, PNG or PDF payment proof smaller than 10 MB.");
-        }
         try {
-            byte[] bytes = file.getBytes();
-            String type = contentType(bytes);
-            if (type == null) throw badRequest("The selected file is not a valid JPEG, PNG or PDF.");
-            String extension = switch (type) {
-                case "image/jpeg" -> ".jpg";
-                case "image/png" -> ".png";
-                default -> ".pdf";
-            };
-            if ("image/jpeg".equals(type) || "image/png".equals(type)) {
-                try (var input = javax.imageio.ImageIO.createImageInputStream(
-                        new java.io.ByteArrayInputStream(bytes))) {
-                    if (input == null || !javax.imageio.ImageIO.getImageReaders(input).hasNext()) {
-                        throw badRequest("The selected image file is invalid.");
-                    }
-                }
-            }
-            Path path = storageDirectory.resolve(UUID.randomUUID() + extension).normalize();
+            ImageUpload image = ImageUpload.read(file);
+            Path path = storageDirectory.resolve(UUID.randomUUID() + image.extension()).normalize();
             if (!path.startsWith(storageDirectory)) throw badRequest("Invalid payment proof path.");
             Files.createDirectories(storageDirectory);
-            Files.write(path, bytes);
-            return new StoredProof(bytes, type, path);
+            Files.write(path, image.bytes(), java.nio.file.StandardOpenOption.CREATE_NEW);
+            return new StoredProof(image.bytes(), image.mediaType(), path);
         } catch (IOException exception) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "The payment proof could not be stored.", exception);

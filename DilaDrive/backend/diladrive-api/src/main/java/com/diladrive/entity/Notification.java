@@ -39,6 +39,30 @@ public class Notification {
     @Column(name = "notification_createdat", nullable = false)
     private LocalDateTime sentAt;
 
+    @Column(name = "entity_type", length = 24)
+    private String entityType;
+
+    @Column(name = "entity_id")
+    private Long entityId;
+
+    @Column(name = "target_route", length = 120)
+    private String targetRoute;
+
+    @Column(name = "read_at")
+    private LocalDateTime readAt;
+
+    public String getEntityType() { return entityType; }
+    public Long getEntityId() { return entityId; }
+    public String getTargetRoute() { return targetRoute; }
+    public LocalDateTime getReadAt() { return readAt; }
+
+    public void markRead(LocalDateTime now) {
+        if (!read) {
+            read = true;
+            readAt = now;
+        }
+    }
+
     @PrePersist
     void setDefaults() {
         if (driver != null) {
@@ -46,7 +70,7 @@ public class Notification {
             recipientId = driver.getDriverId();
         }
         if (sentAt == null) {
-            sentAt = LocalDateTime.now();
+            sentAt = LocalDateTime.now(java.time.ZoneId.of("Asia/Kuala_Lumpur"));
         }
     }
 

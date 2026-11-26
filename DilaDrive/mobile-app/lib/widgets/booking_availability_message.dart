@@ -7,10 +7,12 @@ class BookingAvailabilityMessage extends StatelessWidget {
       {super.key,
       required this.result,
       required this.onRetry,
-      required this.onChange});
+      required this.onChange,
+      this.onChangeTime});
   final AvailabilityResult result;
   final VoidCallback onRetry;
   final VoidCallback onChange;
+  final VoidCallback? onChangeTime;
   @override
   Widget build(BuildContext context) {
     final serviceFailure = result.status == AvailabilityStatus.serviceError ||
@@ -41,9 +43,12 @@ class BookingAvailabilityMessage extends StatelessWidget {
       OutlinedButton.icon(
           onPressed: onChange,
           icon: const Icon(Icons.edit_outlined),
-          label: Text(result.status == AvailabilityStatus.scheduleUnavailable
-              ? 'Change Date/Time'
-              : 'Change Trip Details')),
+          label: const Text('Edit trip details')),
+      if (result.status == AvailabilityStatus.scheduleUnavailable ||
+          result.status == AvailabilityStatus.driverUnavailable)
+        TextButton(
+            onPressed: onChangeTime ?? onChange,
+            child: const Text('Change date or time')),
     ]);
   }
 }

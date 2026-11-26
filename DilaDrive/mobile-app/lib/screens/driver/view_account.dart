@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import '../../controllers/driver_profile_controller.dart';
 import '../../services/driver_profile_service.dart';
 import '../../theme/app_theme.dart';
@@ -32,7 +34,7 @@ class _DriverViewAccountPageState extends State<DriverViewAccountPage> {
   void _signIn() => Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => const LoginPage()), (_) => false);
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(
             title: Text(widget.vehicleOnly
@@ -80,7 +82,7 @@ class _DriverViewAccountPageState extends State<DriverViewAccountPage> {
                   onRefresh: _controller.load,
                   child: ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(18),
+                      padding: pagePadding(context),
                       children: [
                         widget.vehicleOnly
                             ? DriverAssignedVehicleCard(profile: profile)

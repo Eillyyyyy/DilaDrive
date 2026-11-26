@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import '../../widgets/responsive_page.dart';
 
 import '../../models/mobile_user.dart';
 import '../../services/customer_notification_service.dart';
@@ -82,6 +83,7 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
         backgroundColor: AppTheme.primaryNavy,
         foregroundColor: Colors.white,
         shape: const CircleBorder(),
+        tooltip: '+ Create Booking',
         onPressed: _openCreateBooking,
         child: const Icon(Icons.add, size: 30),
       ),
@@ -90,38 +92,38 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
         color: Colors.white,
         shape: const CircularNotchedRectangle(),
         notchMargin: 8,
-        child: SizedBox(
-          height: 65,
-          child: Row(
-            children: [
-              _navItem(
-                Icons.home_outlined,
-                Icons.home,
-                'Home',
-                0,
-              ),
-              _navItem(
-                Icons.inventory_2_outlined,
-                Icons.inventory_2,
-                'Bookings',
-                1,
-              ),
-              const SizedBox(width: 48),
-              _navItem(
-                Icons.notifications_outlined,
-                Icons.notifications,
-                'Alerts',
-                2,
-              ),
-              _navItem(
-                Icons.person_outline,
-                Icons.person,
-                'Profile',
-                3,
-              ),
-            ],
-          ),
-        ),
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: DilaDrivePageLayout(
+            child: Row(
+          children: [
+            _navItem(
+              Icons.home_outlined,
+              Icons.home,
+              'Home',
+              0,
+            ),
+            _navItem(
+              Icons.inventory_2_outlined,
+              Icons.inventory_2,
+              'My Bookings',
+              1,
+            ),
+            const SizedBox(width: 60),
+            _navItem(
+              Icons.notifications_outlined,
+              Icons.notifications,
+              'Notifications',
+              2,
+            ),
+            _navItem(
+              Icons.person_outline,
+              Icons.person,
+              'Profile',
+              3,
+            ),
+          ],
+        )),
       ),
     );
   }
@@ -175,12 +177,16 @@ class _CustomerNavigationPageState extends State<CustomerNavigationPage> {
             else
               navIcon,
             const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                color: selected ? AppTheme.primaryNavy : AppTheme.secondaryText,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                  color:
+                      selected ? AppTheme.primaryNavy : AppTheme.secondaryText,
+                ),
               ),
             ),
           ],

@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 
 import '../../models/customer_booking.dart';
 import '../../models/customer_booking_ordering.dart';
 import '../../models/mobile_user.dart';
 import '../../services/customer_booking_service.dart';
+import '../../services/push_notification_service.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login.dart';
 import 'booking_details.dart';
@@ -29,16 +34,21 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
   late final CustomerBookingService _bookingService =
       widget.bookingService ?? CustomerBookingService();
   late Future<List<CustomerBooking>> _bookingsFuture;
+  late final StreamSubscription<void> _assignmentUpdates;
   _BookingFilter _filter = _BookingFilter.all;
 
   @override
   void initState() {
     super.initState();
     _bookingsFuture = _bookingService.getMyBookings();
+    _assignmentUpdates = PushNotificationService.updates.listen((_) {
+      if (mounted) unawaited(_refresh());
+    });
   }
 
   @override
   void dispose() {
+    unawaited(_assignmentUpdates.cancel());
     if (_ownsBookingService) _bookingService.dispose();
     super.dispose();
   }
@@ -64,7 +74,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -104,33 +114,28 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
             onRefresh: _refresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+              padding: pagePadding(context),
               children: [
                 _BookingsIntro(totalBookings: bookings.length),
                 const SizedBox(height: 16),
-                SizedBox(
-                  height: 42,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: [
-                      for (final filter in _BookingFilter.values)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: FilterChip(
-                            label: Text(_filterLabel(filter)),
-                            selected: _filter == filter,
-                            onSelected: (_) => setState(() => _filter = filter),
-                            selectedColor: AppTheme.paleBlue,
-                            checkmarkColor: AppTheme.primaryNavy,
-                            side: BorderSide(
-                              color: _filter == filter
-                                  ? AppTheme.secondarySkyBlue
-                                  : AppTheme.border,
-                            ),
-                          ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final filter in _BookingFilter.values)
+                      FilterChip(
+                        label: Text(_filterLabel(filter)),
+                        selected: _filter == filter,
+                        onSelected: (_) => setState(() => _filter = filter),
+                        selectedColor: AppTheme.paleBlue,
+                        checkmarkColor: AppTheme.primaryNavy,
+                        side: BorderSide(
+                          color: _filter == filter
+                              ? AppTheme.secondarySkyBlue
+                              : AppTheme.border,
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 if (visibleBookings.isEmpty)

@@ -23,6 +23,7 @@ void main() {
     'available': true,
     'availabilityStatus': 'AVAILABLE',
     'vehicle': {
+      'vehicleId': 36,
       'model': 'Sedan',
       'vehicleType': 'Sedan',
       'passengerCapacity': 4,
@@ -44,9 +45,10 @@ void main() {
       'availability sends coordinates and bag quantities, uses backend road fare',
       () async {
     final d = draft();
+    final paths = <String>[];
     final service = BookingService(client: MockClient((request) async {
+      paths.add(request.url.path);
       expect(request.method, 'POST');
-      expect(request.url.path, '/api/bookings/estimate');
       final body = jsonDecode(request.body) as Map;
       expect(body['pickupLatitude'], 3);
       expect(body['smallCount'], 1);
@@ -57,8 +59,11 @@ void main() {
     }));
     final result = await service.checkAvailability(d);
     expect(result.isAvailable, true);
-    expect(d.fareEstimate!.total, 126);
-    expect(d.fareEstimate!.durationSeconds, 7200);
+    expect(d.fareEstimate, isNull);
+    final fare = await service.estimateFare(d);
+    expect(fare.total, 126);
+    expect(fare.durationSeconds, 7200);
+    expect(paths, ['/api/bookings/availability', '/api/bookings/estimate']);
     service.dispose();
   });
   test('confirm sends retry key and reads persisted pending reference',
@@ -71,7 +76,11 @@ void main() {
     final service = BookingService(client: MockClient((request) async {
       expect(request.url.path, '/api/bookings/customer/complete');
       expect(request.headers['Idempotency-Key'], 'unique-key');
-      expect((jsonDecode(request.body) as Map).containsKey('vehicleId'), false);
+      final body = jsonDecode(request.body) as Map;
+      expect(body.containsKey('preferredVehicleId'), isFalse);
+      expect(body['vehicleCategory'], 'Sedan');
+      expect(body.containsKey('vehicleId'), false);
+      expect(body.containsKey('driverId'), false);
       return http.Response(
           '{"bookingReference":"BK-000123","bookingStatus":"PENDING"}', 201);
     }));

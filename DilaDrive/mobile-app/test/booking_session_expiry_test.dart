@@ -37,7 +37,6 @@ void main() {
           ..bookingDate = DateTime(2030, 1, 1)
           ..fareEstimate = const FareEstimate(
               distanceKm: 58,
-              vehicleModel: 'Sedan',
               baseFare: 10,
               distanceCharge: 116,
               additionalCharges: [],
@@ -50,6 +49,7 @@ void main() {
             luggageCapacity: 2,
           );
 
+    draft.availabilityCheckedFor = draft.availabilityKey;
     await tester.pumpWidget(MaterialApp(
       home: BookingReviewPage(
         draft: draft,

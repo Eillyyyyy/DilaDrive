@@ -11,7 +11,13 @@ public record CustomerProfileResponse(
         String type,
         String companyName,
         String companyRegistrationNumber,
-        String profileImage) {
+        String profileImage,
+        String rejectionReason) {
+
+    public CustomerProfileResponse(Long id, String name, String email, String phone, String status,
+            String type, String companyName, String companyRegistrationNumber, String profileImage) {
+        this(id, name, email, phone, status, type, companyName, companyRegistrationNumber, profileImage, null);
+    }
 
     public static CustomerProfileResponse from(Customer customer) {
         return new CustomerProfileResponse(
@@ -23,6 +29,7 @@ public record CustomerProfileResponse(
                 customer.getCustType(),
                 customer.getCompanyName(),
                 customer.getCompanyRegistrationNumber(),
-                customer.getProfileImage());
+                customer.getProfileImage(),
+                "REJECTED".equalsIgnoreCase(customer.getCustStatus()) ? customer.getRejectionReason() : null);
     }
 }

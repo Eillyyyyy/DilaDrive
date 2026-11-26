@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../services/api";
 
 const money = value => value == null ? "—" : Number(value).toLocaleString("en-MY", {
@@ -41,20 +41,14 @@ export function TripPricingSettings() {
   }
   return <section className={panelStyle}>
     <h2 className="text-lg font-semibold">Trip pricing policy</h2>
-    <p className="text-sm text-slate-600">Hourly charges apply only to hours approved for a booking. Commission and partial-hour settings are provisional pending owner confirmation.</p>
+    <p className="text-sm text-slate-600">Hourly charges apply only to hours approved for a booking. The partial-hour policy determines how approved hours are charged.</p>
     <Notice error={error} success={message} />
     {!form && !error && <p role="status">Loading pricing policy…</p>}
     {form && <form onSubmit={save}>
       <fieldset disabled={busy} className="grid gap-4 sm:grid-cols-2">
-        {[["ratePerKm", "Default rate per km (RM)", "0.0001"], ["hourlyRate", "Approved extra hours rate (RM)", "0.01"],
-          ["commissionPercent", "Driver commission (%)", "0.01", 100]].map(([field, label, step, max]) =>
-          <label key={field}>{label}<input className={inputStyle} type="number" min="0" max={max} step={step}
+        {[["ratePerKm", "Default rate per km (RM)", "0.0001"], ["hourlyRate", "Approved extra hours rate (RM)", "0.01"]].map(([field, label, step]) =>
+          <label key={field}>{label}<input className={inputStyle} type="number" min="0" step={step}
             required value={form[field]} onChange={e => change(field, e.target.value)} /></label>)}
-        <label>Commission basis<select className={inputStyle} value={form.commissionBasis}
-          onChange={e => change("commissionBasis", e.target.value)}>
-          <option value="BASE_AND_HOURS">Base fare and approved hours</option>
-          <option value="BASE_ONLY">Base fare only</option><option value="FINAL_FARE">Final fare including toll and parking</option>
-        </select></label>
         <label>Partial-hour policy<select className={inputStyle} value={form.partialHourPolicy}
           onChange={e => change("partialHourPolicy", e.target.value)}>
           <option value="PRORATE">Prorate</option><option value="ROUND_UP">Round up to the next hour</option>
@@ -162,82 +156,4 @@ export function TripCharges({ bookingId, allowDistance = false, canEditCharges =
         </li>)}</ul></details>}
     </>}
   </section>;
-}
-
-export default function DriverEarnings() {
-  const path = "/admin/driver-earnings";
-  const [filters, setFilters] = useState({ month: new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit",
-  }).format(), driverId: "", status: "" });
-  const [drivers, setDrivers] = useState([]);
-  const [result, setResult] = useState(null);
-  const [history, setHistory] = useState(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  async function load(parameters = filters) {
-    setBusy(true); setError(""); setResult(null); setHistory(null);
-    try {
-      setResult((await api.get(path, { params: Object.fromEntries(Object.entries(parameters).filter(([, value]) => value)) })).data);
-    } catch (e) { setError(errorText(e)); }
-    finally { setBusy(false); }
-  }
-  useEffect(() => {
-    api.get("/drivers").then(({ data }) => setDrivers(data))
-      .catch(e => setError(errorText(e)));
-    load();
-  }, []);
-  async function payment(trip) {
-    const next = trip.payment_status === "PAID" ? "UNPAID" : "PAID";
-    const reason = window.prompt(next === "PAID" ? "Confirm payment was made and enter a reference." : "Reason for reopening this commission.");
-    if (!reason?.trim()) return;
-    setBusy(true); setError(""); setMessage("");
-    try {
-      await api.patch(`${path}/${trip.assignment_id}/payment-status`, { status: next, reason: reason.trim() });
-      await load();
-      setMessage("Commission payment status updated.");
-    } catch (e) { setError(errorText(e)); }
-    finally { setBusy(false); }
-  }
-  async function showHistory(trip) {
-    setError("");
-    try { setHistory((await api.get(`${path}/${trip.assignment_id}/history`)).data); }
-    catch (e) { setError(errorText(e)); }
-  }
-  return <div className="space-y-5">
-    <h1 className="text-2xl font-bold">Driver earnings</h1>
-    <section className={panelStyle}>
-      <form onSubmit={e => { e.preventDefault(); setMessage(""); load(); }} className="flex flex-wrap items-end gap-3">
-        <label>Month<input required type="month" className={inputStyle} value={filters.month}
-          onChange={e => setFilters({ ...filters, month: e.target.value })} /></label>
-        <label>Driver<select className={inputStyle} value={filters.driverId} onChange={e => setFilters({ ...filters, driverId: e.target.value })}>
-          <option value="">All drivers</option>{drivers.map(driver =>
-            <option key={driver.driverId} value={driver.driverId}>{driver.driverName}</option>)}
-        </select></label>
-        <label>Payment status<select className={inputStyle} value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}>
-          <option value="">All statuses</option><option value="UNPAID">Unpaid</option><option value="PAID">Paid</option>
-        </select></label>
-        <button className={actionStyle} disabled={busy}>Apply filters</button>
-      </form>
-      <Notice error={error} success={message} />
-      {busy && <p role="status">Loading earnings…</p>}
-      {result && <><h2 className="font-semibold">Monthly totals · {result.month}</h2>
-        {result.drivers.length === 0 && <p>No recorded commissions match these filters.</p>}
-        <ul className="grid gap-3 sm:grid-cols-2">{result.drivers.map(driver => <li key={driver.driver_id} className="rounded-xl border p-4 text-sm">
-          <h3 className="font-semibold">{driver.driver_name} · {driver.payment_status}</h3>
-          <p>{driver.completed_trips} completed trips · {money(driver.commissionable_fare)} commissionable</p>
-          <p>Earned {money(driver.earned)} · Paid {money(driver.paid)} · Outstanding {money(driver.outstanding)}</p>
-        </li>)}</ul>
-        {result.trips.length > 0 && <h2 className="font-semibold">Trip commissions</h2>}
-        <ul className="space-y-2">{result.trips.map(trip => <li key={trip.assignment_id} className="flex flex-wrap items-center gap-3 rounded-xl border p-3 text-sm">
-          <span className="mr-auto">{trip.driver_name} · Booking #{trip.booking_id} · {money(trip.commission_amount)} ({trip.commission_rate}%) · {trip.payment_status}</span>
-          <button disabled={busy} onClick={() => payment(trip)} className="font-semibold text-teal-700">{trip.payment_status === "PAID" ? "Reopen" : "Mark paid"}</button>
-          <button disabled={busy} onClick={() => showHistory(trip)} className="font-semibold text-teal-700">History</button>
-        </li>)}</ul></>}
-      {history && <div><h3 className="font-semibold">Commission history</h3>
-        {history.length === 0 && <p>No payment or amount changes recorded.</p>}
-        <ul>{history.map(row => <li key={row.id}>{row.action} · {money(row.previous_amount)} → {money(row.new_amount)} · Admin #{row.admin_id} · {new Date(row.changed_at).toLocaleString("en-MY")} · {row.reason}</li>)}</ul>
-      </div>}
-    </section>
-  </div>;
 }

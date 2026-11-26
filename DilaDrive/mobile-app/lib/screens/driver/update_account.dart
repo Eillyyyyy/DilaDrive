@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../widgets/driver_profile_widgets.dart';
+import '../../widgets/profile_edit_fields.dart';
 
 import '../../models/driver_profile.dart';
 import '../../services/driver_profile_service.dart';
@@ -32,6 +35,8 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
   bool _picking = false;
   String? _photo;
   bool _photoChanged = false;
+  DriverProfile? _original;
+  bool _discarding = false;
   final _picker = ImagePicker();
 
   @override
@@ -47,6 +52,7 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
     _email.text = profile.email;
     _phone.text = profile.phone ?? '';
     _photo = profile.profileImage;
+    _original = profile;
     _photoChanged = false;
     return profile;
   }
@@ -61,7 +67,7 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate() || _saving) return;
+    if (_saving || _picking || !_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
       final updated = await _service.updateProfile(
@@ -85,6 +91,20 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _cancel() async {
+    if (_saving || _picking || _discarding) return;
+    final original = _original;
+    final changed = original != null &&
+        (_name.text.trim() != original.name.trim() ||
+            _email.text.trim() != original.email.trim() ||
+            _phone.text.trim() != (original.phone ?? '').trim() ||
+            _photo != original.profileImage);
+    _discarding = true;
+    final discard = !changed || await confirmDiscardProfileChanges(context);
+    _discarding = false;
+    if (discard && mounted) Navigator.pop(context);
   }
 
   void _message(String text) {
@@ -162,9 +182,17 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _cancel();
+      },
+      child: DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
-        appBar: AppBar(title: const Text('Update account')),
+        appBar: AppBar(
+          title: const Text('Update account'),
+          leading: BackButton(onPressed: _cancel),
+        ),
         body: FutureBuilder<DriverProfile>(
           future: _profile,
           builder: (context, snapshot) {
@@ -195,7 +223,7 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
             }
             return Form(
                 key: _formKey,
-                child: ListView(padding: const EdgeInsets.all(18), children: [
+                child: ListView(padding: pagePadding(context), children: [
                   Center(
                       child: Column(children: [
                     DriverProfileAvatar(image: _photo, size: 96),
@@ -222,13 +250,16 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
                       ]),
                   ])),
                   const SizedBox(height: 12),
-                  _field(_name, 'Full name', Icons.person_outline),
-                  const SizedBox(height: 14),
-                  _field(_email, 'Email address', Icons.email_outlined,
-                      keyboardType: TextInputType.emailAddress),
-                  const SizedBox(height: 14),
-                  _field(_phone, 'Phone number', Icons.phone_outlined,
-                      keyboardType: TextInputType.phone),
+                  Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      spacing: 12,
+                      children: [
+                        _field(_name, 'Full name', Icons.person_outline),
+                        _field(_email, 'Email address', Icons.email_outlined,
+                            keyboardType: TextInputType.emailAddress),
+                        _field(_phone, 'Phone number', Icons.phone_outlined,
+                            keyboardType: TextInputType.phone),
+                      ]),
                   const SizedBox(height: 23),
                   SizedBox(
                       height: 52,
@@ -242,6 +273,10 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
                                       strokeWidth: 2, color: Colors.white))
                               : const Text('Save changes'))),
                   TextButton(
+                    onPressed: _saving || _picking ? null : _cancel,
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
                       onPressed: _saving || _picking
                           ? null
                           : () => Navigator.push<void>(
@@ -253,7 +288,7 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
                 ]));
           },
         ),
-      );
+      ));
 
   Widget _field(TextEditingController controller, String label, IconData icon,
           {TextInputType? keyboardType}) =>
@@ -276,9 +311,8 @@ class _DriverUpdateAccountPageState extends State<DriverUpdateAccountPage> {
             return '$label must be $maxLength characters or fewer.';
           }
           if (label == 'Phone number') {
-            final digits = text.replaceAll(RegExp(r'\D'), '');
-            if (digits.length < 9 || digits.length > 15) {
-              return 'Enter a valid phone number (9 to 15 digits).';
+            if (!isMalaysianProfilePhone(text)) {
+              return 'Enter a valid Malaysian phone number.';
             }
           }
           if (label == 'Email address' &&

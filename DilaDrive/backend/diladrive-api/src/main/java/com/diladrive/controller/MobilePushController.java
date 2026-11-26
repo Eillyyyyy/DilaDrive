@@ -13,7 +13,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class MobilePushController {
     private final BookingPushService push;
     public MobilePushController(BookingPushService push){this.push=push;}
-    public record Token(@NotBlank @Size(max=4096) String token) {}
+    public record Token(
+            @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
+            @NotBlank @Size(max=4096) String token) {
+        @Override public String toString() { return "Token[redacted]"; }
+    }
     @PostMapping public void register(@Valid @RequestBody Token token,HttpServletRequest request) {update(token,request,false);}
     @DeleteMapping public void unregister(@Valid @RequestBody Token token,HttpServletRequest request) {update(token,request,true);}
     private void update(Token token,HttpServletRequest request,boolean remove) {

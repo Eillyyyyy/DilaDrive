@@ -12,6 +12,8 @@ public interface AssignmentService {
 
     AssignmentResponse getAssignment(Long assignmentId);
 
+    AssignmentResponse getDriverAssignment(Long assignmentId, Long driverId);
+
     AssignmentResponse createAssignment(AssignmentRequest request);
 
     AssignmentResponse reassign(Long assignmentId, AssignmentRequest request);

@@ -26,7 +26,7 @@ class CustomerNotificationService {
 
     late final http.Response response;
     try {
-      response = await _client.get(
+      response = await fetchMobilePages(_client,
         Uri.parse('${AppConfig.apiBaseUrl}/api/notifications/customer/mine'),
         headers: {'Accept': 'application/json', ...MobileSession.headers},
       ).timeout(const Duration(seconds: 15));
@@ -78,6 +78,11 @@ class CustomerNotificationService {
               'The server returned an invalid notification.');
         }
         return CustomerNotification.fromJson(item);
+      }).where((notification) {
+        final type = notification.type?.trim().toUpperCase() ?? '';
+        return !type.startsWith('PAYMENT') &&
+            !type.startsWith('RECEIPT') &&
+            !(type == 'DOCUMENT' && notification.message.startsWith('REC-'));
       }).toList(growable: false);
     } on FormatException catch (error) {
       throw CustomerNotificationException(error.message);

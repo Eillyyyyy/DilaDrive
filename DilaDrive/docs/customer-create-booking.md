@@ -35,10 +35,10 @@ Enter **approved company rates**, not the example rates from the task, in
 Vehicle type matching is case insensitive. Missing/inactive pricing blocks quoting and
 creation with a meaningful error. No pricing records are seeded by the migration.
 
-Vehicle `vehicle_capacity` and `vehicle_luggagecapacity` are read from PostgreSQL.
-Luggage capacity represents weighted units available **with all recorded passenger seats
-in use**; fleet operators must audit these values against the actual vehicle configuration.
-Small/medium/large bags use 1/2/3 units. These weights are fixed consistently in this version.
+The vehicle category in PostgreSQL defines passenger capacity and boot capacity
+with all category seats occupied. Small, medium, and large bags use 1, 2, and
+3 luggage units respectively. Bag counts are independent of passenger count.
+The admin vehicle forms show both capacities as read-only values.
 
 Chrome and Android now share the authenticated backend geocoding gateway, while GPS
 and permissions stay on the device. `BOOKING_LOCATION_API_URL` remains an optional
@@ -86,9 +86,9 @@ legacy bookings retain their existing editor.
 ## Availability, holds and fares
 
 Suitable vehicles have operational status AVAILABLE (the existing fleet convention) or
-ACTIVE, enough recorded seats and luggage units, and valid recorded road-tax/service
+ACTIVE, enough passenger seats and boot units, and valid recorded road-tax/service
 dates. Maintenance status and unavailable periods exclude them. The recommendation sorts
-by seats, luggage capacity and an internal stable tie-breaker; customers see vehicle types
+by seats, boot capacity and an internal stable tie-breaker; customers see vehicle types
 and capacities, without registration numbers, individual vehicle IDs or driver selection.
 
 The slot is `[pickup, pickup + road duration + buffer)`. Conflicts use

@@ -17,7 +17,7 @@ class DriverNotificationService {
   void dispose() => _client.close();
 
   Future<List<CustomerNotification>> getNotifications(int driverId) async {
-    final response = await _request(() => _client.get(
+    final response = await _request(() => fetchMobilePages(_client,
           Uri.parse(
               '${AppConfig.apiBaseUrl}/api/notifications/driver/$driverId'),
           headers: {'Accept': 'application/json', ...MobileSession.headers},

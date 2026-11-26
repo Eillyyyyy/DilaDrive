@@ -3,7 +3,11 @@ package com.diladrive.controller;
 import com.diladrive.entity.Customer;
 import com.diladrive.dto.CustomerProfileResponse;
 import com.diladrive.dto.CustomerProfileUpdateRequest;
+import com.diladrive.dto.CustomerVerificationRequest;
+import com.diladrive.dto.CustomerVerificationResponse;
+import com.diladrive.security.AdminSession;
 import com.diladrive.service.CustomerService;
+import com.diladrive.service.CustomerVerificationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -18,10 +22,18 @@ import java.util.List;
 public class CustomerController {
 
     private final CustomerService customerService;
+    private final CustomerVerificationService verification;
 
     public CustomerController(
-            CustomerService customerService) {
+            CustomerService customerService, CustomerVerificationService verification) {
         this.customerService = customerService;
+        this.verification = verification;
+    }
+
+    @PatchMapping("/{id}/verification")
+    public CustomerVerificationResponse verifyCustomer(@PathVariable Long id,
+            @Valid @RequestBody CustomerVerificationRequest decision, HttpServletRequest request) {
+        return verification.verify(AdminSession.requireAdminId(request), id, decision);
     }
 
     @GetMapping
@@ -33,11 +45,11 @@ public class CustomerController {
     @PutMapping("/{id}")
     public ResponseEntity<?> updateCustomer(
             @PathVariable Long id,
-            @RequestBody Customer customer,
+            @Valid @RequestBody com.diladrive.dto.AdminCustomerUpdateRequest customer,
             HttpServletRequest request) {
         requireAdminId(request);
         try {
-            return ResponseEntity.ok(customerService.updateCustomer(id, customer));
+            return ResponseEntity.ok(customerService.updateCustomer(id, customer.toUpdate()));
         } catch (IllegalArgumentException exception) {
             return ResponseEntity.badRequest().body(exception.getMessage());
         }

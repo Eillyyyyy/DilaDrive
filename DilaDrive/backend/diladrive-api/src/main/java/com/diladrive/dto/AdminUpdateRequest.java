@@ -10,5 +10,10 @@ public record AdminUpdateRequest(
         @NotBlank @Size(max = 30) String phone,
         @NotBlank @Size(max = 500) String address,
         String profileImage,
-        @Size(max = 20) String role) {
+        @Size(max = 20) String role,
+        @Size(max = 20) String status) {
+    public AdminUpdateRequest(String name, String email, String phone, String address,
+            String profileImage, String role) {
+        this(name, email, phone, address, profileImage, role, null);
+    }
 }

@@ -11,5 +11,7 @@ public record VehicleRecommendationResponse(
             String vehicleType,
             Integer passengerCapacity,
             Integer luggageCapacity) {
+        @com.fasterxml.jackson.annotation.JsonProperty("bootCapacityUnits")
+        public Integer bootCapacityUnits() { return luggageCapacity; }
     }
 }

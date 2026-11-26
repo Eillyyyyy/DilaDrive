@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+import '../../widgets/trip_timeline.dart';
+
 import '../../models/customer_booking.dart';
+import '../../models/booking_schedule.dart';
 import '../../services/customer_booking_service.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login.dart';
@@ -19,6 +23,7 @@ class BookingDetailsPage extends StatefulWidget {
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   final CustomerBookingService _bookingService = CustomerBookingService();
   bool _cancelling = false;
+  bool _rescheduling = false;
 
   Future<void> _editPendingBooking() async {
     final changed = await Navigator.push<bool>(
@@ -28,6 +33,54 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       ),
     );
     if (changed == true && mounted) Navigator.pop(context, true);
+  }
+
+  Future<void> _reschedule() async {
+    final now = DateTime.now().toUtc().add(const Duration(hours: 8));
+    final today = DateTime(now.year, now.month, now.day);
+    final tripDate = widget.booking.tripDate;
+    final lastDate = DateTime(today.year + 2, today.month, today.day);
+    final date = await showDatePicker(
+      context: context,
+      initialDate: tripDate != null && !tripDate.isBefore(today) ? tripDate : today,
+      firstDate: today,
+      lastDate: tripDate != null && tripDate.isAfter(lastDate) ? tripDate : lastDate,
+      helpText: 'Select pickup date (Malaysia time)',
+    );
+    if (date == null || !mounted) return;
+    final existing = widget.booking.pickupTime?.split(':');
+    final hour = existing == null ? null : int.tryParse(existing.first);
+    final minute = existing == null || existing.length < 2
+        ? null
+        : int.tryParse(existing[1]);
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: hour ?? now.hour, minute: minute ?? now.minute),
+      helpText: 'Select pickup time (Malaysia time)',
+    );
+    if (time == null || !mounted) return;
+
+    setState(() => _rescheduling = true);
+    try {
+      await _bookingService.rescheduleBooking(
+        widget.booking.id,
+        DateTime(date.year, date.month, date.day, time.hour, time.minute),
+      );
+      if (mounted) Navigator.pop(context, true);
+    } on CustomerBookingException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+      if (error.requiresLogin) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(builder: (_) => const LoginPage()),
+          (_) => false,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _rescheduling = false);
+    }
   }
 
   @override
@@ -42,7 +95,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       builder: (context) => AlertDialog(
         title: const Text('Cancel this booking?'),
         content: const Text(
-          'You can cancel while the request is pending or confirmed, before a driver is assigned.',
+          'Confirmed bookings require advance notice before pickup. Contact Admin if it is too late to cancel.',
         ),
         actions: [
           TextButton(
@@ -82,13 +135,18 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final booking = widget.booking;
+    final canReschedule = booking.normalizedStatus == 'CONFIRMED' &&
+        booking.activeAssignment &&
+        (booking.assignedTripStatus == null || booking.assignedTripStatus == 'ASSIGNED');
     final statusColor = _statusColor(booking);
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(title: const Text('Booking details')),
       body: ListView(
-        padding: const EdgeInsets.all(18),
+        padding: pagePadding(context),
         children: [
+          if (booking.isActive || booking.isCompleted)
+            TripTimeline(id: booking.id, customer: true),
           BookingFareProposals(
               bookingId: booking.id,
               onAccepted: () => Navigator.pop(context, true)),
@@ -177,9 +235,24 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 const Divider(height: 20),
                 _InfoLine(
                   icon: Icons.directions_car_outlined,
-                  label: 'Vehicle type',
-                  value: _value(booking.type),
+                  label: 'Vehicle category',
+                  value:
+                      _value(booking.assignedVehicleCategory ?? booking.type),
                 ),
+              ],
+              if (booking.assignedVehiclePlate case final plate?) ...[
+                const Divider(height: 20),
+                _InfoLine(
+                    icon: Icons.directions_car_outlined,
+                    label: 'Assigned vehicle',
+                    value: [booking.assignedVehicleModel, plate]
+                        .whereType<String>()
+                        .join(' / ')),
+              ],
+              if (booking.assignedDriver case final driver?) ...[
+                const Divider(height: 20),
+                _InfoLine(
+                    icon: Icons.person_outline, label: 'Driver', value: driver),
               ],
               if (booking.flightNumber != null &&
                   booking.flightNumber!.trim().isNotEmpty) ...[
@@ -189,6 +262,21 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                   label: 'Flight number',
                   value: booking.flightNumber!,
                 ),
+              ],
+              if (booking.flightDate case final date?) ...[
+                const Divider(height: 20),
+                _InfoLine(
+                    icon: Icons.event_outlined,
+                    label: 'Flight date',
+                    value: bookingIsoDate(date)),
+              ],
+              if (parseBookingFlightTime(booking.flightTime)
+                  case final time?) ...[
+                const Divider(height: 20),
+                _InfoLine(
+                    icon: Icons.schedule_outlined,
+                    label: 'Flight time',
+                    value: bookingClockLabel(time.hour, time.minute)),
               ],
               if (booking.passengerCount != null) ...[
                 const Divider(height: 20),
@@ -219,13 +307,23 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         '${booking.smallCount} / ${booking.mediumCount} / ${booking.largeCount}'),
                 _InfoLine(
                     icon: Icons.inventory_2_outlined,
-                    label: 'Luggage units',
-                    value: '${booking.luggageUnits}'),
+                    label: 'Total luggage',
+                    value:
+                        '${(booking.smallCount ?? 0) + (booking.mediumCount ?? 0) + (booking.largeCount ?? 0)} bags'),
                 _InfoLine(
                     icon: Icons.access_time,
                     label: 'Estimated duration',
                     value:
                         '${((booking.durationSeconds ?? 0) / 60).ceil()} minutes'),
+              ],
+              if (booking.isPending &&
+                  booking.reservationStatus == 'EXPIRED') ...[
+                const Divider(height: 20),
+                const _InfoLine(
+                    icon: Icons.event_busy_outlined,
+                    label: 'Temporary reservation',
+                    value:
+                        'Expired. DilaDrive will recheck availability during review.'),
               ],
               if (booking.rejectionReason != null) ...[
                 const Divider(height: 20),
@@ -286,12 +384,20 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           ],
         ],
       ),
-      bottomNavigationBar: booking.canCancel || booking.isPending
+      bottomNavigationBar: booking.canCancel || booking.isPending || canReschedule
           ? SafeArea(
               minimum: const EdgeInsets.fromLTRB(18, 8, 18, 14),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (canReschedule) ...[
+                    FilledButton.tonalIcon(
+                      onPressed: _rescheduling || _cancelling ? null : _reschedule,
+                      icon: const Icon(Icons.event_outlined),
+                      label: Text(_rescheduling ? 'Saving…' : 'Change pickup date or time'),
+                    ),
+                    if (booking.canCancel) const SizedBox(height: 8),
+                  ],
                   if (booking.isPending) ...[
                     FilledButton.tonalIcon(
                       onPressed: _cancelling ? null : _editPendingBooking,
@@ -305,7 +411,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                   ],
                   if (booking.canCancel)
                     OutlinedButton.icon(
-                      onPressed: _cancelling ? null : _cancelBooking,
+                      onPressed: _cancelling || _rescheduling ? null : _cancelBooking,
                       icon: _cancelling
                           ? const SizedBox(
                               width: 17,

@@ -19,7 +19,7 @@ class CustomerPaymentService {
   void dispose() => _client.close();
 
   Future<List<CustomerPayment>> getMyPayments() async {
-    final response = await _send(() => _client.get(
+    final response = await _send(() => fetchMobilePages(_client,
           Uri.parse('${AppConfig.apiBaseUrl}/api/payments/mine'),
           headers: {'Accept': 'application/json', ...MobileSession.headers},
         ));

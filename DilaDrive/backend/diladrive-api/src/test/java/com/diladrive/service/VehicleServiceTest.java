@@ -1,6 +1,9 @@
 package com.diladrive.service;
 
 import com.diladrive.entity.Vehicle;
+import com.diladrive.entity.VehicleCategory;
+import com.diladrive.repository.AssignmentRepository;
+import com.diladrive.repository.VehicleCategoryRepository;
 import com.diladrive.repository.VehicleRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -21,6 +24,41 @@ class VehicleServiceTest {
 
     private final VehicleRepository vehicleRepository = mock(VehicleRepository.class);
     private final VehicleService service = new VehicleService(vehicleRepository, mock(com.diladrive.repository.AssignmentRepository.class));
+
+    @Test
+    void vehicleWritesUseCategoryCapacityInsteadOfRequestValues() {
+        var categories = mock(VehicleCategoryRepository.class);
+        var categoryService = new VehicleService(vehicleRepository, mock(AssignmentRepository.class), categories);
+        var category = new VehicleCategory();
+        category.setVehicleCategoryId(5L);
+        category.setDisplayName("Premium MPV");
+        category.setMaxPassengerCapacity(6);
+        category.setBootCapacityUnits(15);
+        category.setActive(true);
+        when(categories.findById(5L)).thenReturn(Optional.of(category));
+        when(vehicleRepository.save(any(Vehicle.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var request = new Vehicle();
+        request.setVehicleModel("Fleet vehicle");
+        request.setVehiclePlateno("ABC123");
+        request.setVehicleStatus("Active");
+        request.setVehicleCategoryId(5L);
+        var created = categoryService.createVehicleForDriver(request, 17L);
+        assertEquals("Premium MPV", created.getVehicleType());
+        assertEquals(6, created.getVehicleCapacity());
+        assertEquals(15, created.getBootCapacityUnits());
+
+        when(vehicleRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existingVehicle()));
+        var update = new Vehicle();
+        update.setVehiclePlateno("ABC123");
+        update.setVehicleStatus("Active");
+        update.setVehicleCategoryId(5L);
+        update.setVehicleCapacity(2);
+        update.setVehicleLuggageCapacity(1);
+        var updated = categoryService.updateVehicle(7L, update);
+        assertEquals(6, updated.getVehicleCapacity());
+        assertEquals(15, updated.getBootCapacityUnits());
+    }
 
     @Test
     void updatesAssignedVehicleWithoutChangingRelationship() {

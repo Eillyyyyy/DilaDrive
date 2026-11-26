@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 class CustomerControllerTest {
 
     private final CustomerService customerService = mock(CustomerService.class);
-    private final CustomerController controller = new CustomerController(customerService);
+    private final CustomerController controller = new CustomerController(customerService, mock(com.diladrive.service.CustomerVerificationService.class));
 
     @Test
     void profileReadUsesCustomerIdFromSession() {

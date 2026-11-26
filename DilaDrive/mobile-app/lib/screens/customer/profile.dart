@@ -5,27 +5,30 @@ import '../../models/mobile_user.dart';
 import '../../services/auth_service.dart' show AuthService;
 import '../../services/customer_profile_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/customer_profile_widgets.dart';
+import '../../widgets/responsive_page.dart';
 import '../auth/login.dart';
 import 'business_documents.dart';
 import 'update_account.dart';
-import 'view_account.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
     super.key,
     required this.customer,
     this.onCustomerUpdated,
+    this.profileService,
   });
 
   final MobileUser customer;
   final ValueChanged<MobileUser>? onCustomerUpdated;
+  final CustomerProfileService? profileService;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  final CustomerProfileService _service = CustomerProfileService();
+  late final _service = widget.profileService ?? CustomerProfileService();
   late Future<CustomerProfile> _profileFuture;
 
   @override
@@ -36,7 +39,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
-    _service.dispose();
+    if (widget.profileService == null) _service.dispose();
     super.dispose();
   }
 
@@ -52,11 +55,11 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _editProfile(CustomerProfile profile) async {
+  Future<void> _editProfile() async {
     final updated = await Navigator.push<CustomerProfile>(
       context,
       MaterialPageRoute(
-        builder: (_) => UpdateAccountPage(profile: profile),
+        builder: (_) => UpdateAccountPage(profileService: _service),
       ),
     );
     if (updated != null && mounted) {
@@ -108,7 +111,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -148,24 +151,14 @@ class _ProfilePageState extends State<ProfilePage> {
 
           final profile = snapshot.data!;
           return ListView(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+            padding: pagePadding(context, bottom: 28),
             children: [
               _ProfileHeader(profile: profile),
               const SizedBox(height: 20),
               _MenuItem(
-                icon: Icons.person_outline,
-                title: 'View account',
-                onTap: () => Navigator.push<void>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ViewAccountPage(service: _service),
-                  ),
-                ),
-              ),
-              _MenuItem(
                 icon: Icons.edit_outlined,
                 title: 'Update account',
-                onTap: () => _editProfile(profile),
+                onTap: _editProfile,
               ),
               if (profile.type?.toUpperCase() == 'COMPANY')
                 _MenuItem(
@@ -178,8 +171,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ),
                 ),
-              const SizedBox(height: 5),
-              const SizedBox(height: 7),
+              const SizedBox(height: 8),
               _MenuItem(
                 icon: Icons.logout,
                 title: 'Sign out',
@@ -223,7 +215,10 @@ class _ProfileHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    profile.name,
+                    profile.type?.toUpperCase() == 'COMPANY' &&
+                            (profile.companyName?.trim().isNotEmpty ?? false)
+                        ? profile.companyName!
+                        : profile.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(

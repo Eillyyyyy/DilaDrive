@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+
 import '../../models/driver_trip.dart';
 import '../../models/mobile_user.dart';
 import '../../services/driver_trip_service.dart';
@@ -8,15 +10,17 @@ import '../auth/login.dart';
 import 'trip_details.dart';
 
 class DriverDashboardPage extends StatefulWidget {
-  const DriverDashboardPage({super.key, required this.driver});
+  const DriverDashboardPage(
+      {super.key, required this.driver, this.tripService});
   final MobileUser driver;
+  final DriverTripService? tripService;
 
   @override
   State<DriverDashboardPage> createState() => _DriverDashboardPageState();
 }
 
 class _DriverDashboardPageState extends State<DriverDashboardPage> {
-  final DriverTripService _service = DriverTripService();
+  late final _service = widget.tripService ?? DriverTripService();
   late Future<List<DriverTrip>> _trips;
 
   @override
@@ -27,7 +31,7 @@ class _DriverDashboardPageState extends State<DriverDashboardPage> {
 
   @override
   void dispose() {
-    _service.dispose();
+    if (widget.tripService == null) _service.dispose();
     super.dispose();
   }
 
@@ -53,7 +57,7 @@ class _DriverDashboardPageState extends State<DriverDashboardPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(
           automaticallyImplyLeading: false,
@@ -98,7 +102,7 @@ class _DriverDashboardPageState extends State<DriverDashboardPage> {
             return RefreshIndicator(
               onRefresh: () async => _reload(),
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: pagePadding(context),
                 children: [
                   Card(
                     color: AppTheme.primaryNavy,
@@ -120,12 +124,16 @@ class _DriverDashboardPageState extends State<DriverDashboardPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Row(children: [
-                    _StatCard(title: 'Assigned', value: '$assigned'),
-                    const SizedBox(width: 8),
-                    _StatCard(title: 'Active', value: '${active.length}'),
-                    const SizedBox(width: 8),
-                    _StatCard(title: 'Completed', value: '$complete'),
+                  Row(spacing: 8, children: [
+                    Expanded(
+                        child:
+                            _StatCard(title: 'Assigned', value: '$assigned')),
+                    Expanded(
+                        child: _StatCard(
+                            title: 'Active', value: '${active.length}')),
+                    Expanded(
+                        child:
+                            _StatCard(title: 'Completed', value: '$complete')),
                   ]),
                   const SizedBox(height: 20),
                   const Text('Current trip',
@@ -202,22 +210,20 @@ class _StatCard extends StatelessWidget {
   final String value;
 
   @override
-  Widget build(BuildContext context) => Expanded(
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
-            child: Column(children: [
-              Text(value,
-                  style: const TextStyle(
-                      color: AppTheme.primaryNavy,
-                      fontSize: 21,
-                      fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(title,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12)),
-            ]),
-          ),
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+          child: Column(children: [
+            Text(value,
+                style: const TextStyle(
+                    color: AppTheme.primaryNavy,
+                    fontSize: 21,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12)),
+          ]),
         ),
       );
 }

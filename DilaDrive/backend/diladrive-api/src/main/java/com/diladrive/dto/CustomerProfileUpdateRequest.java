@@ -10,5 +10,10 @@ public record CustomerProfileUpdateRequest(
         @Size(max = 30) String phone,
         @Size(max = 150) String companyName,
         @Size(max = 30) String companyRegistrationNumber,
-        @Size(max = 1400000) String profileImage) {
+        @Size(max = 1400000) String profileImage,
+        boolean clearPhone) {
+    public CustomerProfileUpdateRequest(String name, String email, String phone, String companyName,
+            String companyRegistrationNumber, String profileImage) {
+        this(name, email, phone, companyName, companyRegistrationNumber, profileImage, false);
+    }
 }

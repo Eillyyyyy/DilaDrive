@@ -24,6 +24,7 @@ import java.util.UUID;
 
 @Service
 public class DocumentServiceImpl implements DocumentService {
+    @org.springframework.beans.factory.annotation.Autowired private NotificationService notifications;
     @org.springframework.beans.factory.annotation.Autowired
     private TripFinanceService tripFinance;
 
@@ -130,6 +131,9 @@ public class DocumentServiceImpl implements DocumentService {
     public DocumentDTO createQuotation(QuotationRequest request) {
         Booking booking = findBookingForUpdate(request.bookingId());
         Customer customer = findCustomer(booking.getCustId());
+        if (!"COMPANY".equalsIgnoreCase(customer.getCustType())) {
+            throw conflict("Quotations are for corporate customers only.");
+        }
 
         Document quotation = new Document();
         quotation.setDocumentType(DocumentType.QUOTATION);
@@ -166,7 +170,13 @@ public class DocumentServiceImpl implements DocumentService {
         requireType(quotation, DocumentType.QUOTATION);
         requireStatus(quotation, "DRAFT", "Only draft quotations can be approved.");
         quotation.setStatus("APPROVED");
-        return DocumentDTO.from(documentRepository.save(quotation));
+        var approved = documentRepository.save(quotation);
+        if (notifications != null) {
+            notifications.createCustomerNotification(approved.getCustId(), "Quotation approved",
+                    "Quotation " + approved.getDocumentNumber() + " is available in Business Documents.",
+                    "QUOTATION_APPROVED");
+        }
+        return DocumentDTO.from(approved);
     }
 
     @Override
@@ -182,6 +192,33 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public DocumentDTO generatePurchaseOrder(Long quotationId) {
+        throw new ResponseStatusException(HttpStatus.GONE, "Record the purchase order supplied by the customer.");
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<DocumentDTO> getCustomerReceipts(Long customerId) {
+        return documentRepository.findVerifiedReceipts(customerId, null).stream().map(DocumentDTO::from).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DocumentDTO getCustomerReceipt(Long customerId, Long documentId) {
+        return documentRepository.findVerifiedReceipts(customerId, documentId).stream().findFirst()
+                .map(DocumentDTO::from)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Receipt not found."));
+    }
+
+    @Override
+    @Transactional
+    public DocumentDTO recordPurchaseOrder(Long quotationId, String clientReference) {
+        if (clientReference == null || clientReference.isBlank() || clientReference.strip().length() > 100) {
+            throw badRequest("Enter a client purchase order reference of up to 100 characters.");
+        }
+        return savePurchaseOrder(quotationId, clientReference.strip());
+    }
+
+    private DocumentDTO savePurchaseOrder(Long quotationId, String clientReference) {
         Document quotation = findDocumentForUpdate(quotationId);
         requireType(quotation, DocumentType.QUOTATION);
         requireStatus(quotation, "APPROVED",
@@ -194,7 +231,8 @@ public class DocumentServiceImpl implements DocumentService {
         Document purchaseOrder = copyDocument(quotation, DocumentType.PURCHASE_ORDER);
         purchaseOrder.setSourceDocumentId(quotation.getDocumentId());
         purchaseOrder.setStatus("ISSUED");
-        purchaseOrder.setRemarks(sourceRemark("Quotation", quotation));
+        purchaseOrder.setRemarks(clientReference == null ? sourceRemark("Quotation", quotation)
+                : "Received client PO " + clientReference + " / " + sourceRemark("Quotation", quotation));
         return saveWithGeneratedNumber(purchaseOrder);
     }
 
@@ -268,6 +306,10 @@ public class DocumentServiceImpl implements DocumentService {
         Document invoice = findDocumentForUpdate(invoiceId);
         requireType(invoice, DocumentType.INVOICE);
         requireStatus(invoice, "ISSUED", "Only issued invoices can be marked as paid.");
+        var verified = payments.sumVerifiedAmount(invoice.getBookingId());
+        if (verified == null || verified.compareTo(invoice.getAmount()) < 0) {
+            throw conflict("Verified payments do not cover this invoice.");
+        }
         invoice.setStatus("PAID");
         return DocumentDTO.from(documentRepository.save(invoice));
     }
@@ -275,24 +317,21 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional
     public DocumentDTO generateReceipt(Long invoiceId) {
-        Document invoice = findDocumentForUpdate(invoiceId);
-        requireType(invoice, DocumentType.INVOICE);
-        requireStatus(invoice, "PAID", "A receipt can only be generated from a paid invoice.");
-        if (documentRepository.existsByDocumentTypeAndSourceDocumentId(
-                DocumentType.RECEIPT, invoice.getDocumentId())) {
-            throw conflict("A receipt has already been generated for this invoice.");
-        }
-
-        Document receipt = copyDocument(invoice, DocumentType.RECEIPT);
-        receipt.setSourceDocumentId(invoice.getDocumentId());
-        receipt.setStatus("PAID");
-        receipt.setRemarks(sourceRemark("Invoice", invoice));
-        return saveWithGeneratedNumber(receipt);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Receipts are generated when a payment is verified.");
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.diladrive.repository.PaymentRepository payments;
 
     @Override
     @Transactional
     public DocumentDTO generateReceiptForPayment(Payment payment) {
+        if (payment == null || payment.getPaymentId() == null) {
+            throw conflict("A receipt requires a saved, verified payment.");
+        }
+        payment = payments.findByIdForUpdate(payment.getPaymentId())
+                .orElseThrow(() -> conflict("A receipt requires a saved, verified payment."));
         if (!"VERIFIED".equalsIgnoreCase(payment.getPaymentStatus())) {
             throw conflict("A receipt can only be generated for a verified payment.");
         }
@@ -311,14 +350,17 @@ public class DocumentServiceImpl implements DocumentService {
         receipt.setBookingId(booking.getBookingId());
         receipt.setPaymentId(payment.getPaymentId());
         receipt.setStatus("PAID");
-        receipt.setAmount(payment.getAmount().add(payment.getSurchargeAmount()));
+        receipt.setAmount(payment.getAmount());
         applyCustomerSnapshot(receipt, customer);
         receipt.setRemarks("Verified " + payment.getPaymentMethod().replace('_', ' ')
-                + " payment for booking " + booking.getBookingId()
-                + (payment.getSurchargeAmount().signum() > 0
-                        ? "; includes card surcharge " + payment.getSurchargeAmount()
-                        : ""));
-        return saveWithGeneratedNumber(receipt);
+                + " payment for booking " + booking.getBookingId());
+        DocumentDTO generated = saveWithGeneratedNumber(receipt);
+        if (notifications != null) {
+            notifications.createCustomerNotification(booking.getCustId(), "Receipt available",
+                    "Your receipt for booking BK-%06d is available.".formatted(booking.getBookingId()),
+                    "RECEIPT_AVAILABLE");
+        }
+        return generated;
     }
 
     private DocumentDTO saveWithGeneratedNumber(Document document) {
@@ -328,7 +370,12 @@ public class DocumentServiceImpl implements DocumentService {
         saved.setDocumentNumber(
                 numberPrefix(saved.getDocumentType()) + "-"
                         + Long.toString(saved.getDocumentId(), 36).toUpperCase(Locale.ROOT));
-        return DocumentDTO.from(documentRepository.save(saved));
+        Document published = documentRepository.save(saved);
+        if (notifications != null && "ISSUED".equals(published.getStatus())) {
+            notifications.createCustomerNotification(published.getCustId(), "Booking document available",
+                    published.getDocumentNumber() + " is available in Business Documents.", "DOCUMENT");
+        }
+        return DocumentDTO.from(published);
     }
 
     private Document copyDocument(Document source, DocumentType type) {

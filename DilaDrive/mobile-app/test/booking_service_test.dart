@@ -7,23 +7,30 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
-  test('distance review submits without inventing a distance or fare', () async {
+  test('distance review submits without inventing a distance or fare',
+      () async {
     final client = _ResponseClient(http.Response(
       jsonEncode({'bookingReference': 'BK-000018', 'bookingStatus': 'PENDING'}),
       201,
     ));
     final service = BookingService(client: client);
-    final draft = BookingDraft(customerName: 'Test Customer', phoneNumber: '0123456789')
-      ..pickupCoordinates = const BookingCoordinates(latitude: 3, longitude: 101)
-      ..destinationCoordinates = const BookingCoordinates(latitude: 4, longitude: 102)
-      ..pickupAddress = 'Pickup'
-      ..destinationAddress = 'Destination'
-      ..bookingDate = DateTime(2030, 1, 2)
-      ..pickupTime = DateTime(2030, 1, 2, 9);
+    final draft =
+        BookingDraft(customerName: 'Test Customer', phoneNumber: '0123456789')
+          ..pickupCoordinates =
+              const BookingCoordinates(latitude: 3, longitude: 101)
+          ..destinationCoordinates =
+              const BookingCoordinates(latitude: 4, longitude: 102)
+          ..pickupAddress = 'Pickup'
+          ..destinationAddress = 'Destination'
+          ..bookingDate = DateTime(2030, 1, 2)
+          ..pickupTime = DateTime(2030, 1, 2, 9);
 
-    expect(await service.requestRoadDistanceReview(draft, idempotencyKey: 'review-18'),
+    expect(
+        await service.requestRoadDistanceReview(draft,
+            idempotencyKey: 'review-18'),
         'BK-000018');
-    expect(client.requestedUri!.path, '/api/bookings/customer/road-distance-review');
+    expect(client.requestedUri!.path,
+        '/api/bookings/customer/road-distance-review');
     expect(client.requestHeaders?['idempotency-key'], 'review-18');
     final body = jsonDecode(client.requestBody!) as Map<String, dynamic>;
     expect(body, isNot(contains('distanceKm')));
@@ -75,7 +82,6 @@ void main() {
     draft.availabilityCheckedFor = draft.availabilityKey;
     draft.fareEstimate = const FareEstimate(
         distanceKm: 12,
-        vehicleModel: 'Fleet Sedan',
         baseFare: 17.35,
         distanceCharge: 14.81,
         additionalCharges: [],

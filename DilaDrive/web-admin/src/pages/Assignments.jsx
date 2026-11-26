@@ -1,3 +1,6 @@
+import useModalScrollLock from "../components/useModalScrollLock";
+import useRecordFocus from "../services/useRecordFocus";
+import AssignmentTimeline from "../components/AssignmentTimeline";
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import api from "../services/api";
@@ -100,7 +103,7 @@ const statusClass = (status) => {
   }
 };
 
-export default function Assignments({ onNavigate }) {
+export default function Assignments({ onNavigate, recordFocus, onRecordOpened }) {
   const [assignments, setAssignments] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -108,6 +111,9 @@ export default function Assignments({ onNavigate }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [dateFilter, setDateFilter] = useState("");
+  const [driverFilter, setDriverFilter] = useState("");
+  const [vehicleFilter, setVehicleFilter] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [modal, setModal] = useState(null);
@@ -156,16 +162,21 @@ export default function Assignments({ onNavigate }) {
     const query = search.trim().toLowerCase();
     return assignments.filter((assignment) => {
       const matchesSearch = [
+        assignment.bookingId,
         assignment.customer,
+        assignment.pickupAddress,
+        assignment.destinationAddress,
         assignment.driverName,
         assignment.vehiclePlate,
       ].some((value) => String(value ?? "").toLowerCase().includes(query));
       const matchesStatus =
         statusFilter === "ALL" ||
         normalizeStatus(assignment.assignmentStatus) === statusFilter;
-      return matchesSearch && matchesStatus;
+      return matchesSearch && matchesStatus && (!dateFilter || assignment.tripDate === dateFilter)
+        && (!driverFilter || String(assignment.driverId) === driverFilter)
+        && (!vehicleFilter || String(assignment.vehicleId) === vehicleFilter);
     });
-  }, [assignments, search, statusFilter]);
+  }, [assignments, search, statusFilter, dateFilter, driverFilter, vehicleFilter]);
 
   const stats = [
     {
@@ -207,6 +218,9 @@ export default function Assignments({ onNavigate }) {
     setModal(nextModal);
   };
 
+  useRecordFocus({ id: recordFocus, items: assignments, idKey: "assignmentId", loading,
+    error, open: assignment => openModal({ type: "view", assignment }), complete: onRecordOpened });
+
   const closeModal = () => {
     if (busy) return;
     setModal(null);
@@ -240,7 +254,12 @@ export default function Assignments({ onNavigate }) {
       setFormError("Select a new eligible driver and a scheduled end time.");
       return;
     }
-    const request = {driverId: Number(driverValue), vehicleId: Number(form.get("vehicleId")), scheduledEndAt};
+    const reason = String(form.get("reason") || "").trim();
+    if (!reason) {
+      setFormError("Enter the reason for reassignment.");
+      return;
+    }
+    const request = {driverId: Number(driverValue), vehicleId: Number(form.get("vehicleId")), scheduledEndAt, reason, emergency: form.has("emergency")};
     const assignment = modal.assignment;
 
     performAction(
@@ -258,10 +277,10 @@ export default function Assignments({ onNavigate }) {
   };
 
   return (
-    <div className="admin-page">
-      <header className="admin-page-header">
+    <div className="admin-page !space-y-3">
+      <header className="admin-page-header !gap-3 !pb-3">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-sm text-slate-500">
+          <div className="mb-1 flex items-center gap-2 text-sm text-slate-500">
             <span>Management</span>
             <span>/</span>
             <span className="font-medium text-blue-600">Assignments</span>
@@ -277,7 +296,7 @@ export default function Assignments({ onNavigate }) {
           type="button"
           onClick={() => onNavigate?.("Bookings")}
           disabled={loading}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
         >
           <ClipboardList size={18} />
           View Bookings
@@ -306,20 +325,20 @@ export default function Assignments({ onNavigate }) {
 
       {error && <ErrorBanner message={error} />}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {stats.map(({ label, value, icon: Icon, style }) => (
           <article
             key={label}
-            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+            className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
           >
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-medium text-slate-500">{label}</p>
-                <p className="mt-2 text-2xl font-bold text-slate-900">
+                <p className="mt-1 text-2xl font-bold text-slate-900">
                   {loading ? "…" : value}
                 </p>
               </div>
-              <div className={`rounded-xl p-3 ${style}`}>
+              <div className={`rounded-lg p-2 ${style}`}>
                 <Icon size={20} />
               </div>
             </div>
@@ -328,15 +347,57 @@ export default function Assignments({ onNavigate }) {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 md:flex-row md:items-center md:justify-between">
-          <div>
+        <div className="border-b border-slate-100 p-3 md:p-4">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h2 className="font-semibold text-slate-900">Assignment Records</h2>
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="text-xs text-slate-500">
               Review trip assignments, resource details and current status.
             </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <label className="relative block">
+          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3 lg:grid-cols-[minmax(110px,180px)_minmax(120px,220px)_minmax(120px,220px)_minmax(100px,160px)_minmax(170px,280px)_auto] xl:grid-cols-[180px_220px_220px_160px_280px_auto]">
+            <input
+              type="date"
+              aria-label="Filter by pickup date"
+              value={dateFilter}
+              onChange={(event) => setDateFilter(event.target.value)}
+              className="h-11 min-w-0 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+            <select
+              aria-label="Filter by driver"
+              value={driverFilter}
+              onChange={(event) => setDriverFilter(event.target.value)}
+              className="h-11 min-w-0 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="">All drivers</option>
+              {[...new Map(assignments.map((a) => [a.driverId, a.driverName])).entries()].map(([id, name]) => (
+                <option key={id} value={id}>{name || id}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by vehicle"
+              value={vehicleFilter}
+              onChange={(event) => setVehicleFilter(event.target.value)}
+              className="h-11 min-w-0 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="">All vehicles</option>
+              {[...new Map(assignments.map((a) => [a.vehicleId, a.vehiclePlate])).entries()].map(([id, plate]) => (
+                <option key={id} value={id}>{plate || id}</option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              aria-label="Filter by assignment status"
+              className="h-11 min-w-0 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="ALL">All statuses</option>
+              {ASSIGNMENT_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+            <label className="relative block min-w-0">
               <Search
                 size={17}
                 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -346,38 +407,25 @@ export default function Assignments({ onNavigate }) {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search customer, driver, vehicle..."
-                className="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 sm:w-72"
+                className="h-11 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </label>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              aria-label="Filter by assignment status"
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-            >
-              <option value="ALL">All statuses</option>
-              {ASSIGNMENT_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status.replaceAll("_", " ")}
-                </option>
-              ))}
-            </select>
             <button
               type="button"
               title="Refresh assignment data"
+              aria-label="Refresh assignment data"
               onClick={() => setRefreshKey((current) => current + 1)}
-              className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2.5 text-slate-600 hover:bg-slate-50"
+              className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-slate-200 px-3 text-slate-600 hover:bg-slate-50 lg:w-auto"
             >
               <RefreshCw size={17} />
             </button>
           </div>
         </div>
-
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-5 py-3 font-semibold">No.</th>
+                <th className="px-5 py-3 font-semibold">Booking</th>
                 <th className="px-5 py-3 font-semibold">Customer</th>
                 <th className="px-5 py-3 font-semibold">Driver</th>
                 <th className="px-5 py-3 font-semibold">Vehicle</th>
@@ -407,7 +455,7 @@ export default function Assignments({ onNavigate }) {
                   </td>
                 </tr>
               ) : (
-                filteredAssignments.map((assignment, index) => {
+                filteredAssignments.map((assignment) => {
                   const status = normalizeStatus(assignment.assignmentStatus);
                   const isActive = !TERMINAL_STATUSES.has(status);
                   return (
@@ -415,22 +463,25 @@ export default function Assignments({ onNavigate }) {
                       key={assignment.assignmentId}
                       className="hover:bg-slate-50/70"
                     >
-                      <td className="px-5 py-4 text-sm font-medium text-slate-500">
-                        {index + 1}
+                      <td className="px-5 py-3 text-sm font-medium text-slate-500">
+                        {assignment.bookingId && `BK-${String(assignment.bookingId).padStart(6, "0")}`}
                       </td>
-                      <td className="px-5 py-4 text-sm font-medium text-slate-800">
+                      <td className="px-5 py-3 text-sm font-medium text-slate-800">
                         {assignment.customer || "—"}
                       </td>
-                      <td className="px-5 py-4 text-sm text-slate-700">
+                      <td className="px-5 py-3 text-sm text-slate-700">
                         {assignment.driverName || "—"}
                       </td>
-                      <td className="px-5 py-4 text-sm font-medium text-slate-700">
+                      <td className="px-5 py-3 text-sm font-medium text-slate-700">
+                        <div>{[assignment.vehicleModel, assignment.vehicleCategory].filter(Boolean).join(" / ")}</div>
                         {assignment.vehiclePlate || "—"}
                       </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-500">
-                        {formatDateTime(getAssignmentDate(assignment))}
+                      <td className="whitespace-nowrap px-5 py-3 text-sm text-slate-500">
+                        {formatDateTime(assignment.tripDate && assignment.pickupTime
+                          ? `${assignment.tripDate}T${assignment.pickupTime}` : null)}
+                        <div className="max-w-56 whitespace-normal text-xs">{assignment.pickupAddress} / {assignment.destinationAddress}</div>
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-3">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusClass(
                             status
@@ -438,8 +489,9 @@ export default function Assignments({ onNavigate }) {
                         >
                           {status.replaceAll("_", " ")}
                         </span>
+                        {assignment.bookingStatus && <div className="mt-1 text-xs text-slate-500">{assignment.bookingStatus}</div>}
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="px-5 py-3">
                         <div className="flex justify-end gap-1">
                           <IconButton
                             label="View assignment details"
@@ -448,7 +500,7 @@ export default function Assignments({ onNavigate }) {
                           />
                           {isActive && (
                             <>
-                              <button
+                              {status === "ASSIGNED" && <button
                                 type="button"
                                 onClick={() =>
                                   openModal({ type: "reassign", assignment })
@@ -458,8 +510,8 @@ export default function Assignments({ onNavigate }) {
                                 className="rounded-lg p-2 text-blue-600 hover:bg-blue-50"
                               >
                                 <RefreshCw size={16} />
-                              </button>
-                              <button
+                              </button>}
+                              {status === "DROP" && <button
                                 type="button"
                                 onClick={() => completeAssignment(assignment)}
                                 title="Complete assignment"
@@ -467,7 +519,7 @@ export default function Assignments({ onNavigate }) {
                                 className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50"
                               >
                                 <CheckCircle2 size={16} />
-                              </button>
+                              </button>}
                             </>
                           )}
                         </div>
@@ -534,9 +586,11 @@ function IconButton({ label, onClick, icon: Icon }) {
 }
 
 function Modal({ title, subtitle, onClose, children }) {
+  useModalScrollLock();
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4"
+      className="fixed inset-0 !m-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -545,7 +599,7 @@ function Modal({ title, subtitle, onClose, children }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="my-auto max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+        className="modal-panel w-full max-w-xl overflow-y-auto overscroll-contain rounded-2xl bg-white shadow-2xl"
       >
         <header className="sticky top-0 flex items-start justify-between border-b border-slate-100 bg-white p-5">
           <div>
@@ -596,7 +650,7 @@ function FormError({ message }) {
 
 function FormActions({ onClose, busy, submitLabel, disabled = false }) {
   return (
-    <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+    <div className="sticky bottom-0 z-10 flex justify-end gap-2 border-t border-slate-100 bg-white py-3">
       <button
         type="button"
         onClick={onClose}
@@ -639,12 +693,15 @@ function ReassignModal({
           Select another suitable vehicle and its eligible driver. Previous assignment history will be preserved.
         </p>
         <FormField label="Scheduled end time">
-          <input name="scheduledEndAt" type="datetime-local" step="1" required className={inputClass} value={scheduledEndAt} onChange={e => setScheduledEndAt(e.target.value)} />
+          <input name="scheduledEndAt" type="datetime-local" step="1" required className={inputClass} value={scheduledEndAt} onChange={e => { setSelection(null); setScheduledEndAt(e.target.value); }} />
           <span className="mt-1 block text-xs text-slate-500">Must be after pickup. Bookings may share this pair only when their time ranges do not overlap.</span>
         </FormField>
         <AssignmentResourcePicker bookingId={assignment.bookingId} scheduledEndAt={scheduledEndAt}
-          excludeDriverId={assignment.driverId} onChange={setSelection} disabled={busy} />
-     <FormError message={error} />
+          replacementOf={assignment.assignmentId} onChange={setSelection} onSuggestedEnd={setScheduledEndAt} disabled={busy} />
+        <FormField label="Reason for reassignment">
+          <textarea name="reason" required maxLength={500} rows={3} className={inputClass} />
+        </FormField>
+        <FormError message={error} />
         <FormActions
           onClose={onClose}
           busy={busy}
@@ -659,7 +716,10 @@ function ReassignModal({
 function AssignmentDetailsModal({ assignment, onClose }) {
   const status = normalizeStatus(assignment.assignmentStatus);
   const details = [
-    { label: "Luggage points", value: assignment.luggageUnits ?? "Not recorded", icon: Users },
+    { label: "Booking Reference", value: assignment.bookingId == null ? "Not recorded" : `BK-${String(assignment.bookingId).padStart(6, "0")}`, icon: ClipboardList },
+    { label: "Reassignment reason", value: assignment.reassignmentReason || "Not applicable", icon: ClipboardList },
+    { label: "Previous assignment", value: assignment.previousAssignmentId ?? "Not applicable", icon: ClipboardList },
+    { label: "Boot usage (luggage units)", value: assignment.luggageUnits ?? "Not recorded", icon: Users },
     { label: "Small / medium / large bags", value: assignment.smallCount == null ? "Not recorded" : `${assignment.smallCount} / ${assignment.mediumCount ?? 0} / ${assignment.largeCount ?? 0}`, icon: ClipboardList },
     {
       label: "Customer Name",
@@ -740,6 +800,7 @@ function AssignmentDetailsModal({ assignment, onClose }) {
           );
         })}
       </div>
+      <AssignmentTimeline key={assignment.assignmentId} assignmentId={assignment.assignmentId} />
       <AssignmentPhotos key={assignment.assignmentId} assignmentId={assignment.assignmentId} />
       <div className="flex justify-end border-t border-slate-100 p-5 pt-4">
         <button

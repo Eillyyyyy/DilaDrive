@@ -14,6 +14,8 @@ public interface DriverRepository
         extends JpaRepository<Driver, Long> {
 
     Optional<Driver> findByDriverEmailIgnoreCase(String email);
+    Optional<Driver> findByDriverIcnoLookup(String driverIcnoLookup);
+    boolean existsByDriverIcnoLookupAndDriverIdNot(String driverIcnoLookup, Long driverId);
 
     List<Driver> findByDriverAvailabilityIgnoreCase(String availability);
 
@@ -21,6 +23,17 @@ public interface DriverRepository
             String availability, String driverStatus);
 
     long countByDriverStatusIgnoreCase(String driverStatus);
+
+    @Query(value = """
+            select count(*) from driver d
+            where upper(d.driver_status)='ACTIVE'
+              and not exists (
+                  select 1 from driver_assignment a join booking b using (booking_id)
+                  where a.driver_id=d.driver_id
+                    and upper(a.assignment_status) in ('OTW','WAITING','PICKUP','DROP')
+                    and upper(b.booking_status) in ('CONFIRMED','ASSIGNED','OTW','WAITING','PICKUP','DROP'))
+            """, nativeQuery = true)
+    long countAvailableDrivers();
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from Driver d where d.driverId = :id")

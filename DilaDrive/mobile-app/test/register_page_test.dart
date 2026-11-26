@@ -24,8 +24,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_maxLength(tester, 'Company Name'), 150);
-    await _scrollToField(tester, 'Company Registration Number');
-    expect(_maxLength(tester, 'Company Registration Number'), 30);
+    await _scrollToField(tester, 'Company Registration Number (optional)');
+    expect(_maxLength(tester, 'Company Registration Number (optional)'), 30);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });

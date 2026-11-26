@@ -1,8 +1,6 @@
 package com.diladrive.service;
 
-import com.diladrive.entity.Assignment;
 import com.diladrive.entity.Booking;
-import com.diladrive.entity.Driver;
 import com.diladrive.entity.Vehicle;
 import com.diladrive.repository.BookingRepository;
 import org.junit.jupiter.api.Test;
@@ -20,10 +18,10 @@ class TripFinanceServiceTest {
     }
 
     @Test
-    void calculatesDistanceEstimateAndApprovedExtrasWithoutCountingTollAndParkingAsCommission() {
+    void calculatesDistanceEstimateAndApprovedExtras() {
         var finance = mock(TripFinanceService.class);
         when(finance.settings()).thenReturn(new TripFinanceService.Settings(money("2"), money("60"),
-                money("15"), TripFinanceService.Basis.BASE_AND_HOURS, TripFinanceService.HoursPolicy.PRORATE, true, false));
+                TripFinanceService.HoursPolicy.PRORATE, true, false));
         var pricing = spy(new PricingService(mock(JdbcTemplate.class), finance));
         doReturn(Optional.empty()).when(pricing).find("Van");
 
@@ -31,35 +29,18 @@ class TripFinanceServiceTest {
         assertEquals(money("160.00"), fare.totalFare());
         var result = TripFinanceService.calculate(fare.totalFare(), money("60"),
                 new TripFinanceService.Charges(money("1"), money("12"), money("5"), "Actual expenses"),
-                TripFinanceService.HoursPolicy.PRORATE, TripFinanceService.Basis.BASE_AND_HOURS, money("15"));
+                TripFinanceService.HoursPolicy.PRORATE);
         assertEquals(money("60.00"), result.hourly());
         assertEquals(money("237.00"), result.finalFare());
-        assertEquals(money("220.00"), result.commissionable());
-        assertEquals(money("33.00"), result.commission());
     }
 
     @Test
-    void appliesConfiguredPartialHourAndCommissionPolicy() {
+    void roundsUpApprovedPartialHours() {
         var result = TripFinanceService.calculate(money("160"), money("60"),
                 new TripFinanceService.Charges(money("0.25"), money("12"), money("5"), "Actual expenses"),
-                TripFinanceService.HoursPolicy.ROUND_UP, TripFinanceService.Basis.FINAL_FARE, money("15"));
+                TripFinanceService.HoursPolicy.ROUND_UP);
         assertEquals(money("60.00"), result.hourly());
-        assertEquals(money("35.55"), result.commission());
-    }
-
-    @Test
-    void excludesCancelledTripsFromCommission() {
-        var jdbc = mock(JdbcTemplate.class);
-        var finance = new TripFinanceService(jdbc, mock(BookingRepository.class));
-        var booking = new Booking();
-        booking.setBookingStatus("CANCELLED");
-        booking.setBookingTripfare(money("160"));
-        var assignment = new Assignment();
-        assignment.setDriver(new Driver());
-
-        finance.recordCompletion(assignment, booking);
-
-        verifyNoInteractions(jdbc);
+        assertEquals(money("237.00"), result.finalFare());
     }
 
     @Test
@@ -67,12 +48,12 @@ class TripFinanceServiceTest {
         var jdbc = mock(JdbcTemplate.class);
         var finance = new TripFinanceService(jdbc, mock(BookingRepository.class));
         var booking = new Booking();
-        booking.applyTripPricing(money("60"), money("15"), "BASE_AND_HOURS", "PRORATE");
+        booking.applyTripPricing(money("60"), "PRORATE");
 
         finance.snapshot(booking);
 
         assertEquals(money("60"), booking.getAppliedHourlyRate());
-        assertEquals(money("15"), booking.getAppliedCommissionPercent());
+        assertEquals("PRORATE", booking.getAppliedPartialHourPolicy());
         verifyNoInteractions(jdbc);
         var vehicle = new Vehicle();
         vehicle.setMaxLargeLuggage(2);

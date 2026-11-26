@@ -9,7 +9,22 @@ const api = axios.create({
   withCredentials: true,
 });
 
-api.interceptors.response.use(response => response, error => {
+export const adminSessionExpiredEvent = "diladrive:admin-session-expired";
+let sessionVersion = 0;
+
+api.interceptors.request.use(config => {
+  config.sessionVersion = sessionVersion;
+  return config;
+});
+
+api.interceptors.response.use(response => {
+  if (response.config.url === "/auth/login") sessionVersion += 1;
+  return response;
+}, error => {
+  if (error.response?.status === 401 && error.config?.sessionVersion === sessionVersion
+      && !["/auth/login", "/auth/session", "/auth/logout"].includes(error.config?.url)) {
+    window.dispatchEvent(new Event(adminSessionExpiredEvent));
+  }
   logApiError(error);
   return Promise.reject(error);
 });

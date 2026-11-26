@@ -10,6 +10,7 @@ public interface AssignmentSummaryProjection {
     Long getBookingId();
 
     String getCustomer();
+    String getCustomerPhone();
 
     LocalDate getTripDate();
 
@@ -40,10 +41,16 @@ public interface AssignmentSummaryProjection {
     Long getVehicleId();
 
     String getVehiclePlate();
+    String getVehicleModel();
+    String getVehicleCategory();
 
     String getAssignmentStatus();
 
     LocalDateTime getAssignmentDate();
 
     LocalDateTime getScheduledEndAt();
+    Long getPreviousAssignmentId();
+    String getReassignmentReason();
+    String getBookingStatus();
+    java.math.BigDecimal getBookingFare();
 }

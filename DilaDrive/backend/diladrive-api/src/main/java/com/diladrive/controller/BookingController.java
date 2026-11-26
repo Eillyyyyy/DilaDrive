@@ -75,6 +75,15 @@ public class BookingController {
         return trips.update(requireCustomerId(request),id,trip);
     }
 
+    public record RescheduleRequest(@jakarta.validation.constraints.NotNull java.time.LocalDateTime scheduledAt) {}
+
+    @PatchMapping("/{id}/customer/schedule")
+    public ResponseEntity<Void> reschedule(@PathVariable Long id, @Valid @RequestBody RescheduleRequest input,
+                                           HttpServletRequest request) {
+        trips.rescheduleConfirmed(requireCustomerId(request), id, input.scheduledAt());
+        return ResponseEntity.noContent().build();
+    }
+
     public record Rejection(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max=1000) String reason) {}
     @PostMapping("/{id}/reject")
     public ResponseEntity<Void> reject(@PathVariable Long id,@Valid @RequestBody Rejection rejection,HttpServletRequest request) {
@@ -86,9 +95,23 @@ public class BookingController {
         return bookingService.getAllBookings();
     }
 
+    @org.springframework.beans.factory.annotation.Autowired private com.diladrive.service.TripMonitoringService monitoring;
+
+    @MobilePagination.Paged
+    @GetMapping("/{id}/timeline")
+    public List<com.diladrive.service.TripMonitoringService.Milestone> timeline(@PathVariable Long id, HttpServletRequest request) {
+        return monitoring.customerTimeline(id, requireCustomerId(request));
+    }
+
+    @MobilePagination.Paged
     @GetMapping("/mine")
     public List<CustomerBookingResponse> getMyBookings(HttpServletRequest request) {
         return bookingService.getCustomerBookings(requireCustomerId(request));
+    }
+
+    @GetMapping("/mine/{id}")
+    public CustomerBookingResponse getMyBooking(@PathVariable Long id, HttpServletRequest request) {
+        return bookingService.getCustomerBooking(requireCustomerId(request), id);
     }
 
     @GetMapping("/availability/recommendation")

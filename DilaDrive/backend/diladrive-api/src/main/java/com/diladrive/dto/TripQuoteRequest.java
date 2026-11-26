@@ -1,6 +1,9 @@
 package com.diladrive.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import jakarta.validation.constraints.*;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.LocalDateTime;
 
 public record TripQuoteRequest(
@@ -19,21 +22,33 @@ public record TripQuoteRequest(
         @Size(max=20) String flightNumber,
         @Size(max=1000) String additionalNotes,
         @Size(max=30) String vehicleCategory,
-        @Size(max=256) String acceptedQuoteToken) {
+        @Size(max=256) String acceptedQuoteToken,
+        @JsonInclude(JsonInclude.Include.NON_NULL) LocalDate flightDate,
+        @JsonInclude(JsonInclude.Include.NON_NULL) LocalTime flightTime,
+        @Null(message = "choose a vehicle category instead of a specific vehicle") @JsonInclude(JsonInclude.Include.NON_NULL) Long preferredVehicleId) {
     public TripQuoteRequest(String pickupAddress,String destinationAddress,Double pickupLatitude,Double pickupLongitude,
             Double destinationLatitude,Double destinationLongitude,LocalDateTime scheduledAt,int passengerCount,
             int smallCount,int mediumCount,int largeCount,String tripType,String flightNumber,String additionalNotes) {
         this(pickupAddress,destinationAddress,pickupLatitude,pickupLongitude,destinationLatitude,destinationLongitude,
-                scheduledAt,passengerCount,smallCount,mediumCount,largeCount,tripType,flightNumber,additionalNotes,null,null);
+                scheduledAt,passengerCount,smallCount,mediumCount,largeCount,tripType,flightNumber,additionalNotes,null,null,null,null,null);
+    }
+    public TripQuoteRequest(String pickupAddress,String destinationAddress,Double pickupLatitude,Double pickupLongitude,
+            Double destinationLatitude,Double destinationLongitude,LocalDateTime scheduledAt,int passengerCount,
+            int smallCount,int mediumCount,int largeCount,String tripType,String flightNumber,String additionalNotes,
+            String vehicleCategory,String acceptedQuoteToken,LocalDate flightDate,LocalTime flightTime) {
+        this(pickupAddress,destinationAddress,pickupLatitude,pickupLongitude,destinationLatitude,destinationLongitude,
+                scheduledAt,passengerCount,smallCount,mediumCount,largeCount,tripType,flightNumber,additionalNotes,
+                vehicleCategory,acceptedQuoteToken,flightDate,flightTime,null);
     }
     public String pricingKey() {
-        return java.util.Arrays.asList(pickupAddress,destinationAddress,pickupLatitude,pickupLongitude,destinationLatitude,
+        String key = java.util.Arrays.asList(pickupAddress,destinationAddress,pickupLatitude,pickupLongitude,destinationLatitude,
                 destinationLongitude,scheduledAt,passengerCount,smallCount,mediumCount,largeCount,tripType,flightNumber,additionalNotes)
                 .stream().map(value -> value==null ? "-1:" : value.toString().length()+":"+value)
                 .collect(java.util.stream.Collectors.joining());
+        return flightDate == null && flightTime == null ? key : key + "|" + flightDate + "|" + flightTime;
     }
     public TripQuoteRequest accept(String category,String token) {
         return new TripQuoteRequest(pickupAddress,destinationAddress,pickupLatitude,pickupLongitude,destinationLatitude,destinationLongitude,
-                scheduledAt,passengerCount,smallCount,mediumCount,largeCount,tripType,flightNumber,additionalNotes,category,token);
+                scheduledAt,passengerCount,smallCount,mediumCount,largeCount,tripType,flightNumber,additionalNotes,category,token,flightDate,flightTime,preferredVehicleId);
     }
 }

@@ -55,7 +55,7 @@ void main() {
     expect(capturedRequest.headers['cookie'], 'JSESSIONID=customer-session');
     expect(payments, hasLength(1));
     expect(payments.single.bookingReference, 'BK-000012');
-    expect(payments.single.totalAmount, 106);
+    expect(payments.single.totalAmount, 100);
     service.dispose();
   });
 

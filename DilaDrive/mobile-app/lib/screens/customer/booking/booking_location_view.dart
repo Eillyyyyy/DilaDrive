@@ -6,7 +6,10 @@ import '../../../services/booking_location_service.dart';
 import '../../../services/booking_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/booking_route_map.dart';
+import '../../../widgets/responsive_page.dart';
 import 'booking_location_search_page.dart';
+import 'booking_map_sheet.dart';
+import 'booking_page_layout.dart';
 
 class BookingLocationPin {
   const BookingLocationPin(
@@ -19,7 +22,7 @@ class BookingLocationPin {
 typedef BookingLocationMapBuilder = Widget Function(
     BuildContext context, List<BookingLocationPin> pins);
 
-/// Location selection only; the existing page owns navigation to Trip Details.
+/// Owns location input and the map shared by the booking stages.
 class BookingLocationView extends StatefulWidget {
   const BookingLocationView(
       {super.key,
@@ -28,8 +31,14 @@ class BookingLocationView extends StatefulWidget {
       this.locationProvider,
       this.bookingService,
       this.mapBuilder,
-      this.tileProvider});
+      this.tileProvider,
+      this.mapFlow = false,
+      this.stageContent,
+      this.onStageBack});
   final BookingDraft draft;
+  final bool mapFlow;
+  final Widget? stageContent;
+  final VoidCallback? onStageBack;
   final VoidCallback onContinue;
   final BookingLocationProvider? locationProvider;
   final BookingService? bookingService;
@@ -171,21 +180,33 @@ class _BookingLocationViewState extends State<BookingLocationView> {
 
   Future<void> _search(bool pickup) async {
     setState(() => _pickupMode = pickup);
-    final result = await Navigator.of(context).push<BookingLocationResult>(
-        MaterialPageRoute(
-            builder: (_) => BookingLocationSearchPage(
-                title: pickup ? 'Choose pickup' : 'Choose drop-off',
-                provider: _provider,
-                initialQuery: pickup
-                    ? draft.pickupSearchQuery
-                    : draft.destinationSearchQuery,
-                onQueryChanged: (value) {
-                  if (pickup) {
-                    draft.pickupSearchQuery = value;
-                  } else {
-                    draft.destinationSearchQuery = value;
-                  }
-                })));
+    final search = BookingLocationSearchPage(
+      title: pickup ? 'Choose pickup' : 'Choose drop-off',
+      provider: _provider,
+      initialQuery:
+          pickup ? draft.pickupSearchQuery : draft.destinationSearchQuery,
+      onQueryChanged: (value) {
+        if (pickup) {
+          draft.pickupSearchQuery = value;
+        } else {
+          draft.destinationSearchQuery = value;
+        }
+      },
+    );
+    final result = widget.mapFlow
+        ? await showModalBottomSheet<BookingLocationResult>(
+            context: context,
+            useSafeArea: true,
+            constraints: const BoxConstraints(maxWidth: dilaDrivePageWidth),
+            isScrollControlled: true,
+            builder: (context) => FractionallySizedBox(
+              heightFactor: .85,
+              child: search,
+            ),
+          )
+        : await Navigator.of(context).push<BookingLocationResult>(
+            MaterialPageRoute(builder: (_) => search),
+          );
     if (result != null && mounted) _accept(result, pickup);
   }
 
@@ -340,9 +361,11 @@ class _BookingLocationViewState extends State<BookingLocationView> {
           _distanceReviewAvailable = draft.existingBookingId == null &&
               error is BookingException &&
               error.code == 'ROAD_DISTANCE_REVIEW_AVAILABLE';
-          _routeError = error is BookingException
-              ? error.message
-              : 'The driving route could not be loaded. Please retry.';
+          _routeError = widget.mapFlow && _distanceReviewAvailable
+              ? 'The driving route is temporarily unavailable. Retry to continue.'
+              : error is BookingException
+                  ? error.message
+                  : 'The driving route could not be loaded. Please retry.';
         });
       }
     } finally {
@@ -400,157 +423,160 @@ class _BookingLocationViewState extends State<BookingLocationView> {
               address: _address(pickup),
               coordinates: _point(pickup)!)
     ];
-    return Scaffold(
-        backgroundColor: AppTheme.lightBlueBackground,
-        appBar: AppBar(
-            title: const Text('Create Booking'),
-            backgroundColor: Colors.white,
-            foregroundColor: AppTheme.primaryNavy),
-        body: SafeArea(
-            top: false,
-            child: Center(
-                child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 900),
-              child: LayoutBuilder(
-                  builder: (context, constraints) =>
-                      ListView(padding: const EdgeInsets.all(16), children: [
-                        _card(Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Text('Step 1 of 5 · Locations',
-                                  style: TextStyle(
-                                      color: AppTheme.secondaryText,
-                                      fontSize: 12)),
-                              const SizedBox(height: 6),
-                              const Text('Where are you going?',
-                                  style: TextStyle(
-                                      fontSize: 23,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.primaryNavy)),
-                              Align(
-                                  alignment: Alignment.centerRight,
-                                  child: IconButton(
-                                      tooltip: 'Swap pickup and drop-off',
-                                      onPressed: _point(true) == null &&
-                                              _point(false) == null
-                                          ? null
-                                          : _swap,
-                                      icon: const Icon(Icons.swap_vert,
-                                          color: AppTheme.primaryNavy))),
-                              _location(true),
-                              const Divider(height: 1),
-                              _location(false),
-                              Wrap(spacing: 10, children: [
-                                ChoiceChip(
-                                    key: const ValueKey('pickup-mode'),
-                                    label: const Text('Pin pickup'),
-                                    selected: _pickupMode,
-                                    avatar: Icon(Icons.location_on,
-                                        color: Colors.green.shade700),
-                                    onSelected: (_) =>
-                                        setState(() => _pickupMode = true)),
-                                ChoiceChip(
-                                    key: const ValueKey('dropoff-mode'),
-                                    label: const Text('Pin drop-off'),
-                                    selected: !_pickupMode,
-                                    avatar: const Icon(Icons.location_on,
-                                        color: Colors.red),
-                                    onSelected: (_) =>
-                                        setState(() => _pickupMode = false)),
-                              ]),
-                              TextButton.icon(
-                                  onPressed: _locating ? null : _current,
-                                  icon: const Icon(Icons.my_location),
-                                  label: Text(_locating
-                                      ? 'Getting current location…'
-                                      : 'Use Current Location')),
-                              Text(
-                                  'Tap the map to set ${_pickupMode ? 'pickup' : 'drop-off'}.',
-                                  style: const TextStyle(
-                                      color: AppTheme.secondaryText)),
-                            ])),
-                        const SizedBox(height: 14),
-                        ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: SizedBox(
-                                key: const ValueKey('booking-location-map'),
-                                height: (constraints.maxHeight * .48)
-                                    .clamp(240, 420),
-                                child: widget.mapBuilder?.call(context, pins) ??
-                                    BookingRouteMap(
-                                        draft: draft,
-                                        tileProvider: widget.tileProvider,
-                                        onSelect: (coordinates) => _selectPin(
-                                            coordinates, _pickupMode)))),
-                        const SizedBox(height: 14),
-                        _card(Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (_error != null)
-                                Text(_error!,
-                                    style:
-                                        TextStyle(color: Colors.red.shade800)),
-                              for (final pickup in [true, false])
-                                if (_lookupErrors.containsKey(pickup)) ...[
-                                  Text(
-                                      '${pickup ? 'Pickup' : 'Drop-off'}: ${_lookupErrors[pickup]}',
-                                      style: TextStyle(
-                                          color: Colors.red.shade800)),
-                                  Wrap(children: [
-                                    TextButton(
-                                        onPressed: () =>
-                                            _selectPin(_point(pickup)!, pickup),
-                                        child: Text(
-                                            'Retry ${pickup ? 'pickup' : 'drop-off'} address')),
-                                    TextButton(
-                                        onPressed: () =>
-                                            _confirmAddress(pickup),
-                                        child: Text(
-                                            'Confirm ${pickup ? 'pickup' : 'drop-off'} address'))
-                                  ]),
-                                ],
-                              if (_routing) ...[
-                                const LinearProgressIndicator(),
-                                const SizedBox(height: 8),
-                                const Text('Calculating driving route…')
-                              ],
-                              if (_routeError != null) ...[
-                                Text(_routeError!,
-                                    style:
-                                        TextStyle(color: Colors.red.shade800)),
-                                TextButton(
-                                    onPressed:
-                                        _routing ? null : _calculateRoute,
-                                    child: const Text('Retry route'))
-                              ],
-                              if (draft.roadRoute != null)
-                                Text(
-                                    '${draft.routeDistanceKm!.toStringAsFixed(1)} km · ${(draft.routeDurationSeconds! / 60).ceil()} minutes',
-                                    key: const ValueKey('route-summary'),
-                                    style: const TextStyle(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppTheme.primaryNavy)),
-                              if (!_ready)
-                                const Text(
-                                    'Choose a readable address and map pin for both locations.',
-                                    style: TextStyle(
-                                        color: AppTheme.secondaryText)),
-                              const SizedBox(height: 12),
-                              FilledButton(
-                                  key: const ValueKey('continue-trip-details'),
-                                  onPressed: _ready &&
-                                          !_routing &&
-                                          (draft.roadRoute != null || _distanceReviewAvailable)
-                                      ? widget.onContinue
-                                      : null,
-                                  style: FilledButton.styleFrom(
-                                      backgroundColor: AppTheme.primaryNavy,
-                                      minimumSize: const Size.fromHeight(50)),
-                                  child:
-                                      const Text('Continue to trip details')),
-                            ])),
-                      ])),
-            ))));
+    final canContinue = _ready &&
+        !_locating &&
+        !_routing &&
+        (draft.roadRoute != null ||
+            (!widget.mapFlow && _distanceReviewAvailable));
+    final routeSummary = draft.roadRoute == null
+        ? null
+        : Text(
+            '${bookingDistanceLabel(draft.routeDistanceKm!)} \u00b7 '
+            '${(draft.routeDurationSeconds! / 60).ceil()} minutes',
+            key: const ValueKey('route-summary'),
+            style: Theme.of(context).textTheme.titleMedium,
+          );
+    final locations =
+        _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text('Where are you going?',
+                style: Theme.of(context).textTheme.titleLarge),
+          ),
+          IconButton(
+            tooltip: 'Swap pickup and drop-off',
+            onPressed:
+                _point(true) == null && _point(false) == null ? null : _swap,
+            icon: const Icon(Icons.swap_vert, color: AppTheme.primaryNavy),
+          ),
+        ],
+      ),
+      _location(true),
+      const Divider(height: 1),
+      _location(false),
+      if (widget.mapFlow && routeSummary != null) routeSummary,
+      Wrap(spacing: 10, children: [
+        ChoiceChip(
+            key: const ValueKey('pickup-mode'),
+            label: const Text('Pin pickup'),
+            selected: _pickupMode,
+            avatar: Icon(Icons.location_on, color: Colors.green.shade700),
+            onSelected: (_) => setState(() => _pickupMode = true)),
+        ChoiceChip(
+            key: const ValueKey('dropoff-mode'),
+            label: const Text('Pin drop-off'),
+            selected: !_pickupMode,
+            avatar: const Icon(Icons.location_on, color: Colors.red),
+            onSelected: (_) => setState(() => _pickupMode = false)),
+      ]),
+      if (!widget.mapFlow)
+        TextButton.icon(
+            onPressed: _locating ? null : _current,
+            icon: const Icon(Icons.my_location),
+            label: Text(_locating
+                ? 'Getting current location...'
+                : 'Use Current Location')),
+      if (widget.mapFlow && _locating)
+        const Text('Getting current location...'),
+      Text('Tap the map to set ${_pickupMode ? 'pickup' : 'drop-off'}.',
+          style: const TextStyle(color: AppTheme.secondaryText)),
+    ]));
+    final route =
+        _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (_error != null)
+        Text(_error!, style: TextStyle(color: Colors.red.shade800)),
+      for (final pickup in [true, false])
+        if (_lookupErrors.containsKey(pickup)) ...[
+          Text('${pickup ? 'Pickup' : 'Drop-off'}: ${_lookupErrors[pickup]}',
+              style: TextStyle(color: Colors.red.shade800)),
+          Wrap(children: [
+            TextButton(
+                onPressed: () => _selectPin(_point(pickup)!, pickup),
+                child: Text('Retry ${pickup ? 'pickup' : 'drop-off'} address')),
+            TextButton(
+                onPressed: () => _confirmAddress(pickup),
+                child:
+                    Text('Confirm ${pickup ? 'pickup' : 'drop-off'} address'))
+          ]),
+        ],
+      if (_routing) ...[
+        const LinearProgressIndicator(),
+        const SizedBox(height: 8),
+        const Text('Calculating driving route...')
+      ],
+      if (_routeError != null) ...[
+        Text(_routeError!, style: TextStyle(color: Colors.red.shade800)),
+        TextButton(
+            onPressed: _routing ? null : _calculateRoute,
+            child: const Text('Retry route'))
+      ],
+      if (!widget.mapFlow && routeSummary != null) routeSummary,
+      if (!_ready)
+        const Text('Choose a readable address and map pin for both locations.',
+            style: TextStyle(color: AppTheme.secondaryText)),
+    ]));
+    final action = FilledButton(
+        key: const ValueKey('continue-trip-details'),
+        onPressed: canContinue ? widget.onContinue : null,
+        style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primaryNavy,
+            minimumSize: const Size.fromHeight(50)),
+        child: const Text('Continue to trip details'));
+    Widget map(EdgeInsets padding) => SizedBox.expand(
+          key: const ValueKey('booking-location-map'),
+          child: widget.mapBuilder?.call(context, pins) ??
+              BookingRouteMap(
+                draft: draft,
+                tileProvider: widget.tileProvider,
+                cameraPadding: padding,
+                onSelect: (coordinates) {
+                  if (widget.stageContent == null) {
+                    _selectPin(coordinates, _pickupMode);
+                  }
+                },
+              ),
+        );
+    if (widget.mapFlow) {
+      return BookingMapSheet(
+        mapBuilder: map,
+        onBack: widget.onStageBack,
+        onLocate: widget.stageContent == null && !_locating ? _current : null,
+        expanded: widget.stageContent != null,
+        child: widget.stageContent ??
+            BookingSheetContent(
+              action: action,
+              child: Column(children: [
+                locations,
+                if (!_ready ||
+                    _routing ||
+                    _error != null ||
+                    _routeError != null ||
+                    _lookupErrors.isNotEmpty)
+                  route,
+              ]),
+            ),
+      );
+    }
+    return DilaDriveScaffold(
+      appBar: AppBar(title: const Text('Create Booking')),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => ListView(
+            padding: pagePadding(context),
+            children: [
+              locations,
+              const SizedBox(height: 14),
+              SizedBox(
+                  height: (constraints.maxHeight * .48).clamp(240, 420),
+                  child: map(const EdgeInsets.all(42))),
+              const SizedBox(height: 14),
+              route,
+              action,
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

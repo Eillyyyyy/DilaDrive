@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/responsive_page.dart';
 import '../../models/mobile_user.dart';
 import '../../services/driver_notification_service.dart';
 import '../../services/push_notification_service.dart';
@@ -69,7 +70,8 @@ class _DriverNavigationPageState extends State<DriverNavigationPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
+      bottomNavigationBar: DilaDrivePageLayout(
+          child: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
         type: BottomNavigationBarType.fixed,
@@ -100,7 +102,7 @@ class _DriverNavigationPageState extends State<DriverNavigationPage> {
             label: 'Profile',
           ),
         ],
-      ),
+      )),
     );
   }
 }

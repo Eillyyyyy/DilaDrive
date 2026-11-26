@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+
 import '../../models/customer_notification.dart';
 import '../../models/mobile_user.dart';
 import '../../services/driver_notification_service.dart';
@@ -73,7 +75,7 @@ class _DriverNotificationPageState extends State<DriverNotificationPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(
           automaticallyImplyLeading: false,
@@ -109,7 +111,7 @@ class _DriverNotificationPageState extends State<DriverNotificationPage> {
               child: notifications.isEmpty
                   ? ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(24),
+                      padding: pagePadding(context),
                       children: const [
                         SizedBox(height: 100),
                         Icon(Icons.notifications_none_rounded,
@@ -127,7 +129,7 @@ class _DriverNotificationPageState extends State<DriverNotificationPage> {
                     )
                   : ListView.separated(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(16),
+                      padding: pagePadding(context),
                       itemCount: notifications.length + 1,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {

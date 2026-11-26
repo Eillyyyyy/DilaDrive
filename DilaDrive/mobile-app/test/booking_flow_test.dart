@@ -5,6 +5,7 @@ import 'package:diladrive_customer/screens/customer/booking/booking_fare_page.da
 import 'package:diladrive_customer/screens/customer/booking/booking_location_page.dart';
 import 'package:diladrive_customer/screens/customer/booking/booking_review_page.dart';
 import 'package:diladrive_customer/services/booking_location_service.dart';
+import 'package:diladrive_customer/screens/customer/booking/booking_trip_details_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -59,7 +60,9 @@ void main() {
           .widget<TextFormField>(find.byKey(const ValueKey('location-search')));
       expect(field.controller, isNotNull);
       expect(tester.widget<TextField>(find.byType(TextField)).maxLength, 500);
-      await tester.pageBack();
+      await tester.tap(find.descendant(
+          of: find.byType(AppBar), matching: find.byType(BackButton)));
+
       await tester.pumpAndSettle();
     }
   });
@@ -83,7 +86,7 @@ void main() {
 
     await tester.tap(find.text('Continue to trip details'));
     await tester.pumpAndSettle();
-    expect(find.byType(BookingDetailsPage), findsOneWidget);
+    expect(find.byType(BookingTripDetailsSheet), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(draft.pickupAddress, 'Melaka Sentral');
@@ -145,6 +148,7 @@ void main() {
         luggageCapacity: 2,
       );
 
+    draft.availabilityCheckedFor = draft.availabilityKey;
     await tester.pumpWidget(
       MaterialApp(
           home: BookingFarePage(
@@ -155,7 +159,7 @@ void main() {
     expect(find.text('Pickup Location'), findsOneWidget);
     expect(find.text('Destination'), findsOneWidget);
     expect(find.text('Distance (KM)'), findsOneWidget);
-    expect(find.text('Recommended Vehicle: SEDAN Ã‚Â· Fleet Sedan'),
+    expect(find.text('Recommended Vehicle: SEDAN \u00b7 Fleet Sedan'),
         findsOneWidget);
     expect(find.text('Estimated Fare'), findsOneWidget);
     expect(draft.fareEstimate, isNotNull);
@@ -183,7 +187,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Use Current Location'));
+    await tester.tap(find.byTooltip('Use Current Location'));
     await tester.pumpAndSettle();
     expect(draft.pickupAddress, 'Current pickup');
     await chooseLocation(tester, false, 'Manual destination');
@@ -235,7 +239,6 @@ class _TestBookingService extends BookingService {
   Future<FareEstimate> estimateFare(BookingDraft draft) async =>
       const FareEstimate(
           distanceKm: 58,
-          vehicleModel: 'Fleet Sedan',
           baseFare: 10,
           distanceCharge: 116,
           additionalCharges: [],

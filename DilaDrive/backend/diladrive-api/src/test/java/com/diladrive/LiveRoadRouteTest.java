@@ -37,7 +37,7 @@ class LiveRoadRouteTest {
         url=env.getProperty("spring.datasource.url"); user=env.getProperty("spring.datasource.username"); password=env.getProperty("spring.datasource.password");
         try(var c=DriverManager.getConnection(url,user,password); var s=c.createStatement()) {
             s.execute("create schema "+schema); s.execute("set search_path to "+schema);
-            for(String file:List.of("BASELINE_CURRENT.sql","020_one_driver_one_vehicle.sql","021_driver_profile_image.sql","022_active_booking_assignment.sql","023_customer_booking_flow.sql","024_pending_without_reservation.sql","025_distance_pricing.sql","026_trip_charges_and_commission.sql"))
+            for(String file:List.of("BASELINE_CURRENT.sql","020_one_driver_one_vehicle.sql","021_driver_profile_image.sql","022_active_booking_assignment.sql","023_customer_booking_flow.sql","024_pending_without_reservation.sql","025_distance_pricing.sql","026_trip_charges_and_commission.sql","028_customer_account_verification.sql"))
                 s.execute(Files.readString(Path.of("../../database/schema/"+file)));
         }
         registry.add("spring.datasource.url",()->url+(url.contains("?")?"&":"?")+"currentSchema="+schema);

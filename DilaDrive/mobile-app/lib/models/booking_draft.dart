@@ -12,11 +12,13 @@ enum BookingTripType {
 
 class BookingDraft {
   BookingDraft({
+    this.customerId,
     required this.customerName,
     required this.phoneNumber,
   });
 
   int? existingBookingId;
+  final int? customerId;
   final String customerName;
   final String phoneNumber;
 
@@ -33,10 +35,14 @@ class BookingDraft {
   DateTime? pickupTime;
   DateTime? landedTime;
   String? flightNumber;
+  DateTime? flightDate;
+  String? flightTime;
+  bool showFlightDetails = false;
   int passengerCount = 1;
   int smallCount = 0;
   int mediumCount = 0;
   int largeCount = 0;
+  int get totalBagCount => smallCount + mediumCount + largeCount;
   int get luggageUnits => smallCount + 2 * mediumCount + 3 * largeCount;
   Map<String, dynamic>? roadRoute;
   double? get routeDistanceKm => (roadRoute?['distanceKm'] as num?)?.toDouble();
@@ -65,6 +71,8 @@ class BookingDraft {
         mediumCount,
         largeCount,
         flightNumber,
+        flightDate?.toIso8601String(),
+        flightTime,
         additionalNotes,
         routeDistanceKm,
         routeDurationSeconds,
@@ -120,7 +128,8 @@ class RecommendedVehicle {
     final model = json['model'];
     final type = json['vehicleType'];
     final passengerCapacity = _asInt(json['passengerCapacity']);
-    final luggageCapacity = _asInt(json['luggageCapacity']);
+    final luggageCapacity =
+        _asInt(json['bootCapacityUnits']) ?? _asInt(json['luggageCapacity']);
     if (model is! String ||
         model.trim().isEmpty ||
         type is! String ||
@@ -144,7 +153,6 @@ class RecommendedVehicle {
 class FareEstimate {
   const FareEstimate({
     required this.distanceKm,
-    required this.vehicleModel,
     required this.baseFare,
     required this.distanceCharge,
     required this.additionalCharges,
@@ -155,7 +163,6 @@ class FareEstimate {
   });
 
   final double distanceKm;
-  final String vehicleModel;
   final double baseFare;
   final double distanceCharge;
   final List<FareCharge> additionalCharges;
@@ -166,7 +173,6 @@ class FareEstimate {
 
   factory FareEstimate.fromJson(Map<String, dynamic> json) {
     final distanceKm = _asDouble(json['estimatedDistanceKm']);
-    final vehicleModel = json['vehicleModel'];
     final baseFare = _asDouble(json['baseFare']);
     final distanceCharge = _asDouble(json['distanceCharge']);
     final total = _asDouble(json['totalFare']);
@@ -174,7 +180,6 @@ class FareEstimate {
 
     if (distanceKm == null ||
         distanceKm <= 0 ||
-        vehicleModel is! String ||
         baseFare == null ||
         baseFare < 0 ||
         distanceCharge == null ||
@@ -209,7 +214,6 @@ class FareEstimate {
       durationSeconds: _asInt(json['durationSeconds']) ?? 0,
       ratePerKm: _asDouble(json['ratePerKm']),
       distanceKm: distanceKm,
-      vehicleModel: vehicleModel,
       baseFare: baseFare,
       distanceCharge: distanceCharge,
       additionalCharges: charges,

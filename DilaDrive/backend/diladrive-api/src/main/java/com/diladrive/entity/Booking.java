@@ -24,6 +24,16 @@ public class Booking {
     @Column(name = "vehicle_id")
     private Long vehicleId;
 
+    @Column(name = "preferred_vehicle_id")
+    private Long preferredVehicleId;
+    @Column(name = "preferred_vehicle_category")
+    private String preferredVehicleCategory;
+
+    public Long getPreferredVehicleId() { return preferredVehicleId; }
+    public void setPreferredVehicleId(Long value) { preferredVehicleId = value; }
+    public String getPreferredVehicleCategory() { return preferredVehicleCategory; }
+    public void setPreferredVehicleCategory(String value) { preferredVehicleCategory = value; }
+
     @Column(name = "booking_type")
     private String bookingType;
 
@@ -48,6 +58,28 @@ public class Booking {
     @Column(name = "booking_flightno")
     private String bookingFlightno;
 
+    @Column(name = "booking_flight_date")
+    private LocalDate flightDate;
+
+    @Column(name = "booking_flight_time")
+    private LocalTime flightTime;
+
+    public LocalDate getFlightDate() {
+        return flightDate;
+    }
+
+    public void setFlightDate(LocalDate flightDate) {
+        this.flightDate = flightDate;
+    }
+
+    public LocalTime getFlightTime() {
+        return flightTime;
+    }
+
+    public void setFlightTime(LocalTime flightTime) {
+        this.flightTime = flightTime;
+    }
+
     @Column(name = "booking_passengercount")
     private Integer bookingPassengercount;
 
@@ -68,10 +100,6 @@ public class Booking {
 
     @Column(name = "applied_hourly_rate")
     private BigDecimal appliedHourlyRate;
-    @Column(name = "applied_commission_percent")
-    private BigDecimal appliedCommissionPercent;
-    @Column(name = "applied_commission_basis")
-    private String appliedCommissionBasis;
     @Column(name = "applied_partial_hour_policy")
     private String appliedPartialHourPolicy;
     @Column(name = "road_distance_pending", nullable = false)
@@ -81,15 +109,10 @@ public class Booking {
     public void setRoadDistancePending(boolean value) { roadDistancePending = value; }
 
     public BigDecimal getAppliedHourlyRate() { return appliedHourlyRate; }
-    public BigDecimal getAppliedCommissionPercent() { return appliedCommissionPercent; }
-    public String getAppliedCommissionBasis() { return appliedCommissionBasis; }
     public String getAppliedPartialHourPolicy() { return appliedPartialHourPolicy; }
 
-    public void applyTripPricing(BigDecimal hourlyRate, BigDecimal commissionPercent,
-                                 String commissionBasis, String partialHourPolicy) {
+    public void applyTripPricing(BigDecimal hourlyRate, String partialHourPolicy) {
         appliedHourlyRate = hourlyRate;
-        appliedCommissionPercent = commissionPercent;
-        appliedCommissionBasis = commissionBasis;
         appliedPartialHourPolicy = partialHourPolicy;
     }
 
@@ -142,6 +165,15 @@ public class Booking {
     @Column(name = "luggage_units")
     private Integer luggageUnits;
     public Integer getLuggageUnits() { return luggageUnits; }
+
+    public static int legacyBootUsage(int count, String luggageSize) {
+        if (luggageSize == null) return count;
+        return switch (luggageSize.trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "MEDIUM" -> 2 * count;
+            case "LARGE" -> 3 * count;
+            default -> count;
+        };
+    }
     public void setLuggageUnits(Integer value) { this.luggageUnits = value; }
 
     @Column(name = "duration_seconds")

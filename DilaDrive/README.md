@@ -33,10 +33,13 @@ psql -h localhost -p 5432 -U postgres -d DilaDrive -v ON_ERROR_STOP=1 -f databas
 ```
 
 ### 2. Backend
-```bash
+```powershell
 cd backend/diladrive-api
-mvn spring-boot:run
+.\run-local.ps1
 ```
+The local launcher uses `postgres` as the database password. For a custom
+password, set `DATABASE_PASSWORD` and run the launcher with
+`-UseConfiguredDatabasePassword`.
 - The API listens on `0.0.0.0:8080` by default so LAN-connected devices can reach it.
 - Restrict network access to the API port with host/cloud firewall rules.
 - Swagger UI: http://localhost:8080/swagger-ui.html
@@ -53,5 +56,20 @@ when the web app and API are deployed at different addresses.
 ### 4. Mobile
 See `mobile-app/README.md` for emulator, physical-device, and release API URLs.
 
+For Chrome development, use the VS Code launch configuration **DilaDrive Chrome - API 8080** or run:
+
+```powershell
+cd mobile-app
+flutter run -d chrome
+```
+
+The local API allows `http://127.0.0.1:5174` for credentialed requests.
+Admin web uses port 5173. Flutter reads its fixed port from
+`mobile-app/web_dev_config.yaml`.
+
 Web Admin and Flutter Mobile use the same backend API and PostgreSQL datasource.
 Existing controller routes are retained, including `POST /api/auth/mobile/login`.
+
+## Refinement documentation
+
+Migration 032 adds the trip timeline and incident store. See [the implementation report](documentation/IMPLEMENTATION_REPORT.md), [API additions](documentation/API_DOCUMENTATION.md), [use cases](documentation/USE_CASE_LIST.md) and [run instructions](../README.md).

@@ -11,4 +11,9 @@ public interface AdminRepository extends JpaRepository<Admin, Long> {
 
     boolean existsByEmailIgnoreCaseAndIdNot(String email, Long id);
 
+    @org.springframework.data.jpa.repository.Query(value = """
+            select admin_id from admin where upper(admin_role) = 'SUPER_ADMIN'
+            and upper(admin_status) = 'ACTIVE' order by admin_id for update
+            """, nativeQuery = true)
+    java.util.List<Long> lockActiveSuperAdminIds();
 }

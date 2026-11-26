@@ -9,7 +9,9 @@ class AppConfig {
     final configured = _configuredApiBaseUrl.trim();
     final defaultUrl = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
         ? 'http://10.0.2.2:8080'
-        : 'http://localhost:8080';
+        : kIsWeb && Uri.base.host == '127.0.0.1'
+            ? 'http://127.0.0.1:8080'
+            : 'http://localhost:8080';
 
     // Android emulators reach the host machine through 10.0.2.2. Physical
     // devices should pass their host's LAN address with API_BASE_URL.

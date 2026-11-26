@@ -1,8 +1,8 @@
 import 'package:diladrive_customer/models/booking_draft.dart';
-import 'package:diladrive_customer/screens/customer/booking/booking_details_page.dart';
 import 'package:diladrive_customer/screens/customer/booking/booking_location_page.dart';
 import 'package:diladrive_customer/services/booking_location_service.dart';
 import 'package:diladrive_customer/services/booking_service.dart';
+import 'package:diladrive_customer/screens/customer/booking/booking_trip_details_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -71,7 +71,7 @@ void main() {
     await tester.ensureVisible(find.text('Continue to trip details'));
     await tester.tap(find.text('Continue to trip details'));
     await tester.pumpAndSettle();
-    expect(find.byType(BookingDetailsPage), findsOneWidget);
+    expect(find.byType(BookingTripDetailsSheet), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -83,7 +83,7 @@ void main() {
             draft: draft,
             locationProvider: _Locations(),
             mapBuilder: (_, __) => const SizedBox())));
-    await tester.tap(find.text('Use Current Location'));
+    await tester.tap(find.byTooltip('Use Current Location'));
     await tester.pumpAndSettle();
     expect(draft.pickupAddress, 'Current pickup');
     expect(draft.pickupCoordinates!.latitude, 3);

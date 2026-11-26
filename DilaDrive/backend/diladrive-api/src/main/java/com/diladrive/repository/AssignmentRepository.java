@@ -14,6 +14,15 @@ import java.util.Optional;
 public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
 
     @Query(value = """
+            select a.* from driver_assignment a join booking b using (booking_id)
+            where a.booking_id=:bookingId and b.cust_id=:customerId
+              and upper(a.assignment_status) not in ('COMPLETED','CANCELLED','SUPERSEDED')
+            order by a.assignment_id for update of a
+            """, nativeQuery = true)
+    List<Assignment> lockCustomerActiveAssignments(@Param("bookingId") Long bookingId,
+                                                    @Param("customerId") Long customerId);
+
+    @Query(value = """
             SELECT a.assignment_id AS "assignmentId",
                    b.booking_id AS "bookingId",
                    c.cust_name AS "customer",
@@ -32,9 +41,11 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
                    d.driver_name AS "driverName",
                    v.vehicle_id AS "vehicleId",
                    v.vehicle_plateno AS "vehiclePlate",
+                   v.vehicle_model AS "vehicleModel", v.vehicle_type AS "vehicleCategory",
                    a.assignment_status AS "assignmentStatus",
                    a.assignment_date AS "assignmentDate",
-                   a.scheduled_end_at AS "scheduledEndAt"
+                   a.scheduled_end_at AS "scheduledEndAt", a.previous_assignment_id AS "previousAssignmentId",
+                   a.reassignment_reason AS "reassignmentReason", b.booking_status AS "bookingStatus", b.booking_tripfare AS "bookingFare"
             FROM driver_assignment a
             JOIN booking b ON b.booking_id = a.booking_id
             JOIN customer c ON c.cust_id = b.cust_id
@@ -63,9 +74,11 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
                    d.driver_name AS "driverName",
                    v.vehicle_id AS "vehicleId",
                    v.vehicle_plateno AS "vehiclePlate",
+                   v.vehicle_model AS "vehicleModel", v.vehicle_type AS "vehicleCategory",
                    a.assignment_status AS "assignmentStatus",
                    a.assignment_date AS "assignmentDate",
-                   a.scheduled_end_at AS "scheduledEndAt"
+                   a.scheduled_end_at AS "scheduledEndAt", a.previous_assignment_id AS "previousAssignmentId",
+                   a.reassignment_reason AS "reassignmentReason", b.booking_status AS "bookingStatus", b.booking_tripfare AS "bookingFare"
             FROM driver_assignment a
             JOIN booking b ON b.booking_id = a.booking_id
             JOIN customer c ON c.cust_id = b.cust_id
@@ -78,10 +91,11 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
     List<AssignmentSummaryProjection> findAssignmentSummariesByDriverId(
             @Param("driverId") Long driverId);
 
-    @Query(value = """
+    String ASSIGNMENT_DETAIL = """
             SELECT a.assignment_id AS "assignmentId",
                    b.booking_id AS "bookingId",
-                   c.cust_name AS "customer",
+                   coalesce(nullif(b.contact_name, ''), nullif(c.cust_contactperson, ''), c.cust_name) AS "customer",
+                   coalesce(nullif(b.contact_phone, ''), c.cust_phoneno) AS "customerPhone",
                    b.booking_tripdate AS "tripDate",
                    b.booking_pickuptime AS "pickupTime",
                    b.booking_triptype AS "tripType",
@@ -97,18 +111,37 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
                    d.driver_name AS "driverName",
                    v.vehicle_id AS "vehicleId",
                    v.vehicle_plateno AS "vehiclePlate",
+                   v.vehicle_model AS "vehicleModel", v.vehicle_type AS "vehicleCategory",
                    a.assignment_status AS "assignmentStatus",
                    a.assignment_date AS "assignmentDate",
-                   a.scheduled_end_at AS "scheduledEndAt"
+                   a.scheduled_end_at AS "scheduledEndAt", a.previous_assignment_id AS "previousAssignmentId",
+                   a.reassignment_reason AS "reassignmentReason", b.booking_status AS "bookingStatus", b.booking_tripfare AS "bookingFare"
             FROM driver_assignment a
             JOIN booking b ON b.booking_id = a.booking_id
             JOIN customer c ON c.cust_id = b.cust_id
             JOIN driver d ON d.driver_id = a.driver_id
             JOIN vehicle v ON v.vehicle_id = a.vehicle_id
-            WHERE a.assignment_id = :id
+            """;
+
+    @Query(value = ASSIGNMENT_DETAIL + " WHERE a.assignment_id = :id", nativeQuery = true)
+    Optional<AssignmentSummaryProjection> findAssignmentSummaryById(@Param("id") Long id);
+
+    @Query(value = ASSIGNMENT_DETAIL + """
+            WHERE a.assignment_id = :id AND a.driver_id = :driverId
+              AND upper(a.assignment_status) <> 'SUPERSEDED'
+              AND upper(b.booking_status) NOT IN ('PENDING','PENDING_VERIFICATION','REJECTED')
             """, nativeQuery = true)
-    Optional<AssignmentSummaryProjection> findAssignmentSummaryById(
-            @Param("id") Long id);
+    Optional<AssignmentSummaryProjection> findDriverAssignmentDetail(
+            @Param("id") Long id, @Param("driverId") Long driverId);
+
+    @Query("""
+            select a from Assignment a join fetch a.booking b join fetch a.driver join fetch a.vehicle
+            where b.custId = :customerId and upper(b.bookingStatus) in
+                ('CONFIRMED','ASSIGNED','OTW','WAITING','PICKUP','DROP','COMPLETED')
+              and upper(a.assignmentStatus) in ('ASSIGNED','OTW','WAITING','PICKUP','DROP','COMPLETED')
+            order by case when upper(a.assignmentStatus) = 'COMPLETED' then 1 else 0 end, a.assignmentId desc
+            """)
+    List<Assignment> findCustomerConfirmedAssignments(@Param("customerId") Long customerId);
 
     @Query("select (count(a) > 0) from Assignment a where a.booking.bookingId = :bookingId and upper(a.assignmentStatus) not in :terminalStatuses")
     boolean existsByBookingBookingIdAndAssignmentStatusNotIn(
@@ -144,6 +177,8 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
     Optional<Assignment> findTopByBookingBookingIdOrderByAssignmentDateDesc(
             Long bookingId);
 
+    @Query("select a from Assignment a where a.booking.bookingId = :bookingId and upper(a.assignmentStatus) not in ('COMPLETED','CANCELLED','SUPERSEDED')")
+    Optional<Assignment> findActiveByBookingId(Long bookingId);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Assignment a where a.assignmentId = :id")
     Optional<Assignment> findByIdForUpdate(@Param("id") Long id);

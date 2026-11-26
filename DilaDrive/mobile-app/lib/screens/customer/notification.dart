@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+
 import '../../models/customer_notification.dart';
 import '../../services/customer_notification_service.dart';
 import '../../theme/app_theme.dart';
@@ -74,7 +76,7 @@ class _NotificationPageState extends State<NotificationPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -108,7 +110,7 @@ class _NotificationPageState extends State<NotificationPage> {
             child: notifications.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(24),
+                    padding: pagePadding(context),
                     children: const [
                       SizedBox(height: 110),
                       Icon(Icons.notifications_none_rounded,
@@ -130,7 +132,7 @@ class _NotificationPageState extends State<NotificationPage> {
                   )
                 : ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+                    padding: pagePadding(context),
                     itemCount: notifications.length + 1,
                     separatorBuilder: (_, __) => const SizedBox(height: 11),
                     itemBuilder: (context, index) {

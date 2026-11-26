@@ -34,6 +34,17 @@ class PaymentServiceTest {
             System.getProperty("java.io.tmpdir") + "/diladrive-payment-tests");
 
     @Test
+    void proofMethodsRejectConfirmedBooking() {
+        Booking booking = booking(7L, 13L, "CONFIRMED");
+        when(bookings.findByIdForUpdate(8L)).thenReturn(Optional.of(booking));
+        for (String method : java.util.List.of("BANK_TRANSFER", "CARD")) {
+            assertEquals(409, assertThrows(ResponseStatusException.class,
+                    () -> service.submit(7L, 8L, new BigDecimal("10.00"), method, null)).getStatusCode().value());
+        }
+        verifyNoInteractions(payments);
+    }
+
+    @Test
     void verifyingPaymentCreatesReceiptAndNotifiesCustomer() {
         Payment payment = payment();
         Admin admin = new Admin();

@@ -6,6 +6,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('verification notices display decision and rejection reason',
+      (tester) async {
+    final service = _NotificationService(verification: true);
+    await tester.pumpWidget(MaterialApp(home: NotificationPage(notificationService: service)));
+    await tester.pumpAndSettle();
+    expect(find.text('Account Approved'), findsOneWidget);
+    expect(find.text('Account Verification Rejected'), findsOneWidget);
+    expect(find.text('Your DilaDrive account was rejected. Reason: Registration could not be verified.'), findsOneWidget);
+    await tester.tap(find.text('Mark read'));
+    await tester.pumpAndSettle();
+    expect(service.markedIds, [21]);
+  });
+
   testWidgets('marking a notification read refreshes its displayed state',
       (tester) async {
     final service = _NotificationService();
@@ -29,6 +42,8 @@ void main() {
 }
 
 class _NotificationService extends CustomerNotificationService {
+  _NotificationService({this.verification = false});
+  final bool verification;
   final List<int> markedIds = [];
   bool _read = false;
 
@@ -36,11 +51,17 @@ class _NotificationService extends CustomerNotificationService {
   Future<List<CustomerNotification>> getMyNotifications() async => [
         CustomerNotification(
           id: 21,
-          title: 'Booking request received',
-          message: 'Your booking is waiting for Admin verification.',
+          title: verification ? 'Account Verification Rejected' : 'Booking request received',
+          message: verification
+              ? 'Your DilaDrive account was rejected. Reason: Registration could not be verified.'
+              : 'Your booking is waiting for Admin verification.',
           read: _read,
-          type: 'BOOKING',
+          type: verification ? 'ACCOUNT_VERIFICATION' : 'BOOKING',
         ),
+        if (verification)
+          const CustomerNotification(id: 22, title: 'Account Approved',
+              message: 'Your DilaDrive account has been approved. You can now make bookings.',
+              read: true, type: 'ACCOUNT_VERIFICATION'),
       ];
 
   @override

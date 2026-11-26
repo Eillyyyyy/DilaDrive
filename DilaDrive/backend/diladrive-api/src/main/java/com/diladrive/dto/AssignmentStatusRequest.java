@@ -3,5 +3,5 @@ package com.diladrive.dto;
 import jakarta.validation.constraints.NotBlank;
 
 public record AssignmentStatusRequest(
-        @NotBlank String status) {
+        @NotBlank @jakarta.validation.constraints.Size(max = 16) String status) {
 }

@@ -96,7 +96,7 @@ void main() {
         isTrue);
     expect(routes.calls, 1);
     expect(find.byType(PolylineLayer), findsOneWidget);
-    expect(find.text('58.0 km · 120 minutes'), findsOneWidget);
+    expect(find.text('58.00 km · 120 minutes'), findsOneWidget);
     expect(continueButton(tester).onPressed, isNotNull);
     await tester
         .ensureVisible(find.byKey(const ValueKey('continue-trip-details')));

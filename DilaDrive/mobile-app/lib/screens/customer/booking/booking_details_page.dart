@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import '../../../models/booking_draft.dart';
 import 'booking_availability_page.dart';
 import 'booking_page_layout.dart';
+import 'booking_time_sheet.dart';
+import 'boot_capacity_reference.dart';
 
 class BookingDetailsPage extends StatefulWidget {
-  const BookingDetailsPage({super.key, required this.draft});
+  const BookingDetailsPage({super.key, required this.draft, this.onContinue});
 
   final BookingDraft draft;
+  final VoidCallback? onContinue;
 
   @override
   State<BookingDetailsPage> createState() => _BookingDetailsPageState();
@@ -25,8 +28,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   DateTime? _landedTime;
   int _passengerCount = 1;
   int _small = 0, _medium = 0, _large = 0;
-  int _luggageCount = 0;
-  String? _luggageSize;
 
   @override
   void initState() {
@@ -44,8 +45,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     _small = draft.smallCount;
     _medium = draft.mediumCount;
     _large = draft.largeCount;
-    _luggageCount = draft.luggageCount;
-    _luggageSize = draft.luggageSize;
+    if (widget.onContinue != null) {
+      _flightController.addListener(_saveDraft);
+      _notesController.addListener(_saveDraft);
+    }
   }
 
   @override
@@ -61,12 +64,13 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     final now = DateTime.now();
     final selected = await showDatePicker(
       context: context,
-      initialDate: _date ?? DateTime(now.year, now.month, now.day),
+      initialDate:
+          _date?.isAfter(now) == true ? _date : DateUtils.dateOnly(now),
       firstDate: DateTime(now.year, now.month, now.day),
       lastDate: DateTime(2100),
     );
-    if (selected == null) return;
-    setState(() {
+    if (!mounted || selected == null) return;
+    _update(() {
       _date = DateTime(selected.year, selected.month, selected.day);
       _pickupTime = _withDate(_pickupTime, _date!);
       _landedTime = _withDate(_landedTime, _date!);
@@ -81,15 +85,16 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     }
 
     final current = landedTime ? _landedTime : _pickupTime;
-    final selected = await showTimePicker(
-      context: context,
-      initialTime: current == null
+    final selected = await showBookingClockTime(
+      context,
+      title: landedTime ? 'Landed time' : 'Pickup time',
+      initial: current == null
           ? TimeOfDay.fromDateTime(DateTime.now())
           : TimeOfDay.fromDateTime(current),
     );
-    if (selected == null) return;
+    if (!mounted || selected == null) return;
 
-    setState(() {
+    _update(() {
       final value = DateTime(
         bookingDate.year,
         bookingDate.month,
@@ -117,8 +122,15 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     return null;
   }
 
+  void _update(VoidCallback change) {
+    setState(change);
+    if (widget.onContinue != null) _saveDraft();
+  }
+
   void _saveDraft() {
-    widget.draft
+    final draft = widget.draft;
+    final previousKey = draft.availabilityKey;
+    draft
       ..tripType = _tripType
       ..bookingDate = _date
       ..pickupTime = _pickupTime
@@ -130,12 +142,10 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       ..smallCount = _small
       ..mediumCount = _medium
       ..largeCount = _large
-      ..luggageCount = _small + _medium + _large
-      ..luggageSize = _luggageCount == 0 ? null : _luggageSize
       ..additionalNotes = _notesController.text.trim().isEmpty
           ? null
-          : _notesController.text.trim()
-      ..clearAvailability();
+          : _notesController.text.trim();
+    if (draft.availabilityKey != previousKey) draft.clearAvailability();
   }
 
   void _continue() {
@@ -175,6 +185,11 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     }
 
     _saveDraft();
+    final onContinue = widget.onContinue;
+    if (onContinue != null) {
+      onContinue();
+      return;
+    }
 
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -200,7 +215,9 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
           subtitle:
               'Contact details are taken from the account you signed in with.',
           currentStep: 1,
-          actionLabel: 'Check vehicle availability',
+          actionLabel: widget.onContinue == null
+              ? 'Check vehicle availability'
+              : 'Find Available Vehicles',
           onAction: _continue,
           child: Form(
             key: _formKey,
@@ -238,6 +255,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       const SizedBox(height: 14),
                       DropdownButtonFormField<BookingTripType>(
                         initialValue: _tripType,
+                        isExpanded: true,
                         decoration: bookingInputDecoration(
                           label: 'Trip type',
                           icon: Icons.route_outlined,
@@ -246,13 +264,14 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                             .map(
                               (type) => DropdownMenuItem(
                                 value: type,
-                                child: Text(type.label),
+                                child: Text(type.label,
+                                    overflow: TextOverflow.ellipsis),
                               ),
                             )
                             .toList(),
                         onChanged: (value) {
                           if (value == null) return;
-                          setState(() => _tripType = value);
+                          _update(() => _tripType = value);
                         },
                       ),
                       const SizedBox(height: 14),
@@ -309,11 +328,11 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         value: _passengerCount,
                         minimum: 1,
                         onChanged: (value) =>
-                            setState(() => _passengerCount = value),
+                            _update(() => _passengerCount = value),
                       ),
                       const Divider(height: 24),
                       const Text(
-                        'Luggage',
+                        'Boot Capacity (Luggage Units)',
                         style: TextStyle(
                           color: bookingNavy,
                           fontSize: 16,
@@ -321,30 +340,28 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      TextButton(
-                        onPressed: () => setState(() {
-                          _small = _passengerCount;
-                          _large = _passengerCount;
-                        }),
-                        child: const Text('Suggest one large bag and backpack per passenger'),
+                      const Text(
+                        'Small bag = 1 unit · Medium bag = 2 units · Large bag = 3 units',
                       ),
-                      const Text('Backpacks / small bags (1 point each)'),
+                      const Text('Small luggage'),
                       _Counter(
                           value: _small,
                           minimum: 0,
-                          onChanged: (v) => setState(() => _small = v)),
-                      const Text('Medium luggage (2 points each)'),
+                          onChanged: (v) => _update(() => _small = v)),
+                      const Text('Medium luggage'),
                       _Counter(
                           value: _medium,
                           minimum: 0,
-                          onChanged: (v) => setState(() => _medium = v)),
-                      const Text('Large luggage (3 points each)'),
+                          onChanged: (v) => _update(() => _medium = v)),
+                      const Text('Large luggage'),
                       _Counter(
                           value: _large,
                           minimum: 0,
-                          onChanged: (v) => setState(() => _large = v)),
+                          onChanged: (v) => _update(() => _large = v)),
                       Text(
-                          'Total luggage points: ${_small + 2 * _medium + 3 * _large}'),
+                        'Total Boot Usage: ${_small + 2 * _medium + 3 * _large} units',
+                      ),
+                      const BootCapacityReference(),
                     ],
                   ),
                 ),
@@ -433,7 +450,7 @@ class _Counter extends StatelessWidget {
           tooltip: 'Decrease',
         ),
         IconButton(
-          onPressed: () => onChanged(value + 1),
+          onPressed: value >= 100 ? null : () => onChanged(value + 1),
           icon: const Icon(Icons.add_circle_outline),
           color: bookingBlue,
           tooltip: 'Increase',

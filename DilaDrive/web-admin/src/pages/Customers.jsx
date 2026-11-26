@@ -1,5 +1,6 @@
 import api from "../services/api";
-import { useCallback, useMemo, useState, useEffect } from "react";
+import useRecordFocus from "../services/useRecordFocus";
+import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import {
   Search,
   Eye,
@@ -18,28 +19,20 @@ import {
 } from "lucide-react";
 
 const statusStyles = {
-  Verified: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  Pending: "bg-amber-50 text-amber-700 ring-amber-600/20",
-  "Pending Verification": "bg-amber-50 text-amber-700 ring-amber-600/20",
+  ACTIVE: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+  PENDING: "bg-amber-50 text-amber-700 ring-amber-600/20",
+  REJECTED: "bg-red-50 text-red-700 ring-red-600/20",
 };
+const statusLabels = { ACTIVE: "Active", PENDING: "Pending", REJECTED: "Rejected" };
 
 function StatusBadge({ status }) {
-  const verified = status === "Verified";
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
-        statusStyles[status] ||
-        (verified
-          ? statusStyles.Verified
-          : statusStyles["Pending Verification"])
+        statusStyles[status] || "bg-slate-100 text-slate-700 ring-slate-300"
       }`}
     >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          verified ? "bg-emerald-500" : "bg-amber-500"
-        }`}
-      />
-      {verified ? "Verified" : "Pending verification"}
+      {statusLabels[status] || status || "Unknown"}
     </span>
   );
 }
@@ -62,16 +55,24 @@ function InfoItem({ icon: Icon, label, value }) {
   );
 }
 
-export default function Customers() {
+export default function Customers({ onSessionExpired, recordFocus, onRecordOpened }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [customerList, setCustomerList] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customersError, setCustomersError] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  useRecordFocus({ id: recordFocus, items: customerList, idKey: "id", loading: customersLoading,
+    error: customersError, open: setSelectedCustomer, complete: onRecordOpened });
   const [customerToVerify, setCustomerToVerify] = useState(null);
   const [verifyingId, setVerifyingId] = useState(null);
   const [verificationError, setVerificationError] = useState("");
+  const [verificationSuccess, setVerificationSuccess] = useState("");
+  const [verificationDecision, setVerificationDecision] = useState("APPROVE");
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [refreshRequired, setRefreshRequired] = useState(false);
+  const verificationInFlight = useRef(false);
+  const customerFetch = useRef(0);
   const [customerForm, setCustomerForm] = useState(null);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -96,11 +97,13 @@ export default function Customers() {
   };
 
   const fetchCustomers = useCallback(async () => {
+    const requestId = ++customerFetch.current;
     setCustomersLoading(true);
     setCustomersError("");
     try {
-      const { data } = await api.get("/customers");
-      setCustomerList(data.map((customer) => ({
+      const { data } = await api.get("/customers", { timeout: 15000 });
+      if (requestId !== customerFetch.current) return null;
+      const customers = data.map((customer) => ({
         ...customer,
         id: customer.custId,
         name: customer.custName,
@@ -108,23 +111,33 @@ export default function Customers() {
         phone: customer.custPhoneno,
         companyName: customer.companyName ?? customer.custCompanyname,
         companyRegistrationNumber: customer.companyRegistrationNumber,
-        status: customer.custStatus === "ACTIVE" ? "Verified" : "Pending",
-        customerType: customer.custType === "COMPANY" ? "Corporate" : "Normal",
-      })));
+        status: customer.custStatus?.toUpperCase() || "",
+        customerType: customer.custType?.toUpperCase() === "COMPANY" ? "Corporate" : "Normal",
+      }));
+      setCustomerList(customers);
+      setSelectedCustomer((previous) => previous
+        ? customers.find((customer) => customer.id === previous.id) ?? null
+        : null);
+      setRefreshRequired(false);
+      return customers;
     } catch (error) {
+      if (requestId !== customerFetch.current) return null;
+      if (error.response?.status === 401) onSessionExpired?.();
       const response = error.response?.data;
       setCustomersError(
         (typeof response === "string" ? response : response?.message)
           || error.message
           || "Unable to load customers.",
       );
+      return null;
     } finally {
-      setCustomersLoading(false);
+      if (requestId === customerFetch.current) setCustomersLoading(false);
     }
-  }, []);
+  }, [onSessionExpired]);
 
   useEffect(() => {
     fetchCustomers();
+    return () => { customerFetch.current++; };
   }, [fetchCustomers]);
 
   const saveCustomer = async (event) => {
@@ -161,9 +174,9 @@ export default function Customers() {
   };
 
   const verifiedCount = customerList.filter(
-    (customer) => customer.status === "Verified"
+    (customer) => customer.status === "ACTIVE"
   ).length;
-  const pendingCount = customerList.length - verifiedCount;
+  const pendingCount = customerList.filter((customer) => customer.status === "PENDING").length;
 
   const filteredCustomers = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -181,53 +194,67 @@ export default function Customers() {
 
       const matchesStatus =
         statusFilter === "All" ||
-        (statusFilter === "Verified" && customer.status === "Verified") ||
-        (statusFilter === "Pending" && customer.status !== "Verified");
+        customer.status === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
   }, [customerList, search, statusFilter]);
 
-  const askToVerify = (customer) => {
+  const askToVerify = (customer, decision) => {
+    if (customer.status !== "PENDING" || refreshRequired || verificationInFlight.current) return;
     setVerificationError("");
+    setVerificationSuccess("");
+    setVerificationDecision(decision);
+    setRejectionReason("");
     setCustomerToVerify(customer);
   };
 
   const handleVerify = async (customer) => {
-    if (!customer?.id || verifyingId !== null) return;
+    if (!customer?.id || customer.status !== "PENDING" || refreshRequired || verificationInFlight.current) return;
+    const reason = rejectionReason.trim();
+    if (verificationDecision === "REJECT" && (!reason || reason.length > 500)) {
+      setVerificationError("Enter a rejection reason between 1 and 500 characters.");
+      return;
+    }
 
+    verificationInFlight.current = true;
     setVerifyingId(customer.id);
     setVerificationError("");
     try {
-      const { data } = await api.put(`/customers/${customer.id}`, {
-        custName: customer.custName ?? customer.name,
-        custEmail: customer.custEmail ?? customer.email,
-        custPhoneno: customer.custPhoneno ?? customer.phone ?? null,
-        custType: customer.custType
-          ?? (customer.customerType === "Corporate" ? "COMPANY" : "NORMAL"),
-        custStatus: "ACTIVE",
-      });
-      const verifiedCustomer = {
-        ...customer,
-        ...data,
-        id: data.custId ?? customer.id,
-        status: data.custStatus === "ACTIVE" ? "Verified" : "Pending",
-      };
+      const { data } = await api.patch(`/customers/${customer.id}/verification`, {
+        decision: verificationDecision,
+        ...(verificationDecision === "REJECT" ? { reason } : {}),
+      }, { timeout: 15000 });
       setCustomerList((current) =>
-        current.map((item) => item.id === customer.id ? verifiedCustomer : item)
+        current.map((item) => item.id === customer.id ? { ...item, status: data.status } : item)
       );
       setSelectedCustomer((current) =>
-        current?.id === customer.id ? verifiedCustomer : current
+        current?.id === customer.id ? { ...current, status: data.status } : current
       );
       setCustomerToVerify(null);
+      setVerificationSuccess(data.status === "ACTIVE" ? "Customer account approved." : "Customer account rejected.");
+      setRefreshRequired(true);
+      await fetchCustomers();
     } catch (error) {
       const response = error.response?.data;
+      const status = error.response?.status;
+      if (status === 401) {
+        onSessionExpired?.();
+        return;
+      }
+      if (!status || status === 409 || status === 404 || status >= 500) {
+        setRefreshRequired(true);
+        const latest = await fetchCustomers();
+        const updated = latest?.find((item) => item.id === customer.id);
+        setCustomerToVerify(updated?.status === "PENDING" ? updated : null);
+      }
       setVerificationError(
         (typeof response === "string" ? response : response?.message)
           || error.message
           || "Unable to verify this customer. Please try again.",
       );
     } finally {
+      verificationInFlight.current = false;
       setVerifyingId(null);
     }
   };
@@ -250,6 +277,13 @@ export default function Customers() {
           </p>
         </div>
       </section>
+      {verificationSuccess && <p role="status" className="rounded-xl bg-emerald-50 p-4 text-emerald-800">{verificationSuccess}</p>}
+      {!customerToVerify && verificationError && <p role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{verificationError}</p>}
+      {refreshRequired && (
+        <button type="button" className="rounded-xl border px-4 py-2" onClick={fetchCustomers} disabled={customersLoading}>
+          Refresh customer status
+        </button>
+      )}
 
       {/* Summary cards */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -331,8 +365,9 @@ export default function Customers() {
                   className="min-w-28 bg-transparent py-2.5 text-sm font-medium text-slate-700 outline-none"
                 >
                   <option value="All">All statuses</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Verified">Verified</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="REJECTED">Rejected</option>
                 </select>
               </label>
             </div>
@@ -417,14 +452,15 @@ export default function Customers() {
                           <Eye size={15} />
                           View
                         </button>
-                        {customer.status !== "Verified" && (
+                        {customer.status === "PENDING" && (
                           <button
                             type="button"
-                            onClick={() => askToVerify(customer)}
+                            onClick={() => askToVerify(customer, "APPROVE")}
+                            disabled={refreshRequired || verifyingId !== null}
                             className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-4 focus:ring-teal-700/20"
                           >
                             <CheckCircle2 size={15} />
-                            Verify
+                            Approve
                           </button>
                         )}
                       </div>
@@ -543,21 +579,17 @@ export default function Customers() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <InfoItem icon={Mail} label="Email address" value={selectedCustomer.email} />
                 <InfoItem icon={Phone} label="Phone number" value={selectedCustomer.phone} />
-                <InfoItem
-                  icon={Building2}
-                  label="Company address"
-                  value={selectedCustomer.companyAddress || selectedCustomer.company_address}
-                />
-                <InfoItem
-                  icon={UserRound}
-                  label="Contact person"
-                  value={selectedCustomer.contactPerson || selectedCustomer.contact_person}
-                />
+                <InfoItem icon={UserRound} label="Customer category" value={selectedCustomer.customerType} />
+                {selectedCustomer.customerType === "Corporate" && (
+                  <>
+                    <InfoItem icon={Building2} label="Company name" value={selectedCustomer.companyName} />
+                    <InfoItem icon={Building2} label="Company registration number" value={selectedCustomer.companyRegistrationNumber} />
+                  </>
+                )}
               </div>
 
               <p className="text-xs leading-5 text-slate-500">
                 Verify the account only after reviewing the submitted information.
-                Corporate account fields may be empty for normal customers.
               </p>
             </div>
 
@@ -569,19 +601,14 @@ export default function Customers() {
               >
                 Close
               </button>
-              <button type="button" onClick={() => openCustomerForm(selectedCustomer)}
-                className="rounded-xl border border-teal-700 px-4 py-2.5 text-sm font-semibold text-teal-700">
-                Edit customer
-              </button>
-              {selectedCustomer.status !== "Verified" && (
-                <button
-                  type="button"
-                  onClick={() => askToVerify(selectedCustomer)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
-                >
-                  <ShieldCheck size={17} />
-                  Verify account
-                </button>
+              {selectedCustomer.status === "PENDING" && (
+                <>
+                  <button type="button" disabled={refreshRequired || verifyingId !== null}
+                    onClick={() => askToVerify(selectedCustomer, "APPROVE")}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white">
+                    <ShieldCheck size={17} /> Approve account
+                  </button>
+                </>
               )}
             </div>
           </section>
@@ -619,8 +646,8 @@ export default function Customers() {
                       onChange={changeCustomerField} className="mt-1 w-full rounded-lg border px-3 py-2" />
                   </label>
                   <label className="block text-sm font-medium">
-                    Company registration number
-                    <input required maxLength={30} name="companyRegistrationNumber" value={customerForm.companyRegistrationNumber}
+                    Company registration number (optional)
+                    <input maxLength={30} name="companyRegistrationNumber" value={customerForm.companyRegistrationNumber}
                       onChange={changeCustomerField} className="mt-1 w-full rounded-lg border px-3 py-2" />
                   </label>
                 </>
@@ -654,11 +681,12 @@ export default function Customers() {
               <ShieldCheck size={24} />
             </div>
             <h2 id="verify-modal-title" className="mt-4 text-xl font-bold text-slate-900">
-              Verify customer account?
+              {verificationDecision === "REJECT" ? "Reject customer account?" : "Approve customer account?"}
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              This will save the customer account as active in the database.
-              Make sure the customer details have been reviewed first.
+              {verificationDecision === "REJECT"
+                ? "The customer will receive this reason and will remain unable to book."
+                : "The customer will be notified and become eligible to book."}
             </p>
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="font-semibold text-slate-900">
@@ -668,6 +696,15 @@ export default function Customers() {
                 {customerToVerify.email || "No email provided"}
               </p>
             </div>
+            {verificationDecision === "REJECT" && (
+              <label className="mt-4 block text-sm font-medium">
+                Rejection reason
+                <textarea className="mt-1 w-full rounded-lg border px-3 py-2"
+                  maxLength={500} rows={3} value={rejectionReason}
+                  disabled={verifyingId !== null}
+                  onChange={(event) => setRejectionReason(event.target.value)} />
+              </label>
+            )}
             {verificationError && (
               <p
                 role="alert"
@@ -688,13 +725,13 @@ export default function Customers() {
               <button
                 type="button"
                 onClick={() => handleVerify(customerToVerify)}
-                disabled={verifyingId === customerToVerify.id}
+                disabled={verifyingId !== null || refreshRequired}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800"
               >
                 <Check size={16} />
                 {verifyingId === customerToVerify.id
                   ? "Saving..."
-                  : "Confirm verification"}
+                  : verificationDecision === "REJECT" ? "Confirm rejection" : "Confirm approval"}
               </button>
             </div>
           </section>

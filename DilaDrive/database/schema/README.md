@@ -88,7 +88,7 @@ rates in Settings → Pricing; missing or inactive pricing is a 422 business err
 while physical availability remains independent of pricing. Existing accepted
 booking snapshots are preserved when company rates change.
 
-### Trip pricing, actual charges and driver earnings
+### Trip pricing and actual charges
 
 Apply `026_trip_charges_and_commission.sql` after the current baseline and
 required forward migrations, including `025_distance_pricing.sql` when setting
@@ -96,15 +96,16 @@ up the road-pricing flow. This migration is additive. It leaves stored booking
 fares, payment records, issued invoices and assignments intact. Deploy the API
 after applying it, since JPA validates the new booking and vehicle columns.
 
-The migration provisions the owner interview's RM2/km, RM60 per approved hour
-and 15% commission. Provisional defaults are a common distance rate, prorated
-partial hours and commission on base fare plus approved hourly charges.
+The migration provisions RM2/km and RM60 per approved hour, with a common
+distance rate and prorated partial hours by default.
 Administrators can enable the existing category-specific per-kilometre rates.
 Hourly charges are applied only to duration explicitly approved by an Admin.
 Actual toll and parking are entered separately. Existing accepted booking fares
 remain fixed until the existing explicit fare-review workflow changes them.
-Legacy bookings without an hourly or commission snapshot take the current
-policy on the first actual charge approval or eligible completion.
+Legacy bookings without an hourly snapshot take the current policy on the first
+actual charge approval or eligible completion. Commission tables and columns from this historical
+migration are retained for existing records. The application no longer reads
+or writes them.
 
 Vehicle-specific large luggage and backpack limits are optional during upgrade
 so legacy combined luggage limits continue to work. Configure both limits for
@@ -130,3 +131,60 @@ Apply `027_admin_audit_relationships.sql` after the pricing migration.
 It validates the links from payment verification, cash recording and fare
 proposals to Admin accounts. It reuses existing equivalent validated foreign
 keys and rolls back if any existing reference is invalid.
+
+Apply `028_customer_account_verification.sql` after 027 and before starting an
+API build containing UC004. For an existing installation, use the configured
+database and schema for that installation. From the repository root, after
+checking the target and taking your normal backup, run:
+
+```powershell
+psql -X -v ON_ERROR_STOP=1 -d <configured-database> -f diladrive/database/schema/028_customer_account_verification.sql
+```
+
+For a new database, run the baseline and its required forward migrations first.
+Migration 028 adds nullable customer decision metadata, foreign keys, a history
+table and an index. It leaves existing statuses and records in place and does
+not fabricate reviewer identities, reasons or timestamps for legacy rows.
+
+
+Apply "029_booking_flight_schedule.sql" after migration 028 before running the updated backend against an existing database. It adds nullable flight date and flight time columns to booking. Existing rows need no backfill.
+
+Apply `030_booking_assignment_preference.sql` after 029 before starting the updated backend. It adds nullable booking preference and reassignment history fields and a persistent pre-pickup alert marker. Existing bookings have no exact preferred vehicle until a customer submits or edits a complete booking.
+
+## Scheduled booking reservations
+
+Apply 031_pending_pair_reservations.sql to upgraded databases after the booking and assignment migrations. It reuses booking_vehicle_hold and preserves vehicle-only legacy holds. New holds record both resources, expire in Malaysia local time, and are ignored after expiry. Clean installations include the hold table in BASELINE_CURRENT.sql.
+
+### Trip monitoring
+
+Apply `032_trip_milestones_incidents.sql` after migration 031 before starting the refinement backend. It adds two tables and a lookup index. Existing assignments are retained without fabricated timestamps. The current baseline already includes the new tables.
+
+### Driver identity and fleet documents
+
+Apply `033_driver_identity_documents.sql` to existing databases before deploying
+the protected driver identity and fleet document workflow. The migration adds
+encrypted IC fields, vehicle categories, private document metadata and access
+audit history without deleting existing driver or vehicle records. Configure
+`DRIVER_DATA_MASTER_KEY` as a Base64-encoded 32-byte secret before starting the
+API if legacy IC numbers need to be encrypted or new documents uploaded.
+
+Apply `034_fleet_expiry_reminders.sql` after migration 033. It adds persistent
+deduplication records for driver licence, vehicle road-tax and vehicle service
+expiry alerts. New databases include both changes in `BASELINE_CURRENT.sql`.
+The daily scheduler sends configured reminders to active Admin accounts in
+Asia/Kuala_Lumpur. Replacing a document stores the new encrypted document and
+its audit metadata; the superseded encrypted file is removed after the
+transaction commits.
+
+Apply `035_vehicle_boot_capacity.sql` after migration 034 before starting the
+category-based boot capacity backend on an existing database. New databases
+already have this schema in `BASELINE_CURRENT.sql`. The migration links
+recognized legacy vehicle types to their categories and backfills the stored
+vehicle capacities. Vehicles with an unrecognized type keep their stored
+capacities until an administrator assigns a category. The legacy vehicle
+luggage column remains available for older integrations and stores boot units.
+
+Apply `036_actionable_notifications.sql` before deploying the actionable
+admin inbox on an existing database. It adds optional record targets, read
+timestamps and an event deduplication key. Existing messages and their read
+states remain available. New databases include these fields in the baseline.

@@ -13,7 +13,6 @@ public record PaymentResponse(
         String customerName,
         BigDecimal bookingFare,
         BigDecimal amount,
-        BigDecimal surchargeAmount,
         String paymentMethod,
         String paymentStatus,
         String rejectReason,
@@ -27,7 +26,7 @@ public record PaymentResponse(
         return new PaymentResponse(
                 payment.getPaymentId(), booking.getBookingId(),
                 "BK-%06d".formatted(booking.getBookingId()), booking.getCustId(), null,
-                booking.getBookingTripfare(), payment.getAmount(), payment.getSurchargeAmount(),
+                booking.getBookingTripfare(), payment.getAmount(),
                 payment.getPaymentMethod(), payment.getPaymentStatus(), payment.getRejectReason(),
                 payment.getReceiptFileUrl() == null ? null
                         : "/api/payments/" + payment.getPaymentId() + "/proof",
@@ -37,7 +36,7 @@ public record PaymentResponse(
 
     public PaymentResponse withCustomerName(String name) {
         return new PaymentResponse(paymentId, bookingId, bookingReference, customerId, name,
-                bookingFare, amount, surchargeAmount, paymentMethod, paymentStatus,
+                bookingFare, amount, paymentMethod, paymentStatus,
                 rejectReason, proofUrl, submittedAt, verifiedAt,
                 recordedByDriverId, recordedByAdminId);
     }

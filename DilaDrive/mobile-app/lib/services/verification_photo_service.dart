@@ -19,7 +19,7 @@ class VerificationPhotoService {
 
   Future<List<VerificationPhoto>> list(int assignmentId) async {
     final response = await _request(
-      () => _client.get(
+      () => fetchMobilePages(_client,
         Uri.parse(
             '${AppConfig.apiBaseUrl}/api/assignments/$assignmentId/photos'),
         headers: {'Accept': 'application/json', ...MobileSession.headers},

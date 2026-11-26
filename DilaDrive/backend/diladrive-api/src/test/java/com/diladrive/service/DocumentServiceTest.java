@@ -81,7 +81,7 @@ class DocumentServiceTest {
     }
 
     @Test
-    void generatesPurchaseOrderOnlyFromApprovedQuotation() {
+    void recordsClientPurchaseOrderOnlyFromApprovedQuotation() {
         Document quotation = document(42L, DocumentType.QUOTATION, "QUO-16", "APPROVED");
         when(documentRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(quotation));
         when(documentRepository.existsByDocumentTypeAndSourceDocumentId(
@@ -94,12 +94,12 @@ class DocumentServiceTest {
         when(documentRepository.save(any(Document.class))).thenAnswer(invocation ->
                 invocation.getArgument(0));
 
-        var result = service.generatePurchaseOrder(42L);
+        var result = service.recordPurchaseOrder(42L, "CLIENT-PO-7");
 
         assertEquals(DocumentType.PURCHASE_ORDER, result.documentType());
         assertEquals("ISSUED", result.status());
         assertEquals(42L, result.sourceDocumentId());
-        assertEquals("Quotation: QUO-16", result.remarks());
+        assertEquals("Received client PO CLIENT-PO-7 / Quotation: QUO-16", result.remarks());
     }
 
     @Test
@@ -139,49 +139,23 @@ class DocumentServiceTest {
     }
 
     @Test
-    void onlyPaidInvoiceCanGenerateReceipt() {
-        Document invoice = document(55L, DocumentType.INVOICE, "INV-1", "ISSUED");
-        when(documentRepository.findByIdForUpdate(55L)).thenReturn(Optional.of(invoice));
-
-        assertThrows(ResponseStatusException.class, () -> service.generateReceipt(55L));
+    void independentReceiptGenerationIsGoneEvenForPaidInvoices() {
+        assertEquals(410, assertThrows(ResponseStatusException.class,
+                () -> service.generateReceipt(55L)).getStatusCode().value());
         verify(documentRepository, never()).saveAndFlush(any(Document.class));
-
-        invoice.setStatus("PAID");
-        when(documentRepository.existsByDocumentTypeAndSourceDocumentId(
-                DocumentType.RECEIPT, 55L)).thenReturn(false);
-        when(documentRepository.saveAndFlush(any(Document.class))).thenAnswer(invocation -> {
-            Document receipt = invocation.getArgument(0);
-            receipt.setDocumentId(103L);
-            return receipt;
-        });
-        when(documentRepository.save(any(Document.class))).thenAnswer(invocation ->
-                invocation.getArgument(0));
-
-        var result = service.generateReceipt(55L);
-
-        assertEquals(DocumentType.RECEIPT, result.documentType());
-        assertEquals("PAID", result.status());
-        assertEquals(55L, result.sourceDocumentId());
-        assertEquals("Invoice: INV-1", result.remarks());
     }
 
     @Test
-    void marksIssuedInvoicePaid() {
+    void invoiceRequiresEnoughVerifiedPaymentsToBeMarkedPaid() {
         Document invoice = document(55L, DocumentType.INVOICE, "INV-1", "ISSUED");
+        var payments = mock(com.diladrive.repository.PaymentRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "payments", payments);
         when(documentRepository.findByIdForUpdate(55L)).thenReturn(Optional.of(invoice));
-        when(documentRepository.save(any(Document.class))).thenAnswer(invocation ->
-                invocation.getArgument(0));
-
-        var result = service.markInvoicePaid(55L);
-
-        assertEquals("PAID", result.status());
-    }
-
-    @Test
-    void rejectsReceiptForUnpaidInvoice() {
-        Document invoice = document(55L, DocumentType.INVOICE, "INV-1", "ISSUED");
-        when(documentRepository.findByIdForUpdate(55L)).thenReturn(Optional.of(invoice));
-        assertThrows(ResponseStatusException.class, () -> service.generateReceipt(55L));
+        when(payments.sumVerifiedAmount(invoice.getBookingId())).thenReturn(BigDecimal.ZERO, invoice.getAmount());
+        when(documentRepository.save(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        assertEquals(409, assertThrows(ResponseStatusException.class,
+                () -> service.markInvoicePaid(55L)).getStatusCode().value());
+        assertEquals("PAID", service.markInvoicePaid(55L).status());
     }
 
     @Test

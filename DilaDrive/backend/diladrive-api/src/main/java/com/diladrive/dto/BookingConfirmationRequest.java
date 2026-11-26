@@ -6,4 +6,4 @@ import java.time.LocalDateTime;
 
 public record BookingConfirmationRequest(@NotNull @Positive Long driverId,
         @Positive Long vehicleId, @NotNull LocalDateTime scheduledEndAt,
-        @DecimalMin(value = "0.01") BigDecimal tripFare) {}
+        @com.fasterxml.jackson.annotation.JsonIgnore BigDecimal tripFare) {}

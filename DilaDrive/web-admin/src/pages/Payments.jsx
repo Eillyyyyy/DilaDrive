@@ -1,3 +1,4 @@
+import useModalScrollLock from "../components/useModalScrollLock";
 
 import { useEffect, useMemo, useState } from "react";
 import api from "../services/api";
@@ -73,7 +74,6 @@ export default function Payments() {
         bookingId: payment.bookingReference || `BK-${payment.bookingId}`,
         customer: payment.customerName || `Customer ${payment.customerId}`,
         amount: Number(payment.amount || 0),
-        surchargeAmount: Number(payment.surchargeAmount || 0),
         paymentMethod: payment.paymentMethod,
         recordedBy: payment.recordedByDriverId
           ? `Driver #${payment.recordedByDriverId}`
@@ -129,7 +129,7 @@ export default function Payments() {
       verified: verified.length,
       rejected: rejected.length,
       verifiedAmount: verified.reduce(
-        (total, payment) => total + Number(payment.amount || 0) + Number(payment.surchargeAmount || 0),
+        (total, payment) => total + Number(payment.amount || 0),
         0
       ),
     };
@@ -469,7 +469,7 @@ export default function Payments() {
                   </td>
 
                   <td className="whitespace-nowrap px-6 py-5 font-medium">
-                    {formatCurrency(payment.amount + payment.surchargeAmount)}
+                    {formatCurrency(payment.amount)}
                     <p className="mt-1 text-xs font-normal text-slate-500">
                       {payment.paymentMethod?.replaceAll("_", " ")}
                     </p>
@@ -561,11 +561,7 @@ export default function Payments() {
               <Info label="Customer" value={selectedPayment.customer} />
               <Info
                 label="Amount"
-                value={formatCurrency(selectedPayment.amount + selectedPayment.surchargeAmount)}
-              />
-              <Info
-                label="Card surcharge"
-                value={formatCurrency(selectedPayment.surchargeAmount)}
+                value={formatCurrency(selectedPayment.amount)}
               />
               <Info
                 label="Payment Method"
@@ -844,15 +840,17 @@ function StatCard({ title, value, icon: Icon, color }) {
 }
 
 function Modal({ title, subtitle, onClose, children, layer = 50 }) {
+  useModalScrollLock();
+
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center bg-slate-950/50 p-4"
+      className="fixed inset-0 !m-0 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4"
       style={{ zIndex: layer }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-xl">
+      <div className="modal-panel w-full max-w-2xl overflow-y-auto overscroll-contain rounded-3xl bg-white shadow-xl">
         <div className="sticky top-0 flex items-start justify-between border-b border-slate-100 bg-white p-6">
           <div>
             <h3 className="text-xl font-bold text-slate-900">{title}</h3>

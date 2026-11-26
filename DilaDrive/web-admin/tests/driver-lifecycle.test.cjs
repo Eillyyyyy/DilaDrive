@@ -10,7 +10,7 @@ test('null vehicle edit initialization preserves driver information and sends no
   const {toDriverEditForm, toDriverCreatePayload, validateDriverFields} = await formModule();
   const form = toDriverEditForm(apiDriver);
   assert.equal(form.vehicle, null);
-  assert.equal(form.icNo, 'IC7');
+  assert.equal(Object.hasOwn(form, 'icNo'), false);
   assert.equal(form.licenseNo, 'LICENSE7');
   assert.equal(form.licenseExpiry, '2028-01-01');
   assert.deepEqual(validateDriverFields(form, form.id), {});

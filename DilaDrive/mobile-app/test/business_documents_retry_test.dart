@@ -5,6 +5,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+      'keeps quotations and invoices while hiding receipts and payment status',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: BusinessDocumentsPage(documentService: _CustomerDocuments()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('QUO-1'), findsOneWidget);
+    expect(find.text('INV-2'), findsOneWidget);
+    expect(find.text('REC-3'), findsNothing);
+    expect(find.text('PAID'), findsNothing);
+    await tester.tap(find.text('INV-2'));
+    await tester.pumpAndSettle();
+    expect(find.text('ISSUED'), findsOneWidget);
+    expect(find.text('PAID'), findsNothing);
+  });
   testWidgets('retry loads business documents without a setState error',
       (tester) async {
     final service = _RetryingDocumentService();
@@ -39,4 +55,31 @@ class _RetryingDocumentService extends BusinessDocumentService {
 
   @override
   void dispose() {}
+}
+
+class _CustomerDocuments extends BusinessDocumentService {
+  @override
+  Future<List<BusinessDocument>> getMyDocuments() async => const [
+        BusinessDocument(
+            id: 1,
+            number: 'QUO-1',
+            type: 'QUOTATION',
+            bookingId: 1,
+            amount: 25,
+            status: 'APPROVED'),
+        BusinessDocument(
+            id: 2,
+            number: 'INV-2',
+            type: 'INVOICE',
+            bookingId: 1,
+            amount: 25,
+            status: 'PAID'),
+        BusinessDocument(
+            id: 3,
+            number: 'REC-3',
+            type: 'RECEIPT',
+            bookingId: 1,
+            amount: 25,
+            status: 'PAID'),
+      ];
 }

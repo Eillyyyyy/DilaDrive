@@ -26,7 +26,7 @@ class RecordDeletionTest {
         var photos = mock(VerificationPhotoService.class);
         var notifications = mock(NotificationService.class);
         var mvc = MockMvcBuilders.standaloneSetup(
-                new CustomerController(customers),
+                new CustomerController(customers, mock(com.diladrive.service.CustomerVerificationService.class)),
                 new DriverController(drivers),
                 new VehicleController(vehicles),
                 new AssignmentController(assignments, photos),

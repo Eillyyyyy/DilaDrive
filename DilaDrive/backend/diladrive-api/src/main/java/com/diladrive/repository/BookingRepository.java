@@ -34,6 +34,8 @@ public interface BookingRepository
     List<Booking> findCustomerBookingsNewestFirst(
             @Param("customerId") Long customerId);
 
+    Optional<Booking> findByBookingIdAndCustId(Long bookingId, Long customerId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select b from Booking b where b.bookingId = :id")
     Optional<Booking> findByIdForUpdate(@Param("id") Long id);

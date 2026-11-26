@@ -1,9 +1,11 @@
+import useModalScrollLock from "../components/useModalScrollLock";
+import useRecordFocus from "../services/useRecordFocus";
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import api from "../services/api";
-import { TripCharges } from "./DriverEarnings";
+import { TripCharges } from "../components/TripPricing";
 import AssignmentResourcePicker from "../components/AssignmentResourcePicker";
-import { bookingAssignment, confirmationError } from "../services/bookingAssignments";
+import { assignmentDuration, bookingAssignment, confirmationError } from "../services/bookingAssignments";
 import {
   Search,
   Eye,
@@ -33,6 +35,8 @@ const BOOKING_STATUSES = [
 
 export default function Bookings({
   onNavigate,
+  bookingFocus,
+  onBookingOpened,
 }) {
  const [bookingList, setBookingList] = useState([]);
  const requestVersion = useRef(0);
@@ -63,7 +67,10 @@ const fetchBookings = async () => {
     const customers = customersResponse.data;
 
     const formattedBookings =
-      response.data.map(booking => ({
+      response.data.map(booking => {
+        const assignment = bookingAssignment(booking, assignmentsResponse.data);
+        const inProgress = ["OTW", "WAITING", "PICKUP", "DROP"].includes(assignment.tripStatus);
+        return {
 
         id: booking.bookingId,
         hasAcceptedFare: !!booking.fareSnapshot,
@@ -96,7 +103,9 @@ const fetchBookings = async () => {
           booking.bookingPassengercount,
 
         smallCount: booking.smallCount, mediumCount: booking.mediumCount, largeCount: booking.largeCount,
-        phone: booking.contactPhone,
+        phone: booking.contactPhone || customers.find(c => c.custId === booking.custId)?.custPhoneno,
+        customerCategory: customers.find(c => c.custId === booking.custId)?.custType,
+        distanceKm: booking.bookingDistancekm,
         luggageUnits: booking.luggageUnits, reservedEndAt: booking.reservedEndAt,
         durationSeconds: booking.durationSeconds,
         luggageCount:
@@ -117,9 +126,9 @@ const fetchBookings = async () => {
         notes:
           booking.bookingNotes,
 
-        ...bookingAssignment(booking, assignmentsResponse.data),
+        ...assignment,
 
-        status: ({
+        status: inProgress ? "In Progress" : ({
           PENDING: "Pending Verification",
           PENDING_VERIFICATION: "Pending Verification",
           CONFIRMED: "Confirmed",
@@ -134,7 +143,8 @@ const fetchBookings = async () => {
           booking.bookingStatus ||
           "Pending Verification")
 
-      }));
+        };
+      });
 
     setBookingList(formattedBookings);
     setSelectedBooking(previous => previous ? formattedBookings.find(b => b.id === previous.id) || null : null);
@@ -156,6 +166,8 @@ const fetchBookings = async () => {
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
+  useRecordFocus({ id: bookingFocus, items: bookingList, idKey: "id", loading,
+    error: loadError, open: setSelectedBooking, complete: onBookingOpened });
   const [busy, setBusy] = useState(false);
   const submitLock = useRef(false);
   const [notice, setNotice] = useState("");
@@ -247,6 +259,25 @@ const fetchBookings = async () => {
     }
   };
 
+  const reserveSuggestedAssignment = async (option) => {
+    if (!bookingToVerify || submitLock.current) return false;
+    submitLock.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await api.put(`/bookings/${bookingToVerify.id}/suggested-assignment`, {
+        driverId: option.driverId, vehicleId: option.vehicleId, scheduledEndAt,
+      });
+      return true;
+    } catch (failure) {
+      setError(confirmationError(failure));
+      return false;
+    } finally {
+      submitLock.current = false;
+      setBusy(false);
+    }
+  };
+
   const openAssignment = (booking) => {
     setError("");
     if (booking.roadDistancePending) {
@@ -254,6 +285,7 @@ const fetchBookings = async () => {
       return;
     }
     if (!booking.assignmentId && ["Confirmed", "Pending Verification"].includes(booking.status)) {
+      setAssignmentOption(null);
       setBookingToVerify(booking);
       setScheduledEndAt(booking.reservedEndAt?.slice(0, 19) || "");
       setFareInput(Number(booking.fare) > 0 ? String(booking.fare) : "");
@@ -550,7 +582,8 @@ const fetchBookings = async () => {
                           <button
                             type="button"
                             onClick={() => {
-                              setBookingToVerify(booking);
+                              setAssignmentOption(null);
+      setBookingToVerify(booking);
       setScheduledEndAt(booking.reservedEndAt?.slice(0, 19) || "");
                               setFareInput(
                                 Number.isFinite(Number(booking.fare)) &&
@@ -563,7 +596,7 @@ const fetchBookings = async () => {
                             className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
                           >
                             <CheckCircle2 size={15} />
-                            Confirm & Assign
+                            Verify Booking
                           </button>
                         )}
 
@@ -650,7 +683,7 @@ const fetchBookings = async () => {
                          <Detail label="Luggage Size" value={selectedBooking.luggageSize} />
              {selectedBooking.smallCount != null && <>
                <Detail label="Small / medium / large" value={`${selectedBooking.smallCount} / ${selectedBooking.mediumCount} / ${selectedBooking.largeCount}`} />
-               <Detail label="Luggage points" value={selectedBooking.luggageUnits} />
+               <Detail label="Boot usage (luggage units)" value={selectedBooking.luggageUnits} />
                <Detail label="Estimated travel minutes" value={Math.ceil(selectedBooking.durationSeconds / 60)} />
              </>}
              {selectedBooking.status === "Pending Verification" && <button type="button" disabled={busy} className="rounded-xl border border-rose-300 px-4 py-2 text-rose-700" onClick={async () => {
@@ -669,7 +702,6 @@ const fetchBookings = async () => {
             <Detail label="Assigned Driver" value={selectedBooking.driver || "Not assigned"} />
             <Detail label="Assigned Vehicle" value={selectedBooking.vehicle || "Not assigned"} />
             <Detail label="Trip Status" value={selectedBooking.tripStatus || "Not assigned"} />
-            <Detail label="Payment Status" value={selectedBooking.paymentStatus || "Not provided"} />
 
             {selectedBooking.status === "Pending Verification" && !selectedBooking.assignmentId && !selectedBooking.roadDistancePending && (
               <button
@@ -688,7 +720,7 @@ const fetchBookings = async () => {
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700"
               >
                 <ShieldCheck size={18} />
-                Confirm & Assign
+                Verify Booking
               </button>
             )}
 
@@ -716,7 +748,7 @@ const fetchBookings = async () => {
       {/* Verify confirmation */}
       {bookingToVerify && (
         <Modal
-          title={bookingToVerify.status === "Confirmed" ? "Complete missing assignment" : "Confirm & Assign"}
+          title={bookingToVerify.status === "Confirmed" ? "Complete missing assignment" : "Verify Booking"}
           subtitle="Check availability before confirming this request."
           onClose={() => {
             if (busy) return;
@@ -726,29 +758,36 @@ const fetchBookings = async () => {
           icon={<ShieldCheck size={21} />}
         >
           <div className="space-y-4">
-            <p className="text-sm leading-6 text-slate-600">
-              Confirm that the requested schedule and suitable
-              transport resources can accommodate this booking.
-            </p>
-
-            <div className="rounded-xl bg-slate-50 p-4">
-              <Detail label="Trip Date" value={formatDate(bookingToVerify.date)} />
+            <div className="grid gap-x-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2">
+              <Detail label="Booking" value={`BK-${String(bookingToVerify.id).padStart(6, "0")}`} />
               <Detail label="Customer" value={bookingToVerify.customer} />
-              <Detail label="Contact phone" value={bookingToVerify.phone} />
-              <Detail label="Route" value={`${bookingToVerify.pickup || "N/A"} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ${bookingToVerify.dropoff || "N/A"}`} />
+              <Detail label="Phone" value={bookingToVerify.phone || "Not provided"} />
+              <Detail label="Customer category" value={bookingToVerify.customerCategory || "Not recorded"} />
+              <Detail label="Selected category" value={bookingToVerify.type || "Not recorded"} />
+              <Detail label="Estimated distance" value={bookingToVerify.distanceKm == null ? "Not recorded" : `${bookingToVerify.distanceKm} km`} />
+              {bookingToVerify.flight && <Detail label="Flight" value={bookingToVerify.flight} />}
+              <Detail label="Pickup date" value={formatDate(bookingToVerify.date)} />
+              <Detail label="Pickup time (Malaysia)" value={bookingToVerify.pickupTime} />
+              <Detail label="Pickup" value={bookingToVerify.pickup || "N/A"} />
+              <Detail label="Destination" value={bookingToVerify.dropoff || "N/A"} />
               <Detail label="Passengers" value={bookingToVerify.passengers || 1} />
+              <Detail label="Boot usage (luggage units)" value={bookingToVerify.luggageUnits ?? "Not recorded"} />
+              <Detail label="Estimated fare" value={bookingToVerify.fare == null ? "Not recorded" : `RM ${Number(bookingToVerify.fare).toFixed(2)}`} />
+              <Detail label="Bag counts (small / medium / large)" value={bookingToVerify.smallCount == null
+                ? "Not recorded"
+                : `${bookingToVerify.smallCount} / ${bookingToVerify.mediumCount ?? 0} / ${bookingToVerify.largeCount ?? 0}`} />
+              {bookingToVerify.durationSeconds > 0 && <Detail label="Estimated drive"
+                value={assignmentDuration(bookingToVerify.durationSeconds)} />}
             </div>
-
-            <Detail label="Luggage points" value={bookingToVerify.luggageUnits ?? "Not recorded"} />
-            <p className="text-sm text-slate-600">{bookingToVerify.status === "Confirmed" ? "This legacy booking needs its missing assignment." : "This pending request has not reserved a vehicle."} The recommended type is {bookingToVerify.type}; another suitable type may be selected.</p>
             <label className="block space-y-2 text-sm font-medium text-slate-700">
               Scheduled trip end time
-              <input type="datetime-local" step="1" required disabled={busy} value={scheduledEndAt} min={(bookingToVerify.date + "T" + bookingToVerify.pickupTime).slice(0,16)} onChange={e => setScheduledEndAt(e.target.value)} className="w-full rounded-xl border border-slate-300 p-3" />
+              <input type="datetime-local" step="1" required disabled={busy} value={scheduledEndAt} min={(bookingToVerify.date + "T" + bookingToVerify.pickupTime).slice(0,16)} onChange={e => { setAssignmentOption(null); setScheduledEndAt(e.target.value); }} className="w-full rounded-xl border border-slate-300 p-3" />
               <span className="block text-xs font-normal text-slate-500">Include driving duration and the configured buffer. Confirmed active assignments with an unknown end need schedule correction before resource reuse.</span>
             </label>
 
             <AssignmentResourcePicker bookingId={bookingToVerify.id} scheduledEndAt={scheduledEndAt}
-              onChange={setAssignmentOption} disabled={busy} />
+              onChange={setAssignmentOption} onSuggestedEnd={setScheduledEndAt} disabled={busy}
+              onReserve={bookingToVerify.status === "Pending Verification" ? reserveSuggestedAssignment : undefined} />
 
             {!bookingToVerify.hasAcceptedFare && (!Number.isFinite(Number(bookingToVerify.fare)) ||
               Number(bookingToVerify.fare) <= 0) && (
@@ -772,7 +811,7 @@ const fetchBookings = async () => {
 
             {error && <ErrorMessage>{error}</ErrorMessage>}
 
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-3 border-t bg-white py-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => {
@@ -792,7 +831,7 @@ const fetchBookings = async () => {
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-semibold text-white hover:bg-emerald-700"
               >
                 <CheckCircle2 size={17} />
-                {busy ? "Saving..." : "Confirm & Assign"}
+                {busy ? "Saving..." : "Verify Booking"}
               </button>
             </div>
           </div>
@@ -837,9 +876,11 @@ function Detail({ label, value }) {
 }
 
 function Modal({ title, subtitle, icon, onClose, children }) {
+  useModalScrollLock();
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 !m-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -848,9 +889,9 @@ function Modal({ title, subtitle, icon, onClose, children }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="my-auto w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="modal-panel flex w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
       >
-        <div className="flex items-start justify-between border-b border-slate-100 p-5 sm:p-6">
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-100 p-5 sm:p-6">
           <div className="flex items-start gap-3">
             <div className="rounded-xl bg-teal-50 p-3 text-teal-700">
               {icon}
@@ -875,7 +916,7 @@ function Modal({ title, subtitle, icon, onClose, children }) {
           </button>
         </div>
 
-        <div className="max-h-[75vh] overflow-y-auto p-5 sm:p-6">
+        <div className="min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-6">
           {children}
         </div>
       </div>

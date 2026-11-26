@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:diladrive_customer/models/customer_profile.dart';
-import 'package:diladrive_customer/screens/customer/view_account.dart';
+import 'package:diladrive_customer/screens/customer/update_account.dart';
 import 'package:diladrive_customer/services/api_http_client.dart';
 import 'package:diladrive_customer/services/customer_profile_service.dart';
 import 'package:diladrive_customer/services/mobile_session.dart';
@@ -28,8 +28,11 @@ void main() {
     MobileSession.onDriverDeactivated = null;
   });
 
-  testWidgets('account fetches each time, retries and handles malformed images',
+  testWidgets(
+      'update account reloads and refreshes verification without resetting edits',
       (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final service = _ProfileService();
     addTearDown(service.dispose);
     await tester.pumpWidget(MaterialApp(
@@ -38,7 +41,7 @@ void main() {
           body: TextButton(
             onPressed: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
-                builder: (_) => ViewAccountPage(service: service),
+                builder: (_) => UpdateAccountPage(profileService: service),
               ),
             ),
             child: const Text('Open account'),
@@ -87,8 +90,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(service.requests, hasLength(3));
     expect(find.text('Updated Individual'), findsOneWidget);
-    expect(find.text('Pending verification'), findsOneWidget);
+    expect(find.text('Pending Verification'), findsOneWidget);
     expect(find.text('Company name'), findsNothing);
+    expect(find.textContaining(RegExp('clear phone', caseSensitive: false)),
+        findsNothing);
+    final nameField = find.widgetWithText(TextFormField, 'Full name');
+    await tester.ensureVisible(nameField);
+    await tester.enterText(nameField, 'Unsaved name');
+
+    await tester.ensureVisible(find.text('Check status'));
+    await tester.tap(find.text('Check status'));
+    await tester.pump();
+    expect(service.requests, hasLength(4));
+    service.requests[3].complete(const CustomerProfile(
+      id: 1,
+      name: 'Updated Individual',
+      email: 'individual@example.test',
+      status: 'REJECTED',
+      rejectionReason: 'Registration details could not be verified.',
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Verification Rejected'), findsOneWidget);
+    expect(find.text('Registration details could not be verified.'),
+        findsOneWidget);
+    expect(find.text('Unsaved name'), findsOneWidget);
+    await tester.ensureVisible(find.text('Check status'));
+    await tester.tap(find.text('Check status'));
+    await tester.pump();
+    service.requests[4].complete(const CustomerProfile(
+      id: 1,
+      name: 'Updated Individual',
+      email: 'individual@example.test',
+      status: 'ACTIVE',
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Verified / Active'), findsOneWidget);
+    expect(
+        find.text('Registration details could not be verified.'), findsNothing);
   });
 
   test('only the specific driver rejection clears the mobile session',

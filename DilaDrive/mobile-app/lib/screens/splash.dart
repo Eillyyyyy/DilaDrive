@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/responsive_page.dart';
+
 import 'auth/login.dart';
 
 class SplashPage extends StatefulWidget {
@@ -30,7 +32,7 @@ class _SplashPageState extends State<SplashPage> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return const DilaDriveScaffold(
       body: Center(
         child: Text(
           "DilaDrive",

@@ -119,6 +119,16 @@ class AdminManagementServiceTest {
         verify(adminRepository).save(any(Admin.class));
     }
 
+    @Test
+    void lastActiveSuperAdminCannotDemoteSelf() {
+        Admin actor = admin(1L, "SUPER_ADMIN");
+        when(adminRepository.findById(1L)).thenReturn(Optional.of(actor));
+        when(adminRepository.lockActiveSuperAdminIds()).thenReturn(java.util.List.of(1L));
+        assertEquals(409, assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> service.updateAdmin(1L, 1L, updateRequest("ADMIN"))).getStatusCode().value());
+        assertEquals("SUPER_ADMIN", actor.getRole());
+    }
+
     private static Admin admin(Long id, String role) {
         Admin admin = new Admin();
         admin.setId(id);

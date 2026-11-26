@@ -16,7 +16,7 @@ class CustomerOnlyCreationTest {
         var customers = mock(CustomerService.class);
         var bookings = mock(BookingService.class);
         var mvc = MockMvcBuilders.standaloneSetup(
-                new CustomerController(customers),
+                new CustomerController(customers, mock(com.diladrive.service.CustomerVerificationService.class)),
                 new BookingController(bookings)
         ).build();
 

@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../../models/business_document.dart';
@@ -61,7 +63,7 @@ class _BusinessDocumentsPageState extends State<BusinessDocumentsPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: const Text('Business documents')),
         body: FutureBuilder<List<BusinessDocument>>(
@@ -85,13 +87,16 @@ class _BusinessDocumentsPageState extends State<BusinessDocumentsPage> {
                 ),
               );
             }
-            final documents = snapshot.data ?? const <BusinessDocument>[];
+            final documents = (snapshot.data ?? const <BusinessDocument>[])
+                .where((document) =>
+                    document.type.trim().toUpperCase() != 'RECEIPT')
+                .toList(growable: false);
             return RefreshIndicator(
               onRefresh: _refresh,
               child: documents.isEmpty
                   ? ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(24),
+                      padding: pagePadding(context),
                       children: const [
                         SizedBox(height: 100),
                         Icon(Icons.description_outlined,
@@ -103,14 +108,14 @@ class _BusinessDocumentsPageState extends State<BusinessDocumentsPage> {
                                 fontSize: 17, fontWeight: FontWeight.w700)),
                         SizedBox(height: 6),
                         Text(
-                            'Approved quotations, invoices and receipts will appear here.',
+                            'Approved quotations, purchase orders and invoices will appear here.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: AppTheme.secondaryText)),
                       ],
                     )
                   : ListView.separated(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(16),
+                      padding: pagePadding(context),
                       itemCount: documents.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) =>
@@ -128,7 +133,7 @@ class _DocumentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _statusColor(document.status);
+    final color = _statusColor(_customerStatus(document));
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Padding(
@@ -160,7 +165,7 @@ class _DocumentCard extends StatelessWidget {
                   child: Padding(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    child: Text(document.status,
+                    child: Text(_customerStatus(document),
                         style: TextStyle(
                             color: color,
                             fontSize: 12,
@@ -205,12 +210,12 @@ class BusinessDocumentDetailsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = _statusColor(document.status);
-    return Scaffold(
+    final statusColor = _statusColor(_customerStatus(document));
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(title: Text(_documentType(document.type))),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: pagePadding(context),
         children: [
           Card(
             color: AppTheme.primaryNavy,
@@ -233,7 +238,7 @@ class BusinessDocumentDetailsPage extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
-                      child: Text(document.status,
+                      child: Text(_customerStatus(document),
                           style: TextStyle(
                               color: statusColor, fontWeight: FontWeight.w700)),
                     ),
@@ -324,7 +329,7 @@ class _BusinessDocumentPdfPageState extends State<BusinessDocumentPdfPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: Text(widget.document.number)),
         body: FutureBuilder<List<int>>(
@@ -433,6 +438,12 @@ String _documentType(String type) => switch (type.toUpperCase()) {
       'RECEIPT' => 'Receipt',
       _ => type,
     };
+
+String _customerStatus(BusinessDocument document) =>
+    document.type.toUpperCase() == 'INVOICE' &&
+            document.status.toUpperCase() == 'PAID'
+        ? 'ISSUED'
+        : document.status;
 
 Color _statusColor(String status) => switch (status.toUpperCase()) {
       'PAID' || 'APPROVED' => Colors.green,

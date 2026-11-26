@@ -1,10 +1,14 @@
 package com.diladrive.entity;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+import java.time.Instant;
+import org.hibernate.annotations.DynamicUpdate;
 
 @Entity
 @Table(name = "customer")
+@DynamicUpdate
 public class Customer {
 
     @Id
@@ -35,8 +39,35 @@ public class Customer {
     @Column(name = "cust_status")
     private String custStatus;
 
+    @Column(name = "rejection_reason", length = 500)
+    private String rejectionReason;
+
+    @Column(name = "verified_at")
+    private Instant verifiedAt;
+
+    @Column(name = "verified_by_admin_id")
+    private Long verifiedByAdminId;
+
+    @JsonIgnore
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void recordVerification(String status, String reason, Instant timestamp, Long reviewerId) {
+        custStatus = status;
+        rejectionReason = reason;
+        verifiedAt = timestamp;
+        verifiedByAdminId = reviewerId;
+    }
+
     @Column(name = "cust_companyname", length = 150)
     private String companyName;
+
+    @Column(name = "cust_companyaddress", columnDefinition = "text")
+    private String companyAddress;
+
+    @Column(name = "cust_contactperson", length = 100)
+    private String contactPerson;
 
     @Column(name = "company_registration_number", length = 30)
     private String companyRegistrationNumber;
@@ -97,6 +128,22 @@ public class Customer {
 
     public void setCustStatus(String custStatus) {
         this.custStatus = custStatus;
+    }
+
+    public String getCompanyAddress() {
+        return companyAddress;
+    }
+
+    public void setCompanyAddress(String companyAddress) {
+        this.companyAddress = companyAddress;
+    }
+
+    public String getContactPerson() {
+        return contactPerson;
+    }
+
+    public void setContactPerson(String contactPerson) {
+        this.contactPerson = contactPerson;
     }
 
     public String getCompanyName() {

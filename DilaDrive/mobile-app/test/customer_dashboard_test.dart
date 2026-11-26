@@ -45,14 +45,16 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    expect(find.text('Pending'), findsOneWidget);
+    expect(find.text('Active'), findsOneWidget);
+    expect(find.text('1'), findsNWidgets(3));
+    await tester.scrollUntilVisible(find.text('BK-000007'), 120,
+        scrollable: find.byType(Scrollable).first);
     expect(find.text('No bookings yet'), findsNothing);
     expect(find.text('BK-000007'), findsOneWidget);
     expect(find.text('BK-000008'), findsNWidgets(2));
     expect(find.text('BK-000009'), findsOneWidget);
-    expect(find.text('Pending'), findsOneWidget);
-    expect(find.text('Active'), findsOneWidget);
     expect(find.text('Completed'), findsNWidgets(2));
-    expect(find.text('1'), findsNWidgets(3));
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -76,8 +78,15 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(find.text('No bookings yet'), 120,
+        scrollable: find.byType(Scrollable).first);
     expect(find.text('No bookings yet'), findsOneWidget);
     expect(service.requestCount, 1);
+    tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position
+        .jumpTo(0);
+    await tester.pumpAndSettle();
 
     await tester.drag(find.byType(ListView).first, const Offset(0, 400));
     await tester.pump();

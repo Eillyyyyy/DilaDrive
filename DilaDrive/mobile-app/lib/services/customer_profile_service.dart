@@ -33,6 +33,7 @@ class CustomerProfileService {
     String? companyName,
     String? companyRegistrationNumber,
     String? profileImage,
+    bool clearPhone = false,
   }) async {
     final response = await _request(
       () => _client.put(
@@ -45,10 +46,12 @@ class CustomerProfileService {
         body: jsonEncode({
           'name': name.trim(),
           'email': email.trim(),
-          'phone': phone?.trim(),
-          'companyName': companyName?.trim(),
-          'companyRegistrationNumber': companyRegistrationNumber?.trim(),
-          'profileImage': profileImage,
+          if (phone != null) 'phone': phone.trim(),
+          if (clearPhone) 'clearPhone': true,
+          if (companyName != null) 'companyName': companyName.trim(),
+          if (companyRegistrationNumber != null)
+            'companyRegistrationNumber': companyRegistrationNumber.trim(),
+          if (profileImage != null) 'profileImage': profileImage,
         }),
       ),
     );

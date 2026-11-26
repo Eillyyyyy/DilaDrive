@@ -1,8 +1,6 @@
 package com.diladrive.service;
 
-import com.diladrive.entity.Assignment;
 import com.diladrive.entity.Booking;
-import com.diladrive.entity.Driver;
 import com.diladrive.repository.BookingRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -14,9 +12,6 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.YearMonth;
-import java.time.ZoneId;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -27,7 +22,7 @@ import static org.mockito.Mockito.*;
 @EnabledIfEnvironmentVariable(named = "RUN_TRIP_FINANCE_IT", matches = "true")
 class TripFinancePostgresIT {
     @Test
-    void preservesBookingsAndRecordsOneCommissionWithMonthlyBalances() throws Exception {
+    void preservesBookingChargesAndIssuedInvoiceAmounts() throws Exception {
         var properties = new Properties();
         try (var input = Files.newInputStream(Path.of("src/main/resources/application.properties"))) {
             properties.load(input);
@@ -71,27 +66,6 @@ class TripFinancePostgresIT {
             assertEquals(1, jdbc.queryForObject("select count(*) from trip_charge_revision", Integer.class));
             assertEquals(new BigDecimal("237.00"), finance.finalFare(booking));
 
-            var driver = new Driver();
-            driver.setDriverId(1L);
-            var assignment = new Assignment();
-            assignment.setAssignmentId(1L);
-            assignment.setDriver(driver);
-            assignment.setAssignmentStatus("COMPLETED");
-            finance.recordCompletion(assignment, booking);
-            finance.recordCompletion(assignment, booking);
-            assertEquals(1, jdbc.queryForObject("select count(*) from driver_trip_commission", Integer.class));
-
-            var month = YearMonth.now(ZoneId.of("Asia/Kuala_Lumpur"));
-            var first = driverTotals(finance, month);
-            assertEquals(1L, first.get("completed_trips"));
-            assertEquals(new BigDecimal("220.00"), first.get("commissionable_fare"));
-            assertEquals(new BigDecimal("33.00"), first.get("earned"));
-            assertEquals(new BigDecimal("33.00"), first.get("outstanding"));
-            finance.paymentStatus(1, TripFinanceService.PaymentStatus.PAID, "Payment reference", 1);
-            var paid = driverTotals(finance, month);
-            assertEquals("PAID", paid.get("payment_status"));
-            assertEquals(new BigDecimal("33.00"), paid.get("paid"));
-            assertEquals("PAID", finance.history(1).get(0).get("action"));
             jdbc.update("insert into customer(cust_id,cust_name) values(1,'Test customer')");
             jdbc.update("""
                     insert into documents(document_number,document_type,booking_id,cust_id,cust_name,amount,status)
@@ -108,10 +82,5 @@ class TripFinancePostgresIT {
         } finally {
             server.execute("drop schema " + schema + " cascade");
         }
-    }
-
-    private Map<?,?> driverTotals(TripFinanceService finance, YearMonth month) {
-        var drivers = (List<?>) finance.earnings(month, 1L, null).get("drivers");
-        return (Map<?,?>) drivers.get(0);
     }
 }

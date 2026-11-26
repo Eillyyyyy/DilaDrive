@@ -18,6 +18,20 @@ public class DashboardController {
         this.dashboardService = dashboardService;
     }
 
+
+    @GetMapping("/operations")
+    public java.util.Map<String,Object> operations(HttpServletRequest request) {
+        requireAdmin(request);
+        return dashboardService.operations();
+    }
+
+    private void requireAdmin(HttpServletRequest request) {
+        var session = request.getSession(false);
+        if (session == null || !(session.getAttribute("adminId") instanceof Long)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Please sign in as an admin.");
+        }
+    }
+
     @GetMapping("/stats")
     public DashboardStatsDTO getStats(HttpServletRequest request) {
         var session = request.getSession(false);

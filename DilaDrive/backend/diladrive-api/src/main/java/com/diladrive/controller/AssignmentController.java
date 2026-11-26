@@ -4,6 +4,7 @@ import com.diladrive.dto.AssignmentRequest;
 import com.diladrive.dto.AssignmentResponse;
 import com.diladrive.dto.AssignmentStatusRequest;
 import com.diladrive.dto.VerificationPhotoResponse;
+import com.diladrive.dto.TripIncidentRequest;
 import com.diladrive.service.AssignmentService;
 import com.diladrive.service.VerificationPhotoService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,9 +39,26 @@ public class AssignmentController {
         return assignmentService.getAllAssignments();
     }
 
+    @org.springframework.beans.factory.annotation.Autowired private com.diladrive.service.CustomerTripService customerTrips;
+
+    @GetMapping("/schedule")
+    public List<com.diladrive.service.CustomerTripService.ResourceScheduleEntry> schedule(
+            @RequestParam(required = false) Long driverId, @RequestParam(required = false) Long vehicleId,
+            @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+            java.time.LocalDate date, HttpServletRequest request) {
+        requireAdminId(request);
+        return customerTrips.resourceSchedule(driverId, vehicleId, date);
+    }
+
+    @MobilePagination.Paged
     @GetMapping("/mine")
     public List<AssignmentResponse> getMyAssignments(HttpServletRequest request) {
         return assignmentService.getDriverAssignments(requireDriverId(request));
+    }
+
+    @GetMapping("/mine/{id}")
+    public AssignmentResponse getMyAssignment(@PathVariable Long id, HttpServletRequest request) {
+        return assignmentService.getDriverAssignment(id, requireDriverId(request));
     }
 
     @GetMapping("/{id}")
@@ -65,6 +83,10 @@ public class AssignmentController {
             @Valid @RequestBody AssignmentRequest request,
             HttpServletRequest servletRequest) {
         requireAdminId(servletRequest);
+        if (request.reason() == null || request.reason().isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Enter the reason for reassignment.");
+        }
         return assignmentService.reassign(id, request);
     }
 
@@ -97,6 +119,27 @@ public class AssignmentController {
                 id, requireDriverId(servletRequest), statusRequest.status());
     }
 
+    @org.springframework.beans.factory.annotation.Autowired private com.diladrive.service.TripMonitoringService monitoring;
+
+    @MobilePagination.Paged
+    @GetMapping("/{id}/timeline")
+    public List<com.diladrive.service.TripMonitoringService.Milestone> timeline(@PathVariable Long id, HttpServletRequest request) {
+        return monitoring.assignmentTimeline(id, isAdmin(request) ? null : requireDriverId(request));
+    }
+
+    @GetMapping("/incidents")
+    public List<com.diladrive.service.TripMonitoringService.Incident> incidents(HttpServletRequest request) {
+        requireAdminId(request);
+        return monitoring.recentIncidents();
+    }
+
+    @PostMapping("/{id}/incidents")
+    @ResponseStatus(HttpStatus.CREATED)
+    public java.util.Map<String,Long> reportIncident(@PathVariable Long id, @Valid @RequestBody TripIncidentRequest input, HttpServletRequest request) {
+        return java.util.Map.of("incidentId", monitoring.report(id, requireDriverId(request), input));
+    }
+
+    @MobilePagination.Paged
     @GetMapping("/{id}/photos")
     public List<VerificationPhotoResponse> getPhotos(
             @PathVariable Long id, HttpServletRequest request) {

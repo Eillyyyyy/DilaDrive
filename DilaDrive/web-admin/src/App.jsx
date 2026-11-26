@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -23,15 +23,18 @@ import Drivers from "./pages/Drivers";
 import Vehicles from "./pages/Vehicles";
 import Bookings from "./pages/Bookings";
 import Assignments from "./pages/Assignments";
+import Calendar from "./pages/Calendar";
 import Payments from "./pages/Payments";
 import Documents from "./pages/Documents";
 import Notifications from "./pages/Notifications";
+import NotificationBell from "./components/NotificationBell";
+import useAdminNotifications, { notificationError } from "./services/useAdminNotifications";
+import { notificationTarget } from "./services/notificationTargets";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import Admins from "./pages/Admins";
 import Settings from "./pages/Settings";
-import DriverEarnings from "./pages/DriverEarnings";
-import api from "./services/api";
+import api, { adminSessionExpiredEvent } from "./services/api";
 
 const menuItems = [
   { name: "Dashboard", icon: LayoutDashboard },
@@ -43,8 +46,8 @@ const menuItems = [
   { name: "Vehicles", icon: CarFront },
 
   { name: "Bookings", icon: CalendarDays },
+  { name: "Calendar", icon: CalendarDays },
   { name: "Assignments", icon: MapPinned },
-  { name: "Driver Earnings", icon: MapPinned },
 
   { name: "Payments", icon: CreditCard },
 
@@ -58,8 +61,19 @@ const menuItems = [
 
 export default function App() {
   const [activePage, setActivePage] = useState("Dashboard");
+  const [calendarDate, setCalendarDate] = useState(null);
+  const openCalendar = date => {
+    setCalendarDate(date);
+    setActivePage("Calendar");
+  };
+  const openBooking = id => {
+    setRecordFocus({ page: "Bookings", id });
+    setActivePage("Bookings");
+  };
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState("");
+  const [recordFocus, setRecordFocus] = useState(null);
 
   const [currentUser, setCurrentUser] = useState(() => {
     const savedUser = localStorage.getItem("currentUser");
@@ -74,9 +88,32 @@ export default function App() {
   });
   const [profileRequest, setProfileRequest] = useState({ state: "loading" });
   const [profileRetry, setProfileRetry] = useState(0);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const restoreSession = useRef(Boolean(currentUser));
   const profileOpen = activePage === "Profile";
   const userId = currentUser?.id;
+  const inbox = useAdminNotifications(sessionExpired ? null : userId, activePage === "Notifications");
+  useEffect(() => {
+    if (!userId) return undefined;
+    const expire = () => setSessionExpired(true);
+    window.addEventListener(adminSessionExpiredEvent, expire);
+    return () => window.removeEventListener(adminSessionExpiredEvent, expire);
+  }, [userId]);
+  const completeRecordFocus = useCallback(message => {
+    setRecordFocus(null);
+    if (message) setNotificationMessage(message);
+  }, []);
+
+  const clearAdminSession = useCallback(() => {
+    localStorage.removeItem("currentUser");
+    localStorage.removeItem("profile");
+    setCurrentUser(null);
+    setSessionExpired(false);
+    setActivePage("Dashboard");
+    setBellOpen(false);
+    setRecordFocus(null);
+    setNotificationMessage("");
+  }, []);
 
   useEffect(() => {
     if (!profileOpen) setProfileRequest({ state: "loading" });
@@ -100,10 +137,7 @@ export default function App() {
         restoreSession.current = false;
         const status = error.response?.status;
         if (status === 401) {
-          localStorage.removeItem("currentUser");
-          localStorage.removeItem("profile");
-          setCurrentUser(null);
-          setActivePage("Dashboard");
+          clearAdminSession();
           return;
         }
         if (!profileOpen) return;
@@ -116,29 +150,39 @@ export default function App() {
     return () => request.abort();
   }, [profileOpen, profileRetry, userId]);
 
-  useEffect(() => {
-    if (!currentUser) {
-      setUnreadNotifications(0);
-      return undefined;
+  async function markNotification(item) {
+    setNotificationMessage("");
+    try {
+      return await inbox.markRead(item);
+    } catch (error) {
+      setNotificationMessage(notificationError(error));
+      return false;
     }
-    let active = true;
-    const refreshUnreadCount = async () => {
-      try {
-        const { data } = await api.get("/notifications");
-        if (active && Array.isArray(data)) {
-          setUnreadNotifications(data.filter((notification) => !notification.read).length);
-        }
-      } catch (error) {
-        console.error("Unable to refresh notification count:", error);
-      }
-    };
-    refreshUnreadCount();
-    const interval = window.setInterval(refreshUnreadCount, 30000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [currentUser]);
+  }
+
+  async function openNotification(item) {
+    if (!await markNotification(item)) return;
+    setBellOpen(false);
+    const target = notificationTarget(item);
+    if (!target) {
+      setNotificationMessage("This notification has no linked record. You can read the message in Notifications.");
+      return;
+    }
+    if (target.page === "Bookings") openBooking(target.id);
+    else {
+      setRecordFocus(target);
+      setActivePage(target.page);
+    }
+  }
+
+  async function markNotificationsRead() {
+    setNotificationMessage("");
+    try {
+      await inbox.markAllRead();
+    } catch (error) {
+      setNotificationMessage(notificationError(error));
+    }
+  }
 
   async function handleLogin(credentials) {
     try {
@@ -161,6 +205,7 @@ export default function App() {
       };
 
       setCurrentUser(user);
+      setSessionExpired(false);
 
       localStorage.setItem("currentUser", JSON.stringify(user));
       setProfile(response.data);
@@ -168,7 +213,12 @@ export default function App() {
   "profile",
   JSON.stringify(response.data)
 );
-      setActivePage("Dashboard");
+      if (user.id !== userId) {
+        setActivePage("Dashboard");
+        setBellOpen(false);
+        setRecordFocus(null);
+        setNotificationMessage("");
+      }
     } catch (error) {
       throw new Error(
         error.response?.data || error.message || "Unable to login",
@@ -182,17 +232,14 @@ export default function App() {
     } catch (error) {
       console.error("Unable to invalidate the admin session.", error);
     } finally {
-      localStorage.removeItem("currentUser");
-      localStorage.removeItem("profile");
-      setCurrentUser(null);
-      setActivePage("Dashboard");
+      clearAdminSession();
       setMobileMenu(false);
     }
   }
 
   async function handleSaveProfile(updatedProfile) {
     try {
-      const response = await api.put("/auth/profile", updatedProfile);
+      const response = await api.put("/auth/profile", updatedProfile, { timeout: 15000 });
       setProfile(response.data);
       const updatedUser = {
         id: response.data.id,
@@ -204,12 +251,23 @@ export default function App() {
       localStorage.setItem("profile", JSON.stringify(response.data));
       return response.data;
     } catch (error) {
+      if (error.response?.status === 401) clearAdminSession();
       const response = error.response?.data;
       throw new Error(
         (typeof response === "string" ? response : response?.message)
           || error.message
           || "Unable to update profile",
       );
+    }
+  }
+
+  async function loadEditProfile(signal) {
+    try {
+      const { data } = await api.get("/auth/session", { signal, timeout: 15000 });
+      return data;
+    } catch (error) {
+      if (!signal.aborted && error.response?.status === 401) clearAdminSession();
+      throw error;
     }
   }
 
@@ -228,28 +286,29 @@ export default function App() {
   }
 
   function renderPage() {
+    const focus = recordFocus?.page === activePage ? recordFocus.id : null;
     switch (activePage) {
       case "Dashboard":
-        return <Dashboard onNavigate={setActivePage} />;
+        return <Dashboard onNavigate={setActivePage} onOpenCalendar={openCalendar} onOpenBooking={openBooking} />;
 
       case "Customers":
-        return <Customers />;
+        return <Customers onSessionExpired={clearAdminSession} recordFocus={focus} onRecordOpened={completeRecordFocus} />;
 
       case "Drivers":
-        return <Drivers />;
+        return <Drivers recordFocus={focus} onRecordOpened={completeRecordFocus} />;
 
       case "Settings":
         return <Settings />;
-      case "Driver Earnings":
-        return <DriverEarnings />;
       case "Vehicles":
-        return <Vehicles />;
+        return <Vehicles recordFocus={focus} onRecordOpened={completeRecordFocus} />;
 
       case "Bookings":
-        return <Bookings onNavigate={setActivePage} />;
+        return <Bookings onNavigate={setActivePage} bookingFocus={focus} onBookingOpened={completeRecordFocus} />;
 
+      case "Calendar":
+        return <Calendar initialDate={calendarDate} onOpenBooking={openBooking} />;
       case "Assignments":
-        return <Assignments onNavigate={setActivePage} />;
+        return <Assignments onNavigate={setActivePage} recordFocus={focus} onRecordOpened={completeRecordFocus} />;
 
       case "Payments":
         return <Payments />;
@@ -258,7 +317,7 @@ export default function App() {
         return <Documents />;
 
       case "Notifications":
-        return <Notifications />;
+        return <Notifications inbox={inbox} onOpen={openNotification} onRead={markNotification} onMarkAll={markNotificationsRead} />;
 
       case "Profile":
         if (profileRequest.state !== "ready") {
@@ -282,6 +341,7 @@ export default function App() {
         return (
           <Profile
             user={profile}
+            onLoadEdit={loadEditProfile}
             onSave={handleSaveProfile}
             onChangePassword={handleChangePassword}
           />
@@ -307,7 +367,7 @@ export default function App() {
         );
 
       default:
-        return <Dashboard onNavigate={setActivePage} />;
+        return <Dashboard onNavigate={setActivePage} onOpenCalendar={openCalendar} onOpenBooking={openBooking} />;
     }
   }
 
@@ -316,7 +376,8 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <>
+    <div key={userId} inert={sessionExpired ? "" : undefined} className="min-h-screen bg-slate-50">
       {/* Sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 z-40 w-64
@@ -425,18 +486,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setActivePage("Notifications")}
-              aria-label={unreadNotifications ? `Notifications, ${unreadNotifications} unread` : "Notifications"}
-              className="relative rounded-xl border p-2.5 hover:bg-slate-50"
-            >
-              <Bell size={19} />
-              {unreadNotifications > 0 && (
-                <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">
-                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
-                </span>
-              )}
-            </button>
+            <NotificationBell inbox={inbox} open={bellOpen} setOpen={setBellOpen}
+              onOpen={openNotification} onMarkAll={markNotificationsRead}
+              onViewAll={() => { setBellOpen(false); setActivePage("Notifications"); }} />
 
             <button
               onClick={() => setActivePage("Profile")}
@@ -466,10 +518,21 @@ export default function App() {
         {/* Content */}
         <section className="p-4 sm:p-6 lg:p-8">
           <div className="mx-auto w-full max-w-[1600px]">
+          {notificationMessage && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            <span>{notificationMessage}</span>
+            <button type="button" className="font-semibold underline" onClick={() => setNotificationMessage("")}>Dismiss</button>
+          </div>}
           {renderPage()}
           </div>
         </section>
       </main>
     </div>
+    {sessionExpired && (
+      <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-50"
+           role="dialog" aria-modal="true" aria-label="Sign in again">
+        <Login onLogin={handleLogin} sessionExpired />
+      </div>
+    )}
+    </>
   );
 }

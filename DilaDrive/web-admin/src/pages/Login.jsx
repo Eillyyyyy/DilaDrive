@@ -7,7 +7,7 @@ import {
   EyeOff,
 } from "lucide-react";
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, sessionExpired = false }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -77,7 +77,9 @@ export default function Login({ onLogin }) {
           </h2>
 
           <p className="mt-2 text-sm text-slate-500">
-            Sign in to access your dashboard.
+            {sessionExpired
+              ? "Your session expired. Sign in again to continue."
+              : "Sign in to access your dashboard."}
           </p>
         </div>
 

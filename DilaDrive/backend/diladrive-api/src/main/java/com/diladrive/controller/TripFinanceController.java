@@ -5,18 +5,12 @@ import com.diladrive.service.TripFinanceService;
 import com.diladrive.service.PricingService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
-import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.YearMonth;
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -69,29 +63,5 @@ public class TripFinanceController {
             @Valid @RequestBody RoadDistance body, HttpServletRequest request) {
         var fare = finance.confirmDistance(id, body.distanceKm(), AdminSession.requireAdminId(request), pricing);
         return Map.of("distanceKm",body.distanceKm(),"estimatedFare",fare);
-    }
-
-    @GetMapping("/driver-earnings")
-    public Map<String,Object> earnings(@RequestParam @DateTimeFormat(pattern = "uuuu-MM") YearMonth month,
-            @RequestParam(required = false) Long driverId,
-            @RequestParam(required = false) TripFinanceService.PaymentStatus status, HttpServletRequest request) {
-        AdminSession.requireAdminId(request);
-        return finance.earnings(month, driverId, status);
-    }
-
-    public record PaymentChange(@NotNull TripFinanceService.PaymentStatus status,
-                                @NotBlank @Size(max = 500) String reason) {}
-
-    @PatchMapping("/driver-earnings/{assignmentId}/payment-status")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void paymentStatus(@PathVariable long assignmentId, @Valid @RequestBody PaymentChange change,
-                              HttpServletRequest request) {
-        finance.paymentStatus(assignmentId, change.status(), change.reason(), AdminSession.requireAdminId(request));
-    }
-
-    @GetMapping("/driver-earnings/{assignmentId}/history")
-    public List<Map<String,Object>> history(@PathVariable long assignmentId, HttpServletRequest request) {
-        AdminSession.requireAdminId(request);
-        return finance.history(assignmentId);
     }
 }

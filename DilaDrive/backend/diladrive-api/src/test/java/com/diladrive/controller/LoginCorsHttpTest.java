@@ -42,8 +42,8 @@ class LoginCorsHttpTest {
                 .header("Origin", origin);
     }
 
-    @Test void preflightAllowsVaryingLocalPortsAndRequiredMethods() throws Exception {
-        for (String origin : new String[]{"http://localhost:58696", "http://localhost:5173", "http://127.0.0.1:61234"}) {
+    @Test void preflightAllowsConfiguredOriginsAndRequiredMethods() throws Exception {
+        for (String origin : new String[]{"http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:5174"}) {
             for (String method : new String[]{"OPTIONS", "GET", "POST", "PUT", "PATCH", "DELETE"}) {
                 var response = client.send(request(origin)
                         .header("Access-Control-Request-Method", method)
@@ -57,8 +57,14 @@ class LoginCorsHttpTest {
         verifyNoInteractions(mobileAuth, admins);
     }
 
+    @Test void wildcardConfigurationIsRejected() {
+        var config = new CorsConfig();
+        assertThrows(IllegalArgumentException.class, () -> config.corsConfigurer("*"));
+        assertThrows(IllegalArgumentException.class, () -> config.corsConfigurer("http://localhost:[*]"));
+    }
+
     @Test void untrustedOriginIsRejectedBeforeLogin() throws Exception {
-        var response = client.send(request("https://untrusted.example")
+        var response = client.send(request("http://localhost:58696")
                 .header("Access-Control-Request-Method", "POST")
                 .method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(403, response.statusCode());
@@ -73,7 +79,11 @@ class LoginCorsHttpTest {
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("\"id\":42"));
         assertTrue(response.body().contains("\"role\":\"CUSTOMER\""));
-        assertTrue(response.headers().firstValue("Set-Cookie").orElseThrow().contains("JSESSIONID="));
+        String cookie = response.headers().firstValue("Set-Cookie").orElseThrow();
+        assertTrue(cookie.contains("JSESSIONID="));
+        assertTrue(cookie.contains("HttpOnly"));
+        assertTrue(cookie.contains("SameSite=Strict"));
+        assertFalse(cookie.contains("; Secure"));
         verify(mobileAuth).login(argThat(r -> "customer@example.com".equals(r.getEmail())
                 && "correct".equals(r.getPassword()) && "CUSTOMER".equals(r.getRole())));
     }
@@ -86,10 +96,10 @@ class LoginCorsHttpTest {
     }
 
     HttpResponse<String> login(String password) throws Exception {
-        var response = client.send(request("http://localhost:58696").header("Content-Type", "application/json")
+        var response = client.send(request("http://localhost:5173").header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString("{\"email\":\"customer@example.com\",\"password\":\""
                         + password + "\",\"role\":\"CUSTOMER\"}")).build(), HttpResponse.BodyHandlers.ofString());
-        assertEquals("http://localhost:58696", response.headers().firstValue("Access-Control-Allow-Origin").orElseThrow());
+        assertEquals("http://localhost:5173", response.headers().firstValue("Access-Control-Allow-Origin").orElseThrow());
         return response;
     }
 }

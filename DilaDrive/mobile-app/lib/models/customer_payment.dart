@@ -4,7 +4,6 @@ class CustomerPayment {
     required this.bookingId,
     required this.bookingReference,
     required this.amount,
-    required this.surchargeAmount,
     required this.paymentMethod,
     required this.status,
     required this.submittedAt,
@@ -18,7 +17,6 @@ class CustomerPayment {
   final int bookingId;
   final String bookingReference;
   final double amount;
-  final double surchargeAmount;
   final String paymentMethod;
   final String status;
   final DateTime? submittedAt;
@@ -46,7 +44,6 @@ class CustomerPayment {
           'BK-${bookingId.toString().padLeft(6, '0')}',
       bookingFare: doubleValue(json['bookingFare']),
       amount: amount,
-      surchargeAmount: doubleValue(json['surchargeAmount']) ?? 0,
       paymentMethod: json['paymentMethod'] as String? ?? '',
       status: json['paymentStatus'] as String? ?? 'PENDING_VERIFICATION',
       rejectReason: json['rejectReason'] as String?,
@@ -56,5 +53,5 @@ class CustomerPayment {
     );
   }
 
-  double get totalAmount => amount + surchargeAmount;
+  double get totalAmount => amount;
 }

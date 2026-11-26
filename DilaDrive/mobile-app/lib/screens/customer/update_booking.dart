@@ -1,6 +1,8 @@
 import 'booking/booking_location_page.dart';
 import 'package:flutter/material.dart';
 
+import '../../widgets/responsive_page.dart';
+
 import '../../models/booking_draft.dart';
 import '../../models/customer_booking.dart';
 import '../../services/booking_service.dart';
@@ -79,6 +81,8 @@ class _UpdateBookingPageState extends State<UpdateBookingPage> {
         ..largeCount = booking.largeCount ?? 0
         ..passengerCount = booking.passengerCount ?? 1
         ..flightNumber = booking.flightNumber
+        ..flightDate = booking.flightDate
+        ..flightTime = booking.flightTime
         ..additionalNotes = booking.notes;
     }
     final savedLuggageSize = booking.luggageSize?.toUpperCase();
@@ -232,17 +236,17 @@ class _UpdateBookingPageState extends State<UpdateBookingPage> {
   @override
   Widget build(BuildContext context) {
     if (_completeDraft != null) {
-      return BookingLocationPage(draft: _completeDraft!);
+      return BookingLocationPage(draft: _completeDraft!, mapFlow: false);
     }
     final hasLuggage = int.tryParse(_luggageController.text.trim()) != null &&
         int.parse(_luggageController.text.trim()) > 0;
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: AppTheme.lightBlueBackground,
       appBar: AppBar(title: const Text('Edit pending booking')),
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+          padding: pagePadding(context),
           children: [
             const Card(
               child: ListTile(

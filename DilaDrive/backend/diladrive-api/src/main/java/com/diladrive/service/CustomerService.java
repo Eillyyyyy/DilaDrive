@@ -30,6 +30,9 @@ public class CustomerService {
 
     @Transactional
     public Customer updateCustomer(Long id, Customer customer) {
+        if (customer.getCustStatus() != null) {
+            throw new IllegalArgumentException("Use account verification to change customer status.");
+        }
 
         Customer existing =
                 customerRepository.findById(id)
@@ -53,10 +56,6 @@ public class CustomerService {
         if (customer.getCustType() != null) {
             existing.setCustType(customer.getCustType());
         }
-        if (customer.getCustStatus() != null) {
-            existing.setCustStatus(customer.getCustStatus());
-        }
-
         return customerRepository.save(existing);
     }
 
@@ -64,14 +63,16 @@ public class CustomerService {
         String name = requested.getCompanyName() == null ? existing.getCompanyName() : requested.getCompanyName();
         String registration = requested.getCompanyRegistrationNumber() == null
                 ? existing.getCompanyRegistrationNumber() : requested.getCompanyRegistrationNumber();
-        if (name == null || name.isBlank() || registration == null || registration.isBlank()) {
-            throw new IllegalArgumentException("Company name and registration number are required for a corporate account.");
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Company name is required for a corporate account.");
         }
-        if (name.trim().length() > 150 || registration.trim().length() > 30) {
+        if (name.trim().length() > 150 || (registration != null && registration.trim().length() > 30)) {
             throw new IllegalArgumentException("Company name and registration number must be at most 150 and 30 characters.");
         }
         existing.setCompanyName(name.trim());
-        existing.setCompanyRegistrationNumber(registration.trim());
+        if (requested.getCompanyRegistrationNumber() != null) {
+            existing.setCompanyRegistrationNumber(registration.isBlank() ? null : registration.trim());
+        }
     }
 
     @Transactional(readOnly = true)
@@ -98,36 +99,38 @@ public class CustomerService {
                             "That email address is already used by another account.");
                 });
 
-        customer.setCustName(request.name().trim());
-        customer.setCustEmail(email);
-        customer.setCustPhoneno(
-                request.phone() == null || request.phone().isBlank()
-                        ? null
-                        : request.phone().trim());
         boolean hasCompanyFields = request.companyName() != null
                 || request.companyRegistrationNumber() != null;
-        if (hasCompanyFields && !"COMPANY".equalsIgnoreCase(customer.getCustType())) {
+        boolean corporate = "COMPANY".equalsIgnoreCase(customer.getCustType());
+        if (hasCompanyFields && !corporate) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     "Corporate registration details are only available to company customers.");
         }
+        String companyName = request.companyName() == null ? customer.getCompanyName() : request.companyName();
+        String companyNumber = request.companyRegistrationNumber() == null
+                ? customer.getCompanyRegistrationNumber() : request.companyRegistrationNumber();
+        if (corporate && (companyName == null || companyName.isBlank())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Company name is required for a corporate account.");
+        }
+        String phone = request.phone() == null || request.phone().isBlank()
+                ? null : ProfileUpdateValidation.phone(request.phone());
+        String image = request.profileImage() == null ? null
+                : ProfileUpdateValidation.customerImage(request.profileImage());
+
+        customer.setCustName(request.name().trim());
+        customer.setCustEmail(email);
+        if (request.clearPhone()) customer.setCustPhoneno(null);
+        else if (phone != null) customer.setCustPhoneno(phone);
         if (request.companyName() != null) {
-            customer.setCompanyName(request.companyName().isBlank()
-                    ? null : request.companyName().trim());
+            customer.setCompanyName(companyName.trim());
         }
         if (request.companyRegistrationNumber() != null) {
-            customer.setCompanyRegistrationNumber(
-                    request.companyRegistrationNumber().isBlank()
-                            ? null : request.companyRegistrationNumber().trim());
+            customer.setCompanyRegistrationNumber(companyNumber.isBlank() ? null : companyNumber.trim());
         }
         if (request.profileImage() != null) {
-            if (!request.profileImage().isEmpty()
-                    && !request.profileImage().matches("^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Profile image must be a PNG, JPEG, or WebP image.");
-            }
-            customer.setProfileImage(request.profileImage().isEmpty()
-                    ? null : request.profileImage());
+            customer.setProfileImage(image);
         }
         return CustomerProfileResponse.from(customerRepository.save(customer));
     }

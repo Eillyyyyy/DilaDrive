@@ -1,10 +1,16 @@
+import useModalScrollLock from "../components/useModalScrollLock";
+import useRecordFocus from "../services/useRecordFocus";
+import AssignmentSchedule from "../components/AssignmentSchedule";
+import UnavailablePeriods from "../components/UnavailablePeriods";
+import DocumentUploadField from "../components/DocumentUploadField";
+import SecureDocumentPreview from "../components/SecureDocumentPreview";
 import { useState, useEffect, useRef } from "react";
 import api from "../services/api";
 import { getApiErrorMessage } from "../services/apiErrors";
 import { loadDriverManagement } from "../services/driverManagement";
 import { DRIVER_TYPES, ACCOUNT_STATUSES, AVAILABILITY_OPTIONS, VEHICLE_STATUSES,
   emptyDriver, emptyVehicle, formatDriver, toDriverPayload, toDriverCreatePayload,
-  toDriverEditForm, validateDriverFields } from "../services/driverForm";
+  toDriverEditForm, validateDriverFields, driverRequestFieldErrors } from "../services/driverForm";
 import {
   Search,
   Eye,
@@ -114,9 +120,11 @@ function Field({
   onChange,
   type = "text",
   required = false,
+  readOnly = false,
   placeholder = "",
   error,
   min,
+  max,
   step,
 }) {
   return (
@@ -130,10 +138,12 @@ function Field({
         type={type}
         aria-invalid={!!error}
         min={min}
+        max={max}
         step={step}
         value={value ?? ""}
         onChange={onChange}
         required={required}
+        readOnly={readOnly}
         placeholder={placeholder}
         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
       />
@@ -169,15 +179,20 @@ function SummaryCard({
 }
 
 function Modal({ title, subtitle, onClose, children, wide = false }) {
+  useModalScrollLock();
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-3 backdrop-blur-sm sm:p-5"
+      className="fixed inset-0 !m-0 z-50 flex items-center justify-center overflow-clip bg-slate-950/50 p-3 backdrop-blur-sm sm:p-5"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
-        className={`my-auto flex max-h-[calc(100vh-24px)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`modal-panel flex w-full flex-col overflow-clip rounded-2xl bg-white shadow-2xl ${
           wide ? "max-w-3xl" : "max-w-xl"
         }`}
       >
@@ -221,7 +236,8 @@ function Detail({ icon: Icon, label, value }) {
 // MAIN DRIVER MANAGEMENT
 // ==========================================
 
-function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }) {
+function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {},
+  vehicleCategories = [], uploadProgress = -1 }) {
   return <>
               {/* PERSONAL INFORMATION */}
 
@@ -282,16 +298,26 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
 
                   <Field
                     label="IC Number"
-                    error={fieldErrors["icNo"]}
-                    value={newDriver.icNo}
-                    onChange={(event) =>
-                      setNewDriver({
-                        ...newDriver,
-                        icNo: event.target.value,
-                      })
-                    }
-                    placeholder="Enter identification number"
+                    error={fieldErrors["icNumber"]}
+                    value={newDriver.icNumber}
+                    onChange={(event) => setNewDriver(previous => ({
+                      ...previous, icNumber: event.target.value,
+                    }))}
+                    placeholder={editing && newDriver.icNumberMasked
+                      ? `Leave blank to keep ${newDriver.icNumberMasked}` : "XXXXXX-XX-XXXX"}
                   />
+                  <div className="sm:col-span-2">
+                    <DocumentUploadField
+                      label="IC Document"
+                      file={newDriver.icDocumentFile}
+                      onChange={(file) => setNewDriver(previous => ({
+                        ...previous, icDocumentFile: file,
+                      }))}
+                      currentDocument={newDriver.icDocument}
+                      progress={uploadProgress}
+                      error={fieldErrors["icDocument"]}
+                    />
+                  </div>
                 </div>
               </section>
 
@@ -384,12 +410,14 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                       })
                     }
                     placeholder="Enter driving licence number"
+                    required={!editing}
                   />
 
                   <Field
                     label="License Expiry Date"
                     error={fieldErrors["licenseExpiry"]}
                     type="date"
+                    required={!editing}
                     value={newDriver.licenseExpiry}
                     onChange={(event) =>
                       setNewDriver({
@@ -406,6 +434,7 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
 
                     <select
                       value={newDriver.driverType}
+                      aria-invalid={Boolean(fieldErrors.driverType)}
                       onChange={(event) =>
                         setNewDriver({
                           ...newDriver,
@@ -416,7 +445,21 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                     >
                       {DRIVER_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
                     </select>
+                    {fieldErrors.driverType && <span role="alert" className="mt-1 block text-xs text-red-600">{fieldErrors.driverType}</span>}
                   </label>
+                  <div className="sm:col-span-2">
+                    <DocumentUploadField
+                      label="Driving Licence Document"
+                      file={newDriver.licenseDocumentFile}
+                      onChange={(file) => setNewDriver(previous => ({
+                        ...previous, licenseDocumentFile: file,
+                      }))}
+                      currentDocument={newDriver.licenseDocument}
+                      progress={uploadProgress}
+                      error={fieldErrors["licenseDocument"]}
+                      required={!editing}
+                    />
+                  </div>
                 </div>
               </section>
 
@@ -457,7 +500,7 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                   />
 
                   <Field
-                    label="Registration Number / Plate Number"
+                    label="Vehicle Registration Number"
                     error={fieldErrors["vehicle.plate"]}
                     value={newDriver.vehicle.plate}
                     onChange={(event) =>
@@ -473,65 +516,70 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                     required
                   />
 
-                  <Field
-                    label="Vehicle Type"
-                    error={fieldErrors["vehicle.type"]}
-                    value={newDriver.vehicle.type}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          type: event.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="e.g. MPV, Sedan, Bus"
-                    required
-                  />
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Vehicle Category <span className="ml-1 text-red-500">*</span>
+                    </span>
+                    <select
+                      required={!editing || newDriver.updateVehicle}
+                      aria-invalid={Boolean(fieldErrors["vehicle.categoryId"])}
+                      value={newDriver.vehicle.categoryId}
+                      onChange={(event) => {
+                        const categoryId = event.target.value;
+                        const category = vehicleCategories.find(item =>
+                          String(item.vehicleCategoryId) === categoryId);
+                        const maxCapacity = category?.maxPassengerCapacity ?? "";
+                        setNewDriver(previous => ({
+                          ...previous,
+                          vehicle: {
+                            ...previous.vehicle,
+                            categoryId,
+                            type: category?.displayName || "",
+                            capacity: maxCapacity,
+                            luggageCapacity: category?.bootCapacityUnits ?? "",
+                          },
+                        }));
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+                    >
+                      <option value="">Select a vehicle category</option>
+                      {vehicleCategories.map(category => (
+                        <option key={category.vehicleCategoryId} value={category.vehicleCategoryId}>
+                          {category.displayName} · up to {category.maxPassengerCapacity} passengers
+                        </option>
+                      ))}
+                    </select>
+                    {fieldErrors["vehicle.categoryId"] && <span role="alert" className="mt-1 block text-xs text-red-600">{fieldErrors["vehicle.categoryId"]}</span>}
+                  </label>
 
                   <Field
-                    label="Passenger Capacity"
+                    label="Maximum Passengers"
                     error={fieldErrors["vehicle.capacity"]}
                     type="number"
                     value={newDriver.vehicle.capacity}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          capacity: event.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="e.g. 7"
-                    required
+                    readOnly
                   />
 
                   <Field
-                    label="Luggage Capacity (items)"
+                    label="Luggage Capacity (Units)"
                     error={fieldErrors["vehicle.luggageCapacity"]}
                     type="number"
-                    min="0"
-                    step="1"
                     value={newDriver.vehicle.luggageCapacity}
-                    onChange={(event) =>
-                      setNewDriver((previous) => ({
-                        ...previous,
-                        vehicle: {
-                          ...previous.vehicle,
-                          luggageCapacity: event.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="Enter the actual item capacity"
-                    required
+                    readOnly
                   />
+
+                  <div className="sm:col-span-2">
+                    <details className="text-xs text-slate-600">
+                      <summary className="cursor-pointer font-medium text-teal-800">How luggage capacity works</summary>
+                      <p className="mt-1">Small bags use 1 unit, medium bags use 2, and large bags use 3. The vehicle category sets the limit separately from passenger capacity.</p>
+                    </details>
+                  </div>
 
                   <Field
                     label="Road Tax Expiry Date"
                     error={fieldErrors["vehicle.roadTaxExpiry"]}
                     type="date"
+                    required={!editing || newDriver.updateVehicle}
                     value={newDriver.vehicle.roadTaxExpiry}
                     onChange={(event) =>
                       setNewDriver((previous) => ({
@@ -548,6 +596,7 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                     label="Next Service Date"
                     error={fieldErrors["vehicle.serviceExpiry"]}
                     type="date"
+                    required={!editing || newDriver.updateVehicle}
                     value={newDriver.vehicle.serviceExpiry}
                     onChange={(event) =>
                       setNewDriver((previous) => ({
@@ -560,7 +609,7 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                     }
                   />
 
-                  <label className="block">
+                  {editing && <label className="block">
                     <span className="mb-2 block text-sm font-medium text-slate-700">
                       Vehicle Status
                       <span className="ml-1 text-red-500">*</span>
@@ -580,19 +629,52 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                     >
                       {VEHICLE_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
                     </select>
+                  </label>}
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Vehicle Ownership <span className="ml-1 text-red-500">*</span>
+                    </span>
+                    <select
+                      required={!editing || newDriver.updateVehicle}
+                      value={newDriver.vehicle.ownership}
+                      aria-invalid={Boolean(fieldErrors["vehicle.ownership"])}
+                      onChange={(event) => setNewDriver(previous => ({
+                        ...previous, vehicle: { ...previous.vehicle, ownership: event.target.value },
+                      }))}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+                    >
+                      <option value="">Select ownership</option>
+                      <option value="Driver-Owned">Driver-Owned</option>
+                      <option value="Company-Owned">Company-Owned</option>
+                    </select>
+                    {fieldErrors["vehicle.ownership"] && <span role="alert" className="mt-1 block text-xs text-red-600">{fieldErrors["vehicle.ownership"]}</span>}
                   </label>
+                  <div className="sm:col-span-2">
+                    <DocumentUploadField
+                      label="Road Tax Document"
+                      file={newDriver.vehicle.roadTaxDocumentFile}
+                      onChange={(file) => setNewDriver(previous => ({
+                        ...previous,
+                        vehicle: { ...previous.vehicle, roadTaxDocumentFile: file },
+                      }))}
+                      currentDocument={newDriver.roadTaxDocument}
+                      progress={uploadProgress}
+                      error={fieldErrors["roadTaxDocument"]}
+                      required={!editing}
+                    />
+                  </div>
                 </div>
                 </fieldset>}
               </section>
 
-              <section className="space-y-4 border-t border-slate-100 pt-6">
+              {editing && <section className="space-y-4 border-t border-slate-100 pt-6">
                 <h3 className="text-sm font-bold text-slate-900">Driver Status</h3>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {[["availability", "Driver Availability", AVAILABILITY_OPTIONS],
                     ["accountStatus", "Account Status", ACCOUNT_STATUSES]].map(([key, label, options]) => (
                     <label key={key} className="block">
                       <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
-                      <select value={newDriver[key]} disabled={!editing && key === "accountStatus"}
+                      <select value={newDriver[key]}
                         onChange={event => setNewDriver(previous => ({...previous, [key]: event.target.value}))}
                         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10">
                         {options.map(option => <option key={option}>{option}</option>)}
@@ -600,12 +682,22 @@ function DriverFormFields({ newDriver, setNewDriver, editing, fieldErrors = {} }
                     </label>
                   ))}
                 </div>
-              </section>
+              </section>}
   </>;
 }
 
-export default function Drivers() {
+function driverMultipartForm(payload, files) {
+  const form = new FormData();
+  form.append("driver", new Blob([JSON.stringify(payload)], { type: "application/json" }));
+  for (const [part, file] of Object.entries(files)) {
+    if (file) form.append(part, file);
+  }
+  return form;
+}
+
+export default function Drivers({ recordFocus, onRecordOpened }) {
   const [driverList, setDriverList] = useState([]);
+  const [vehicleCategories, setVehicleCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
@@ -621,10 +713,20 @@ export default function Drivers() {
 
   const [newDriver, setNewDriver] = useState(emptyDriver);
   const [savingDriver, setSavingDriver] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(-1);
 
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
+  const driverForm = useRef(null);
+  const creatingDriver = useRef(false);
+  useEffect(() => {
+    if (!Object.keys(fieldErrors).length) return;
+    const first = driverForm.current?.querySelector('[aria-invalid="true"]');
+    if (!first) return;
+    (first.closest("label") ?? first).scrollIntoView({ block: "center" });
+    first.focus({ preventScroll: true });
+  }, [fieldErrors]);
 
   const formDriver = editingDriver || newDriver;
   const setFormDriver = editingDriver ? setEditingDriver : setNewDriver;
@@ -644,6 +746,20 @@ export default function Drivers() {
       editAbort.current?.abort();
       editRequest.current++;
     };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.get("/vehicles/categories", { signal: controller.signal })
+      .then(({ data }) => {
+        if (!controller.signal.aborted && Array.isArray(data)) setVehicleCategories(data);
+      })
+      .catch((requestError) => {
+        if (requestError.code !== "ERR_CANCELED") {
+          setError(getApiErrorMessage(requestError, "Vehicle categories could not be loaded."));
+        }
+      });
+    return () => controller.abort();
   }, []);
 
   const fetchDrivers = async (config = {}) => {
@@ -728,14 +844,9 @@ export default function Drivers() {
   // ==========================================
 
   const setFormRequestError = requestError => {
-    const message = String(requestError.response?.data?.message || requestError.response?.data || "");
-    const fields = {};
-    for (const [pattern, key] of [[/email/i, "email"], [/password/i, "password"], [/phone/i, "phone"],
-      [/driverName|name is required/i, "name"], [/registration|plate/i, "vehicle.plate"],
-      [/luggage/i, "vehicle.luggageCapacity"], [/passenger capacity/i, "vehicle.capacity"]]) {
-      if (pattern.test(message)) fields[key] = message;
-    }
+    const fields = driverRequestFieldErrors(requestError.response?.data);
     setFieldErrors(fields);
+    return Object.keys(fields).length > 0;
   };
 
   const getRequestError = (requestError, fallback) => {
@@ -744,10 +855,17 @@ export default function Drivers() {
 
   const handleCreateDriver = async (event) => {
     event.preventDefault();
+    if (creatingDriver.current) return;
     setError("");
     setSuccessMessage("");
 
     const validationError = validateDriverFields(newDriver, null, driverList);
+    for (const [field, value] of [
+      ["licenseDocument", newDriver.licenseDocumentFile],
+      ["roadTaxDocument", newDriver.vehicle?.roadTaxDocumentFile],
+    ]) {
+      if (!value?.size) validationError[field] = "Select a non-empty document.";
+    }
     setFieldErrors(validationError);
     if (Object.keys(validationError).length) {
       setError("Please correct the highlighted fields.");
@@ -755,10 +873,21 @@ export default function Drivers() {
     }
 
     setSavingDriver(true);
+    creatingDriver.current = true;
+    setUploadProgress(0);
     try {
-      await api.post("/drivers", {
+      const payload = {
         ...toDriverCreatePayload(newDriver),
         driverPassword: newDriver.password,
+      };
+      await api.post("/drivers", driverMultipartForm(payload, {
+        icDocument: newDriver.icDocumentFile,
+        licenseDocument: newDriver.licenseDocumentFile,
+        roadTaxDocument: newDriver.vehicle?.roadTaxDocumentFile,
+      }), {
+        onUploadProgress: (event) => {
+          if (event.total) setUploadProgress(Math.round((event.loaded / event.total) * 100));
+        },
       });
       setNewDriver(emptyDriver);
       setShowCreateModal(false);
@@ -766,16 +895,18 @@ export default function Drivers() {
       setStatusFilter("All");
       setAccountFilter("All");
       setSuccessMessage("Driver account created successfully.");
+      window.dispatchEvent(new Event("diladrive:fleet-changed"));
       try { await fetchDrivers(); } catch {
         setError("Driver was created, but the list could not be refreshed. Please reload the page.");
       }
     } catch (requestError) {
-      setFormRequestError(requestError);
-      setError(
-        getRequestError(requestError, "Failed to create driver account.")
-      );
+      const hasFieldErrors = setFormRequestError(requestError);
+      setError(hasFieldErrors ? "Please correct the highlighted fields."
+        : getRequestError(requestError, "Failed to create driver account."));
     } finally {
+      creatingDriver.current = false;
       setSavingDriver(false);
+      setUploadProgress(-1);
     }
   };
 
@@ -798,12 +929,26 @@ export default function Drivers() {
     }
 
     setSavingDriver(true);
+    setUploadProgress(0);
     try {
       const payload = toDriverCreatePayload(editingDriver);
-      await api.put(`/drivers/${editingDriver.id}`, payload);
+      delete payload.driverIcno;
+      if (editingDriver.icNumber?.trim()) {
+        payload.icNumber = editingDriver.icNumber.trim().replace(/\s+/g, "").replace(/-/g, "");
+      }
+      await api.put(`/drivers/${editingDriver.id}`, driverMultipartForm(payload, {
+        icDocument: editingDriver.icDocumentFile,
+        licenseDocument: editingDriver.licenseDocumentFile,
+        roadTaxDocument: editingDriver.vehicle?.roadTaxDocumentFile,
+      }), {
+        onUploadProgress: (event) => {
+          if (event.total) setUploadProgress(Math.round((event.loaded / event.total) * 100));
+        },
+      });
       setSelectedDriver(null);
       setEditingDriver(null);
       setSuccessMessage("Driver details updated successfully.");
+      window.dispatchEvent(new Event("diladrive:fleet-changed"));
       try {
         await fetchDrivers();
       } catch (refreshError) {
@@ -812,7 +957,7 @@ export default function Drivers() {
     } catch (requestError) {
       setFormRequestError(requestError);
       setError(getRequestError(requestError, "Failed to update driver and vehicle."));
-    } finally { setSavingDriver(false); }
+    } finally { setSavingDriver(false); setUploadProgress(-1); }
   };
 
   const openEditDriver = async (driver) => {
@@ -835,6 +980,27 @@ export default function Drivers() {
       if (requestId === editRequest.current) setLoadingDriver(false);
     }
   };
+
+  const openViewDriver = async (driver) => {
+    setError("");
+    setSelectedDriver({ ...driver, loadingDetails: true });
+    try {
+      const { data } = await api.get(`/drivers/${driver.id}`);
+      setSelectedDriver({
+        ...formatDriver(data),
+        vehicleDetails: data.vehicle,
+        icDocument: data.icDocument,
+        licenseDocument: data.licenseDocument,
+        roadTaxDocument: data.roadTaxDocument,
+      });
+    } catch (requestError) {
+      setSelectedDriver(null);
+      setError(getApiErrorMessage(requestError, "Driver details could not be loaded."));
+    }
+  };
+
+  useRecordFocus({ id: recordFocus, items: driverList, idKey: "id", loading,
+    error, open: openViewDriver, complete: onRecordOpened });
 
   // ==========================================
   // ACTIVATE / DISABLE DRIVER ACCOUNT
@@ -1045,7 +1211,7 @@ export default function Drivers() {
         </div>
 
         <p className="ml-auto max-w-sm text-xs leading-5 text-slate-500">
-          Only drivers with an Active account and Available status should
+          Drivers need an active account and a clear schedule to
           be eligible for new assignments.
         </p>
       </div>
@@ -1116,12 +1282,13 @@ export default function Drivers() {
         {/* TABLE */}
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-left">
+          <table className="w-full min-w-[1200px] text-left">
             <thead className="bg-slate-50">
               <tr className="text-xs uppercase tracking-wider text-slate-500">
                 <th className="px-6 py-4 font-semibold">No.</th>
                 <th className="px-6 py-4 font-semibold">Driver</th>
                 <th className="px-6 py-4 font-semibold">Contact</th>
+                <th className="px-6 py-4 font-semibold">IC Number</th>
                 <th className="px-6 py-4 font-semibold">Vehicle</th>
                 <th className="px-6 py-4 font-semibold">Availability</th>
                 <th className="px-6 py-4 font-semibold">Account Status</th>
@@ -1161,6 +1328,10 @@ export default function Drivers() {
                     </p>
                   </td>
 
+                  <td className="px-6 py-5 text-sm text-slate-600">
+                    {driver.icNumberMasked || "Not recorded"}
+                  </td>
+
                   <td className="px-6 py-5">
                     <div className="flex items-center gap-2 text-sm text-slate-700">
                       <CarFront size={17} className="text-slate-400" />
@@ -1179,10 +1350,8 @@ export default function Drivers() {
                   <td className="px-6 py-5">
                     <div className="flex justify-end gap-2">
                       <button
-                        onClick={() => {
-                          setError("");
-                          setSelectedDriver(driver);
-                        }}
+                        onClick={() => openViewDriver(driver)}
+                        aria-label={`View ${driver.name}`}
                         title="View driver"
                         className="rounded-lg border border-slate-200 p-2 text-slate-600 transition hover:bg-slate-100"
                       >
@@ -1229,7 +1398,7 @@ export default function Drivers() {
 
               {filteredDrivers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-16 text-center">
+                  <td colSpan={8} className="px-6 py-16 text-center">
                     <Users
                       size={32}
                       className="mx-auto text-slate-300"
@@ -1280,29 +1449,17 @@ export default function Drivers() {
           onClose={closeModals}
           wide
         >
-          <form noValidate onSubmit={editingDriver ? handleUpdateDriver : handleCreateDriver} className="flex min-h-0 flex-col">
-            <div className="min-h-0 space-y-6 overflow-y-auto p-5 sm:p-6">
+          <form ref={driverForm} noValidate onSubmit={editingDriver ? handleUpdateDriver : handleCreateDriver} className="flex min-h-0 flex-col">
+            <div className="min-h-0 space-y-6 overflow-y-auto overscroll-contain p-5 sm:p-6">
 
-              {/* ACCOUNT SETUP */}
-
-              {!editingDriver && <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4">
-                <KeyRound
-                  size={20}
-                  className="mt-0.5 shrink-0 text-blue-700"
-                />
-
-                <div>
-                  <p className="text-sm font-semibold text-blue-900">
-                    Account Setup
-                  </p>
-
-                  <p className="mt-1 text-sm leading-5 text-blue-800">
-                    The driver account is active immediately after creation. Driver and vehicle information are both required.
-                  </p>
-                </div>
-              </div>}
-
-              <DriverFormFields newDriver={formDriver} setNewDriver={setFormDriver} editing={!!editingDriver} fieldErrors={fieldErrors} />
+              <DriverFormFields
+                newDriver={formDriver}
+                setNewDriver={setFormDriver}
+                editing={!!editingDriver}
+                fieldErrors={fieldErrors}
+                vehicleCategories={vehicleCategories}
+                uploadProgress={uploadProgress}
+              />
 
               {/* ERROR MESSAGE */}
 
@@ -1348,7 +1505,7 @@ export default function Drivers() {
           subtitle="Driver contact, vehicle, and account information"
           onClose={() => setSelectedDriver(null)}
         >
-          <div className="max-h-[65vh] space-y-5 overflow-y-auto p-6">
+          <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-6">
             <div className="flex items-center gap-4 rounded-xl bg-slate-50 p-4">
               <DriverAvatar name={selectedDriver.name} />
 
@@ -1379,7 +1536,7 @@ export default function Drivers() {
               <Detail
                 icon={ShieldCheck}
                 label="IC Number"
-                value={selectedDriver.icNo}
+                value={selectedDriver.icNumberMasked || "Not recorded"}
               />
 
               <Detail
@@ -1406,6 +1563,25 @@ export default function Drivers() {
                 value={selectedDriver.vehicle || "Not assigned"}
               />
 
+              {selectedDriver.vehicleDetails && (
+                <>
+                  <Detail icon={CarFront} label="Vehicle Model"
+                    value={selectedDriver.vehicleDetails.vehicleModel} />
+                  <Detail icon={Users} label="Vehicle Category"
+                    value={selectedDriver.vehicleDetails.vehicleType} />
+                  <Detail icon={Users} label="Passenger Capacity"
+                    value={selectedDriver.vehicleDetails.vehicleCapacity} />
+                  <Detail icon={Users} label="Boot Capacity (Luggage Units)"
+                    value={selectedDriver.vehicleDetails.bootCapacityUnits ?? selectedDriver.vehicleDetails.vehicleLuggageCapacity} />
+                  <Detail icon={ShieldCheck} label="Vehicle Ownership"
+                    value={selectedDriver.vehicleDetails.vehicleOwnership?.replaceAll("_", "-")} />
+                  <Detail icon={Clock3} label="Road Tax Expiry"
+                    value={selectedDriver.vehicleDetails.vehicleRoadtaxexpiry} />
+                  <Detail icon={Clock3} label="Next Service Date"
+                    value={selectedDriver.vehicleDetails.vehicleServiceexpiry} />
+                </>
+              )}
+
               <Detail
                 icon={UserCheck}
                 label="Availability"
@@ -1413,6 +1589,29 @@ export default function Drivers() {
               />
             </div>
 
+            <section className="space-y-4 rounded-xl border border-slate-200 p-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Identity Documents</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Full IC numbers are masked. Previews are retrieved through authenticated admin endpoints.
+                </p>
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-600">IC document</p>
+                <SecureDocumentPreview documentInfo={selectedDriver.icDocument} />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-600">Driving licence</p>
+                <SecureDocumentPreview documentInfo={selectedDriver.licenseDocument} />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-600">Vehicle road tax</p>
+                <SecureDocumentPreview documentInfo={selectedDriver.roadTaxDocument} />
+              </div>
+            </section>
+
+            <AssignmentSchedule driverId={selectedDriver.id} />
+            <UnavailablePeriods resource="DRIVER" resourceId={selectedDriver.id} />
             <div className="rounded-xl border border-slate-200 p-4">
               <p className="text-sm font-semibold text-slate-800">
                 Account Access

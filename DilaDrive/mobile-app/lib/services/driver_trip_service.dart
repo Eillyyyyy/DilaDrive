@@ -19,7 +19,7 @@ class DriverTripService {
 
   Future<List<DriverTrip>> getMyTrips() async {
     final response = await _request(
-      () => _client.get(
+      () => fetchMobilePages(_client,
         Uri.parse('${AppConfig.apiBaseUrl}/api/assignments/mine'),
         headers: {'Accept': 'application/json', ...MobileSession.headers},
       ),
@@ -47,6 +47,18 @@ class DriverTripService {
     } on FormatException catch (error) {
       throw DriverTripException(error.message);
     }
+  }
+
+  Future<void> reportIncident(int assignmentId, String category, String description) async {
+    await _request(() => _client.post(
+          Uri.parse(
+              '${AppConfig.apiBaseUrl}/api/assignments/$assignmentId/incidents'),
+          headers: {
+            'Content-Type': 'application/json',
+            ...MobileSession.headers
+          },
+          body: jsonEncode({'category': category, 'description': description}),
+        ));
   }
 
   Future<void> updateStatus(int assignmentId, String status) async {

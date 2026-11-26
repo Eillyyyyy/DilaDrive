@@ -130,8 +130,8 @@ void main() {
         expect(retry, true);
       }
       final label = status == AvailabilityStatus.scheduleUnavailable
-          ? 'Change Date/Time'
-          : 'Change Trip Details';
+          ? 'Change date or time'
+          : 'Edit trip details';
       await tester.tap(find.text(label));
       expect(change, true);
       expect(find.text('Continue to Fare'), findsNothing);

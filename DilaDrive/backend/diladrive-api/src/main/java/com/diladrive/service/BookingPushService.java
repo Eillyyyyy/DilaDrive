@@ -26,17 +26,29 @@ public class BookingPushService implements AutoCloseable {
         this.jdbc=jdbc;this.enabled=enabled;this.projectId=projectId;
     }
     public void register(String role,Long owner,String token) {
-        jdbc.update("""
-            insert into mobile_push_token(token,recipient_role,recipient_id,updated_at) values(?,?,?,current_timestamp)
-            on conflict(token) do update set recipient_role=excluded.recipient_role,recipient_id=excluded.recipient_id,updated_at=current_timestamp
-            """,token,role,owner);
+        int registered = jdbc.update("""
+                insert into mobile_push_token(token,recipient_role,recipient_id,updated_at) values(?,?,?,current_timestamp)
+                on conflict(token) do update set updated_at=current_timestamp
+                where mobile_push_token.recipient_role=excluded.recipient_role
+                  and mobile_push_token.recipient_id=excluded.recipient_id
+                """,token,role,owner);
+        if (registered == 0) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.CONFLICT, "This device registration is unavailable.");
+        }
     }
     public void unregister(String role,Long owner,String token) {
         jdbc.update("delete from mobile_push_token where token=? and recipient_role=? and recipient_id=?",token,role,owner);
     }
     public void notifyAfterCommit(String role,Long owner,String title,String body) {
         if(!enabled) return;
-        Runnable send=()->executor.submit(()->send(role,owner,title,body));
+        Runnable send=()-> {
+            try {
+                executor.submit(() -> send(role, owner, title, body));
+            } catch (java.util.concurrent.RejectedExecutionException exception) {
+                log.warn("FCM executor is unavailable for project {}", projectId);
+            }
+        };
         if(TransactionSynchronizationManager.isSynchronizationActive())
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() {send.run();}

@@ -111,6 +111,9 @@ class BookingConfirmationPostgresIT {
         var changed=service.reassign(initial.assignmentId(),request(b,replacement,10,0));
         assertEquals(initial.assignmentId(),changed.assignmentId());assertEquals(1,count(b));
         assertEquals(replacement.getDriverId(),bookings.findById(b.getBookingId()).orElseThrow().getDriverId());
+        for (String step : java.util.List.of("OTW", "WAITING", "PICKUP", "DROP")) {
+            service.updateStatus(changed.assignmentId(), step);
+        }
         service.completeAssignment(changed.assignmentId());
         assertThrows(ResponseStatusException.class,()->service.reassign(changed.assignmentId(),request(b,d,10,0)));
         Booking next=booking(11,0);var cancelled=service.confirmAndAssign(request(next,d,12,0),new BigDecimal("100"));

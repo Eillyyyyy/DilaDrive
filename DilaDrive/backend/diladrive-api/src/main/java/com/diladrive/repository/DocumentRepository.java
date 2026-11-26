@@ -48,10 +48,20 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
                 COUNT(*) FILTER (WHERE document_type = 'INVOICE') AS "totalInvoices",
                 COUNT(*) FILTER (WHERE document_type = 'RECEIPT') AS "totalReceipts",
                 COALESCE(
-                    SUM(amount) FILTER (WHERE document_type = 'RECEIPT'),
+                    SUM(d.amount) FILTER (WHERE d.document_type = 'RECEIPT' AND p.payment_status = 'VERIFIED'),
                     0.00
                 ) AS "totalReceiptAmount"
-            FROM documents
+            FROM documents d LEFT JOIN payment p ON p.payment_id = d.payment_id
             """, nativeQuery = true)
     DocumentDashboardProjection getDashboardStatistics();
+    @Query(value = """
+            select d.* from documents d join payment p on p.payment_id=d.payment_id
+            join booking b on b.booking_id=p.booking_id
+            where d.document_type='RECEIPT' and p.payment_status='VERIFIED'
+              and d.booking_id=b.booking_id and d.cust_id=:customerId and b.cust_id=:customerId
+              and (cast(:documentId as bigint) is null or d.document_id=:documentId)
+            order by d.document_id desc
+            """, nativeQuery = true)
+    java.util.List<Document> findVerifiedReceipts(
+            @Param("customerId") Long customerId, @Param("documentId") Long documentId);
 }

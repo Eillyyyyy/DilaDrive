@@ -1,6 +1,7 @@
 package com.diladrive.controller;
 
 import com.diladrive.security.AdminSession;
+import com.diladrive.security.LoginThrottle;
 
 import com.diladrive.dto.LoginRequest;
 import com.diladrive.dto.AdminProfileResponse;
@@ -18,14 +19,15 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+
 
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
 
-    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
+    private static final String INVALID_LOGIN = "Invalid Email or Password";
+    private final LoginThrottle loginThrottle = new LoginThrottle();
 
     @Autowired
     private AdminService adminService;
@@ -38,23 +40,20 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(
-            @RequestBody LoginRequest request,
+            @Valid @RequestBody LoginRequest request,
             HttpServletRequest servletRequest) {
-        logger.info("Admin login request received from source={}", servletRequest.getRemoteAddr());
+        Runnable success = loginThrottle.begin(request.getEmail(), servletRequest.getRemoteAddr());
+        if (success == null) return throttled();
         if (!adminService.login(request.getEmail(), request.getPassword())) {
-            logger.warn("Admin login failed from source={}", servletRequest.getRemoteAddr());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("Invalid Email or Password");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(INVALID_LOGIN);
         }
-
+        success.run();
         HttpSession existingSession = servletRequest.getSession(false);
         if (existingSession != null) {
             existingSession.invalidate();
         }
         AdminProfileResponse profile = adminService.getProfile(request.getEmail());
         servletRequest.getSession(true).setAttribute("adminId", profile.getId());
-        logger.info("Admin login succeeded from source={}, adminIdType={}",
-                servletRequest.getRemoteAddr(), profile.getId() == null ? "missing" : profile.getId().getClass().getSimpleName());
         return ResponseEntity.ok(profile);
     }
 
@@ -73,27 +72,32 @@ public class AuthController {
     }
 
     @PostMapping("/mobile/login")
-    public ResponseEntity<MobileLoginResponse> mobileLogin(
-            @RequestBody MobileLoginRequest request,
+    public ResponseEntity<?> mobileLogin(
+            @Valid @RequestBody MobileLoginRequest request,
             HttpServletRequest servletRequest) {
-        String source = servletRequest.getRemoteAddr();
-        String role = request.getRole();
-        logger.info("Mobile login request received from source={}, role={}", source, role);
+        Runnable success = loginThrottle.begin(request.getEmail(), servletRequest.getRemoteAddr());
+        if (success == null) return throttled();
         var result = mobileAuthService.login(request);
-        if (result.isPresent()) {
-            HttpSession existingSession = servletRequest.getSession(false);
-            if (existingSession != null) {
-                existingSession.invalidate();
-            }
-            MobileLoginResponse user = result.get();
-            HttpSession session = servletRequest.getSession(true);
-            session.setAttribute("mobileUserId", user.getId());
-            session.setAttribute("mobileRole", user.getRole());
-            logger.info("Mobile login succeeded from source={}, role={}", source, role);
-            return ResponseEntity.ok(user);
+        if (result.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(INVALID_LOGIN);
         }
-        logger.warn("Mobile login failed from source={}, role={}", source, role);
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+
+        success.run();
+        HttpSession existingSession = servletRequest.getSession(false);
+        if (existingSession != null) {
+            existingSession.invalidate();
+        }
+        MobileLoginResponse user = result.get();
+        HttpSession session = servletRequest.getSession(true);
+        session.setAttribute("mobileUserId", user.getId());
+        session.setAttribute("mobileRole", user.getRole());
+        return ResponseEntity.ok(user);
+    }
+
+    private static ResponseEntity<String> throttled() {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", "900")
+                .body("Too many sign-in attempts. Try again later.");
     }
 
     @PostMapping("/mobile/register")
@@ -112,7 +116,7 @@ public class AuthController {
     @PutMapping("/profile")
     public ResponseEntity<?> updateProfile(
             HttpServletRequest servletRequest,
-            @RequestBody ProfileUpdateRequest request) {
+            @Valid @RequestBody ProfileUpdateRequest request) {
         try {
             AdminProfileResponse profile = adminService.updateProfile(requireAdminId(servletRequest), request);
             return ResponseEntity.ok(profile);
@@ -124,7 +128,7 @@ public class AuthController {
     @PostMapping("/profile/password")
     public ResponseEntity<?> changePassword(
             HttpServletRequest servletRequest,
-            @RequestBody ChangePasswordRequest request) {
+            @Valid @RequestBody ChangePasswordRequest request) {
         try {
             adminService.changePassword(requireAdminId(servletRequest), request);
             return ResponseEntity.ok("Password changed successfully.");

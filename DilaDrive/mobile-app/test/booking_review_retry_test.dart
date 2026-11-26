@@ -16,7 +16,6 @@ void main() {
           ..bookingDate = DateTime(2026, 12, 1)
           ..fareEstimate = const FareEstimate(
               distanceKm: 58,
-              vehicleModel: 'Sedan',
               baseFare: 10,
               distanceCharge: 116,
               additionalCharges: [],
@@ -44,6 +43,10 @@ void main() {
 
     expect(service.idempotencyKeys, hasLength(2));
     expect(service.idempotencyKeys[0], service.idempotencyKeys[1]);
+    expect(
+        service.idempotencyKeys[0],
+        matches(
+            r'^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'));
     expect(find.text('Booking reference: BK-000123'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

@@ -9,7 +9,7 @@ const {renderToStaticMarkup}=require('react-dom/server');
 
 async function compile(file, hooks=false) {
  const result=await esbuild.build({entryPoints:[path.resolve(__dirname,'../src/'+file)],bundle:true,write:false,format:'cjs',platform:'node',jsx:'automatic',external:['react','react/jsx-runtime','lucide-react'],plugins:[{name:'harness',setup(build){
-   if(hooks){build.onResolve({filter:/^react$/},args=>args.importer.endsWith('Bookings.jsx')?{path:'state',namespace:'harness'}:undefined);
+   if(hooks){build.onResolve({filter:/^react$/},args=>args.importer.endsWith(hooks === true ? 'Bookings.jsx' : hooks)?{path:'state',namespace:'harness'}:undefined);
      build.onLoad({filter:/.*/,namespace:'harness'},()=>({contents:`export const useState=()=>[globalThis.__bookingStates.shift(),()=>{}];export const useRef=v=>({current:v});export const useEffect=()=>{};export const useMemo=fn=>fn();`}));}
    build.onResolve({filter:/services\/api$/},()=>({path:'api',namespace:'stub'}));
    build.onLoad({filter:/.*/,namespace:'stub'},()=>({contents:'export default {};'}));
@@ -44,17 +44,17 @@ async function render({details=null,confirmation=null,busy=false,driverId='',veh
 }
 test('pending details offer Confirm & Assign and legacy warning without invented resource names',async()=>{
  const html=await render({details:{...row,legacyRelationship:true}});
- assert.match(html,/Confirm &amp; Assign/);assert.match(html,/Legacy driver\/vehicle references/);assert.match(html,/Not assigned/);
+ assert.match(html,/Verify &amp; Confirm Booking/);assert.match(html,/Legacy driver\/vehicle references/);assert.match(html,/Not assigned/);
 });
 test('distance-review bookings must confirm road distance before assignment',async()=>{
  const awaitingDistance={...row,roadDistancePending:true};
  const html=await render({details:awaitingDistance,rows:[awaitingDistance]});
  assert.match(html,/Confirm the measured road distance before assigning this booking/);
- assert.doesNotMatch(html,/Confirm &amp; Assign/);
+ assert.doesNotMatch(html,/Verify &amp; Confirm Booking/);
 });
 test('confirmation uses the shared live resource picker, requires planned end, and disables submit while saving',async()=>{
  const html=await render({confirmation:row,busy:true,driverId:'2',vehicles:[{driverId:2,vehicleId:3,vehiclePlateno:'ACTUALPLATE',vehicleModel:'Actual model',vehicleStatus:'AVAILABLE'}]});
- assert.match(html,/has not reserved a vehicle/);assert.match(html,/Recheck availability/);assert.match(html,/name="vehicleId"/);assert.match(html,/name="driverId"/);assert.match(html,/type="datetime-local"/);assert.match(html,/disabled=""[^>]*><svg[^]*Saving/);
+ assert.match(html,/Verify &amp; Confirm Booking/);assert.match(html,/Recheck availability/);assert.match(html,/Suggested driver and vehicle/);assert.match(html,/type="datetime-local"/);assert.match(html,/disabled=""[^>]*><svg[^]*Saving/);
 });
 test('superseded history never appears as an active booking allocation',async()=>{
  const {bookingAssignment}=await compile('services/bookingAssignments.js');
@@ -86,4 +86,55 @@ test('explicit missing-endpoint code gives recovery advice while other API error
  const {confirmationError}=await compile('services/bookingAssignments.js');
  assert.match(confirmationError({response:{status:404,data:{code:'ENDPOINT_NOT_FOUND',message:'No endpoint matches POST /api/bookings/7/confirm-and-assign.'}}}),/Restart/);
  assert.equal(confirmationError({response:{status:400,data:'End time is required.'}}),'End time is required.');
+});
+
+test('eligible customer preference displays an already selected pair with no duplicate selectors', async () => {
+ const {default:Picker}=await compile('components/AssignmentResourcePicker.jsx','AssignmentResourcePicker.jsx');
+ const pair={vehicleId:3,vehicleModel:'Customer choice',vehiclePlate:'PAIR',driverId:2,driverName:'Linked driver',passengerCapacity:4};
+ globalThis.__bookingStates=[{preferred:pair,alternatives:[pair]},pair,false,'',0];
+ try {
+  const html=renderToStaticMarkup(React.createElement(Picker,{bookingId:7,onChange(){}}));
+  assert.match(html,/Linked driver/);
+  assert.match(html,/eligible for this trip/);
+  assert.match(html,/name="vehicleId" value="3"/);
+  assert.match(html,/name="driverId" value="2"/);
+  assert.doesNotMatch(html,/<select/);
+ } finally {delete globalThis.__bookingStates;}
+});
+
+test('unavailable preference shows exact cause and alternative pair selection', async () => {
+ const {default:Picker}=await compile('components/AssignmentResourcePicker.jsx','AssignmentResourcePicker.jsx');
+ const preferred={vehicleId:3,vehicleModel:'Customer choice',vehiclePlate:'PAIR',driverId:2,driverName:'Linked driver'};
+ const alternative={vehicleId:8,vehicleType:'MPV',driverId:9,driverName:'Replacement driver',customerAcceptanceRequired:true};
+ globalThis.__bookingStates=[{preferred,unavailableReason:'Driver has an overlapping trip.',alternatives:[alternative]},null,false,'',0];
+ try {
+  const html=renderToStaticMarkup(React.createElement(Picker,{bookingId:7,onChange(){}}));
+  assert.match(html,/Driver has an overlapping trip/);
+  assert.match(html,/Replacement driver/);
+  assert.match(html,/customer acceptance required/);
+  assert.doesNotMatch(html,/name="driverId"/);
+ } finally {delete globalThis.__bookingStates;}
+});
+test('assignment preview errors distinguish stale backend, missing booking and unavailable service', async () => {
+ const {assignmentPreviewError, assignmentDuration}=await compile('services/bookingAssignments.js');
+ assert.match(assignmentPreviewError({response:{status:404,data:{code:'ENDPOINT_NOT_FOUND',message:'No endpoint matches'}}}),/Restart the updated backend/);
+ assert.match(assignmentPreviewError({response:{status:404,data:{message:'Booking not found.'}}}),/booking could not be found/);
+ assert.match(assignmentPreviewError({response:{status:401}}),/Sign in again/);
+ assert.match(assignmentPreviewError({response:{status:403}}),/does not have access/);
+ assert.match(assignmentPreviewError({response:{status:500,data:{message:'sensitive diagnostic'}}}),/Could not verify/);
+ assert.doesNotMatch(assignmentPreviewError({response:{status:500}}),/No eligible pair/);
+ assert.equal(assignmentDuration(832), '13 min 52 s');
+ assert.equal(assignmentDuration(1800), '30 min');
+});
+
+test('failed preview shows Retry instead of a successful empty result', async () => {
+ const {default:Picker}=await compile('components/AssignmentResourcePicker.jsx','AssignmentResourcePicker.jsx');
+ globalThis.__bookingStates=[null,null,false,'Restart the updated backend, then retry.',0];
+ try {
+  const html=renderToStaticMarkup(React.createElement(Picker,{bookingId:9,onChange(){}}));
+  assert.match(html,/Retry/);
+  assert.match(html,/Restart the updated backend/);
+  assert.doesNotMatch(html,/No eligible pair/);
+  assert.doesNotMatch(html,/name="driverId"/);
+ } finally {delete globalThis.__bookingStates;}
 });

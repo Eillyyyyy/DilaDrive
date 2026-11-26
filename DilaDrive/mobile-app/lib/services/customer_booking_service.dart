@@ -26,7 +26,7 @@ class CustomerBookingService {
 
     late final http.Response response;
     try {
-      response = await _client.get(
+      response = await fetchMobilePages(_client,
         Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/mine'),
         headers: {
           'Accept': 'application/json',
@@ -90,6 +90,24 @@ class CustomerBookingService {
   }
 
   Future<void> cancelBooking(int bookingId) async {
+    await _changeBooking('cancel', () => _client.post(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/$bookingId/cancel'),
+          headers: {'Accept': 'application/json', ...MobileSession.headers},
+        ));
+  }
+
+  Future<void> rescheduleBooking(int bookingId, DateTime pickup) async {
+    await _changeBooking('reschedule', () => _client.patch(
+          Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/$bookingId/customer/schedule'),
+          headers: {'Content-Type': 'application/json', ...MobileSession.headers},
+          body: jsonEncode({'scheduledAt': pickup.toIso8601String()}),
+        ));
+  }
+
+  Future<void> _changeBooking(
+    String action,
+    Future<http.Response> Function() send,
+  ) async {
     if (!MobileSession.isAuthenticated) {
       throw const CustomerBookingException(
         'Your sign-in session has expired. Please sign in again.',
@@ -99,13 +117,7 @@ class CustomerBookingService {
 
     late final http.Response response;
     try {
-      response = await _client.post(
-        Uri.parse('${AppConfig.apiBaseUrl}/api/bookings/$bookingId/cancel'),
-        headers: {
-          'Accept': 'application/json',
-          ...MobileSession.headers,
-        },
-      ).timeout(const Duration(seconds: 15));
+      response = await send().timeout(const Duration(seconds: 15));
     } on TimeoutException {
       throw const CustomerBookingException(
         'The server took too long to respond. Please try again.',
@@ -131,12 +143,15 @@ class CustomerBookingService {
     if (response.statusCode == 409) {
       throw CustomerBookingException(
         _serverMessage(response.body) ??
-            'This booking can no longer be cancelled by the customer.',
+            (action == 'cancel'
+                ? 'This booking can no longer be cancelled by the customer.'
+                : 'The assigned driver or vehicle is unavailable at this time.'),
       );
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw CustomerBookingException(
-        'The booking could not be cancelled (${response.statusCode}).',
+        _serverMessage(response.body) ??
+            'Could not $action this booking (${response.statusCode}).',
       );
     }
   }

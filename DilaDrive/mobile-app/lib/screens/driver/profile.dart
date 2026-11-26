@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import '../../controllers/driver_profile_controller.dart';
 import '../../models/driver_profile.dart';
 import '../../models/mobile_user.dart';
@@ -96,7 +98,7 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
               DriverChangePasswordPage(profileService: widget.profileService)));
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(
             automaticallyImplyLeading: false,
@@ -138,18 +140,16 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
               if (profile == null) return const SizedBox.shrink();
               return RefreshIndicator(
                   onRefresh: _controller.load,
-                  child: ListView(
-                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
-                      children: [
-                        DriverProfileHeader(profile: profile),
-                        const SizedBox(height: 20),
-                        DriverProfileMenu(
-                            onView: () => _view(),
-                            onUpdate: _editProfile,
-                            onVehicle: () => _view(vehicleOnly: true),
-                            onPassword: _password,
-                            onSignOut: _logout),
-                      ]));
+                  child: ListView(padding: pagePadding(context), children: [
+                    DriverProfileHeader(profile: profile),
+                    const SizedBox(height: 20),
+                    DriverProfileMenu(
+                        onView: () => _view(),
+                        onUpdate: _editProfile,
+                        onVehicle: () => _view(vehicleOnly: true),
+                        onPassword: _password,
+                        onSignOut: _logout),
+                  ]));
             }),
       );
 }

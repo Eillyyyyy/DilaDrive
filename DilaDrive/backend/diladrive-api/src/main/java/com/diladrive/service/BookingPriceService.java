@@ -1,5 +1,7 @@
 package com.diladrive.service;
 
+import com.diladrive.dto.NotificationTarget;
+
 import com.diladrive.entity.Booking;
 import com.diladrive.repository.BookingRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,16 +28,10 @@ public class BookingPriceService {
         if(requestedFare!=null && requestedFare.compareTo(booking.getBookingTripfare())!=0)
             throw new PricingException(HttpStatus.CONFLICT,"CUSTOMER_ACCEPTANCE_REQUIRED",
                     "The assigned category or price differs from the accepted booking. Propose the category fare and obtain customer acceptance first.");
-        if(!category.trim().equalsIgnoreCase(booking.getBookingType().trim())) {
-            pricing.lock(category);
-            var fare=pricing.calculate(category,booking.getBookingDistancekm());
-            if(fare.totalFare().compareTo(booking.getBookingTripfare())!=0)
-                throw new PricingException(HttpStatus.CONFLICT,"CUSTOMER_ACCEPTANCE_REQUIRED",
-                        "The new category changes the fare. Send a fare proposal and obtain customer acceptance before assignment.");
-            // A category change at the identical accepted amount needs no new monetary acceptance.
-            jdbc.update("insert into booking_fare_revision(booking_id,vehicle_type,original_fare,proposed_fare,original_snapshot,proposed_snapshot,status,accepted_at) values(?,?,?,?,?,?,'ACCEPTED',current_timestamp)",
-                    booking.getBookingId(),category,booking.getBookingTripfare(),fare.totalFare(),booking.getFareSnapshot(),encode(fare));
-            booking.setBookingType(category);booking.setFareSnapshot(encode(fare));
+        if (category == null || booking.getBookingType() == null
+                || !category.trim().equalsIgnoreCase(booking.getBookingType().trim())) {
+            throw new PricingException(HttpStatus.CONFLICT, "CUSTOMER_ACCEPTANCE_REQUIRED",
+                    "The vehicle category differs from the accepted booking. Obtain customer acceptance before assigning it.");
         }
     }
     @Transactional(readOnly=true)
@@ -67,12 +63,21 @@ public class BookingPriceService {
         if("ACCEPTED".equals(proposal.get("status"))) return;
         if(!"PROPOSED".equals(proposal.get("status")) || ((BigDecimal)proposal.get("original_fare")).compareTo(b.getBookingTripfare())!=0)
             throw new PricingException(HttpStatus.CONFLICT,"STALE_PRICE_PROPOSAL","This fare proposal is no longer current.");
-        b.setBookingType((String)proposal.get("vehicle_type"));
+        String category = (String) proposal.get("vehicle_type");
+        if (Set.of("PENDING", "PENDING_VERIFICATION").contains(b.getBookingStatus())) {
+            b.setPreferredVehicleId(null);
+            b.setPreferredVehicleCategory(category);
+            jdbc.update("delete from booking_vehicle_hold where booking_id=? and driver_id is not null", bookingId);
+        }
+        b.setBookingType(category);
         b.setBookingTripfare((BigDecimal)proposal.get("proposed_fare"));
         b.setFareSnapshot((String)proposal.get("proposed_snapshot"));
         bookings.saveAndFlush(b);
         jdbc.update("update booking_fare_revision set status='ACCEPTED',accepted_at=current_timestamp where id=?",proposalId);
-        notifications.notifyAdminsOfNewBooking(bookingId);
+        notifications.notifyAdmins("Booking fare accepted",
+                "The customer accepted the fare update for BK-%06d.".formatted(bookingId),
+                "BOOKING_FARE_ACCEPTED", NotificationTarget.BOOKING, bookingId,
+                "booking-fare-accepted:" + proposalId);
     }
     private void mutable(Booking b) {
         if(!Set.of("PENDING","PENDING_VERIFICATION","CONFIRMED").contains(b.getBookingStatus()))

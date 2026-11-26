@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../models/verification_photo.dart';
@@ -98,6 +100,7 @@ class _UploadVerificationPhotoPageState
 
   Future<void> _choosePhotoType() async {
     final selection = await showModalBottomSheet<String>(
+      constraints: const BoxConstraints(maxWidth: dilaDrivePageWidth),
       context: context,
       builder: (context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -116,6 +119,7 @@ class _UploadVerificationPhotoPageState
     );
     if (selection == null || !mounted) return;
     final source = await showModalBottomSheet<ImageSource>(
+      constraints: const BoxConstraints(maxWidth: dilaDrivePageWidth),
       context: context,
       builder: (context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -136,7 +140,7 @@ class _UploadVerificationPhotoPageState
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => DilaDriveScaffold(
         backgroundColor: AppTheme.lightBlueBackground,
         appBar: AppBar(title: const Text('Verification photos')),
         body: FutureBuilder<List<VerificationPhoto>>(
@@ -171,7 +175,7 @@ class _UploadVerificationPhotoPageState
             }
             final photos = snapshot.data ?? const <VerificationPhoto>[];
             return ListView(
-              padding: const EdgeInsets.all(16),
+              padding: pagePadding(context),
               children: [
                 Card(
                   child: Padding(

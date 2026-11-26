@@ -24,10 +24,10 @@ export default function FareProposalPanel({ bookingId, category, disabled }) {
   return <div className="space-y-2 border-t pt-3 text-sm">
     <p className="font-semibold">Accepted fare and category changes</p>
     <p className="text-slate-600">The same category keeps the accepted fare. For a different category, send its configured fare to the customer for review before confirming assignment.</p>
-    {category && <button type="button" disabled={disabled || busy} onClick={propose} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-blue-800">{busy ? "Sending…" : `Propose ${category} fare`}</button>}
+    {category && <button type="button" disabled={disabled || busy} onClick={propose} className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-blue-800">{busy ? "Sending..." : `Propose ${category} fare`}</button>}
     <button type="button" onClick={load} disabled={busy} className="ml-2 text-blue-700">Refresh acceptance</button>
     {message && <p role="status" className="text-emerald-700">{message}</p>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
-    {history.map(h => <p key={h.id} className="text-slate-600">{h.vehicle_type}: MYR {Number(h.original_fare).toFixed(2)} → MYR {Number(h.proposed_fare).toFixed(2)} · {h.status}</p>)}
+    {history.map(h => <p key={h.id} className="text-slate-600">{h.vehicle_type}: MYR {Number(h.original_fare).toFixed(2)} to MYR {Number(h.proposed_fare).toFixed(2)} / {h.status}</p>)}
   </div>;
 }

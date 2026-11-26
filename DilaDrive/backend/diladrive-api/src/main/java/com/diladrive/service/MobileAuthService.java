@@ -1,5 +1,7 @@
 package com.diladrive.service;
 
+import com.diladrive.dto.NotificationTarget;
+
 import com.diladrive.dto.MobileLoginRequest;
 import com.diladrive.dto.MobileLoginResponse;
 import com.diladrive.dto.MobileRegistrationRequest;
@@ -21,6 +23,7 @@ public class MobileAuthService {
     private final CustomerRepository customerRepository;
     private final DriverRepository driverRepository;
     private final PasswordService passwordService;
+    @org.springframework.beans.factory.annotation.Autowired private NotificationService notifications;
 
     public MobileAuthService(
             CustomerRepository customerRepository,
@@ -34,12 +37,13 @@ public class MobileAuthService {
     public Optional<MobileLoginResponse> login(MobileLoginRequest request) {
         if (request == null
                 || request.getEmail() == null
+                || request.getEmail().length() > 254
                 || request.getPassword() == null
                 || request.getPassword().getBytes(StandardCharsets.UTF_8).length > 72) {
             return Optional.empty();
         }
 
-        String email = request.getEmail().trim();
+        String email = request.getEmail();
         String password = request.getPassword();
         if (email.isBlank() || password.isEmpty()) {
             return Optional.empty();
@@ -74,8 +78,11 @@ public class MobileAuthService {
 
     @Transactional
     public void registerCustomer(MobileRegistrationRequest request) {
-        String email = request.email().trim();
-        String type = request.type().trim().toUpperCase();
+        String email = request.email();
+        String type = request.type();
+        if (!java.util.Objects.equals(request.password(), request.confirmPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwords do not match.");
+        }
         if (passwordTooLong(request.password())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "The password must not exceed 72 UTF-8 bytes.");
@@ -87,14 +94,22 @@ public class MobileAuthService {
         boolean corporate = "COMPANY".equals(type);
         String companyName = trimToNull(request.companyName());
         String registrationNumber = trimToNull(request.companyRegistrationNumber());
-        if (corporate && (companyName == null || registrationNumber == null)) {
+        String address = trimToNull(request.companyAddress());
+        String contactPerson = trimToNull(request.contactPerson());
+        String name = trimToNull(request.name());
+        if (corporate && (companyName == null || address == null || contactPerson == null)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Company name and registration number are required for a corporate account.");
+                    "Company name, address and contact person are required.");
+        }
+        if (!corporate && name == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Full name is required.");
         }
 
         Customer customer = new Customer();
         customer.setCustType(type);
-        customer.setCustName(request.name().trim());
+        customer.setCustName(corporate ? companyName : name);
+        customer.setCompanyAddress(corporate ? address : null);
+        customer.setContactPerson(corporate ? contactPerson : null);
         customer.setCustEmail(email);
         customer.setCustPhoneno(trimToNull(request.phone()));
         customer.setCustStatus("PENDING");
@@ -106,6 +121,11 @@ public class MobileAuthService {
         } catch (org.springframework.dao.DataIntegrityViolationException exception) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "That email address is already registered.");
+        }
+        if (notifications != null) {
+            notifications.notifyAdmins("Customer registration awaiting review",
+                    "A new customer account is awaiting verification.", "CUSTOMER_REGISTRATION",
+                    NotificationTarget.CUSTOMER, customer.getCustId(), "customer-registered:" + customer.getCustId());
         }
     }
 

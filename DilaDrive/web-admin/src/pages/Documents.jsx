@@ -1,3 +1,4 @@
+import useModalScrollLock from "../components/useModalScrollLock";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import api from "../services/api";
@@ -456,8 +457,11 @@ export default function Documents() {
                         )}
                         {document.documentType === "QUOTATION" && status === "APPROVED" && (
                           <ActionButton
-                            label="Generate PO"
-                            onClick={() => runDocumentAction(`${API_URL}/${document.documentId}/generate-po`, "post", `Purchase order generated from ${document.documentNumber}.`)}
+                            label="Record received PO"
+                            onClick={() => {
+                              const clientReference = window.prompt("Client purchase order reference")?.trim();
+                              if (clientReference) runDocumentAction(`${API_URL}/${document.documentId}/record-po`, "post", "Client purchase order recorded.", { clientReference });
+                            }}
                           />
                         )}
                         {document.documentType === "PURCHASE_ORDER" && !purchaseOrderHasInvoice && (
@@ -472,9 +476,6 @@ export default function Documents() {
                               }
                             }}
                           />
-                        )}
-                        {document.documentType === "INVOICE" && status === "PAID" && !invoiceHasReceipt && (
-                          <ActionButton label="Generate Receipt" onClick={() => runDocumentAction(`${API_URL}/${document.documentId}/generate-receipt`, "post", `Receipt generated for ${document.documentNumber}.`)} />
                         )}
                         <IconButton label={`Preview ${document.documentNumber} PDF`} onClick={() => previewPdf(document)} icon={FileText} />
                         <IconButton label={`Download ${document.documentNumber} PDF`} onClick={() => downloadPdf(document)} icon={Download} />
@@ -699,9 +700,11 @@ function PdfPreviewModal({ document, url, onClose, onDownload, onPrint }) {
 }
 
 function Modal({ title, onClose, children, className = "max-w-xl" }) {
+  useModalScrollLock();
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section role="dialog" aria-modal="true" aria-label={title} className={`my-auto w-full overflow-hidden rounded-2xl bg-white shadow-2xl ${className}`}>
+    <div className="fixed inset-0 !m-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/50 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section role="dialog" aria-modal="true" aria-label={title} className={`modal-panel w-full overflow-y-auto overscroll-contain rounded-2xl bg-white shadow-2xl ${className}`}>
         <header className="flex items-start justify-between border-b border-slate-100 p-5">
           <h2 className="font-semibold text-slate-900">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close dialog" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><X size={18} /></button>

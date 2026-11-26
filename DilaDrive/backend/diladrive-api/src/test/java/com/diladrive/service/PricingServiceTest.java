@@ -13,7 +13,7 @@ class PricingServiceTest {
     PricingService service(boolean active,BigDecimal base,BigDecimal rate) {
         var finance = mock(TripFinanceService.class);
         when(finance.settings()).thenReturn(new TripFinanceService.Settings(new BigDecimal("2"),
-                new BigDecimal("60"), new BigDecimal("15"), TripFinanceService.Basis.BASE_AND_HOURS,
+                new BigDecimal("60"),
                 TripFinanceService.HoursPolicy.PRORATE, true, true));
         var service=spy(new PricingService(mock(JdbcTemplate.class), finance));
         var now=LocalDateTime.of(2026,1,1,0,0);

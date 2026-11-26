@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../widgets/responsive_page.dart';
 import '../../theme/app_theme.dart';
 
 import '../../services/auth_service.dart';
@@ -26,12 +28,14 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController emailController = TextEditingController();
 
   final TextEditingController passwordController = TextEditingController();
+  final FocusNode passwordFocus = FocusNode();
 
   @override
   void dispose() {
     _authService.dispose();
     emailController.dispose();
     passwordController.dispose();
+    passwordFocus.dispose();
     super.dispose();
   }
 
@@ -91,6 +95,12 @@ class _LoginPageState extends State<LoginPage> {
       );
     } on AuthException catch (exception) {
       if (!mounted) return;
+
+      if (passwordController.text == password) {
+        passwordFocus.requestFocus();
+        passwordController.selection =
+            TextSelection(baseOffset: 0, extentOffset: password.length);
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -187,7 +197,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return DilaDriveScaffold(
       backgroundColor: backgroundColor,
       body: SafeArea(
         child: SingleChildScrollView(
@@ -279,7 +289,7 @@ class _LoginPageState extends State<LoginPage> {
               // Password
               TextField(
                 controller: passwordController,
-                enabled: !isLoading,
+                focusNode: passwordFocus,
                 obscureText: obscurePassword,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) {

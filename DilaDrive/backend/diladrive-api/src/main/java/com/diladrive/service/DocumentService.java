@@ -16,6 +16,10 @@ public interface DocumentService {
 
     DocumentDTO getCustomerDocument(Long customerId, Long documentId);
 
+    List<DocumentDTO> getCustomerReceipts(Long customerId);
+
+    DocumentDTO getCustomerReceipt(Long customerId, Long documentId);
+
     DocumentDTO getDocument(Long id);
 
     List<DocumentDTO> searchDocuments(String query);
@@ -33,6 +37,8 @@ public interface DocumentService {
     DocumentDTO rejectQuotation(Long id);
 
     DocumentDTO generatePurchaseOrder(Long quotationId);
+
+    DocumentDTO recordPurchaseOrder(Long quotationId, String clientReference);
 
     DocumentDTO generateInvoice(Long sourceId, InvoiceSourceType sourceType);
 

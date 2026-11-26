@@ -27,5 +27,7 @@ public record AssignmentResponse(
         @JsonProperty("assignmentDate")
         @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime assignmentDate, LocalDateTime scheduledEndAt,
-        Integer smallCount, Integer mediumCount, Integer largeCount, Integer luggageUnits) {
+        Integer smallCount, Integer mediumCount, Integer largeCount, Integer luggageUnits,
+        Long previousAssignmentId, String reassignmentReason, String bookingStatus, java.math.BigDecimal bookingFare,
+        String vehicleModel, String vehicleCategory, String customerPhone) {
 }

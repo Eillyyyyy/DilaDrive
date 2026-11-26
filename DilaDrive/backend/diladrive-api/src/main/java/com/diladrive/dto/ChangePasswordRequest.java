@@ -2,7 +2,9 @@ package com.diladrive.dto;
 
 public class ChangePasswordRequest {
 
+    @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 72)
     private String currentPassword;
+    @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(min = 8, max = 72)
     private String newPassword;
 
     public String getCurrentPassword() {

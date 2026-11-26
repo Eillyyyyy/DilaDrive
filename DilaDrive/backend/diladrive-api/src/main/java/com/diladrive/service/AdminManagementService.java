@@ -80,16 +80,32 @@ public class AdminManagementService {
         return AdminResponse.from(adminRepository.save(admin));
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public AdminResponse updateAdmin(
             Long actorId,
             Long targetId,
             AdminUpdateRequest request) {
+        boolean demotionRequested = "ADMIN".equalsIgnoreCase(request.role() == null ? "" : request.role().strip());
+        String requestedStatus = request.status() == null || request.status().isBlank()
+                ? null : request.status().strip().toUpperCase(Locale.ROOT);
+        if (requestedStatus != null && !List.of("ACTIVE", "INACTIVE").contains(requestedStatus)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Select ACTIVE or INACTIVE.");
+        }
+        boolean removingActiveSuperAdmin = demotionRequested || "INACTIVE".equals(requestedStatus);
+        var activeSuperAdmins = removingActiveSuperAdmin ? adminRepository.lockActiveSuperAdminIds() : List.<Long>of();
         Admin actor = requireActor(actorId);
         Admin target = findAdmin(targetId);
         boolean superAdmin = "SUPER_ADMIN".equals(actor.getRole());
         if (!superAdmin && !actor.getId().equals(target.getId())) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN, "Admins can only edit their own profile.");
+        }
+        if (requestedStatus != null && !superAdmin) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only a SUPER_ADMIN can change administrator status.");
+        }
+        if (superAdmin && removingActiveSuperAdmin && "ACTIVE".equalsIgnoreCase(target.getStatus())
+                && "SUPER_ADMIN".equalsIgnoreCase(target.getRole()) && activeSuperAdmins.size() <= 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "At least one active Super Admin is required.");
         }
 
         String name = requiredTrimmed(request.name(), "Full name");
@@ -116,6 +132,7 @@ public class AdminManagementService {
         }
 
         target.setName(name);
+        if (requestedStatus != null) target.setStatus(requestedStatus);
         target.setEmail(email);
         target.setPhone(phone);
         target.setAddress(address);

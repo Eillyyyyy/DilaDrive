@@ -14,7 +14,11 @@ public record NotificationResponse(
         boolean read,
         LocalDateTime sentAt,
         String recipientRole,
-        Long recipientId) {
+        Long recipientId,
+        String entityType,
+        Long entityId,
+        String targetRoute,
+        LocalDateTime readAt) {
 
     public static NotificationResponse from(Notification notification) {
         return new NotificationResponse(
@@ -31,6 +35,10 @@ public record NotificationResponse(
                 notification.isRead(),
                 notification.getSentAt(),
                 notification.getRecipientRole(),
-                notification.getRecipientId());
+                notification.getRecipientId(),
+                notification.getEntityType(), notification.getEntityId(),
+                NotificationTarget.validatedRoute(notification.getEntityType(),
+                        notification.getEntityId(), notification.getTargetRoute()),
+                notification.getReadAt());
     }
 }

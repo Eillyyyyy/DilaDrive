@@ -34,6 +34,14 @@ private LocalDateTime assignmentDate;
     @Column(name = "scheduled_end_at")
     private LocalDateTime scheduledEndAt;
 
+    @Column(name = "previous_assignment_id")
+    private Long previousAssignmentId;
+    @Column(name = "reassignment_reason", length = 500)
+    private String reassignmentReason;
+
+    public void setPreviousAssignmentId(Long value) { previousAssignmentId = value; }
+    public void setReassignmentReason(String value) { reassignmentReason = value; }
+
     public LocalDateTime getScheduledEndAt() { return scheduledEndAt; }
     public void setScheduledEndAt(LocalDateTime value) { scheduledEndAt = value; }
 

@@ -24,7 +24,8 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real HTTP, PostgreSQL, authentication and OSRM. All fixtures stay in a disposable schema. */
 @EnabledIfEnvironmentVariable(named="RUN_PRICING_IT",matches="true")
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
-        "spring.jpa.show-sql=false","logging.level.root=WARN","booking.push-enabled=false"})
+        "spring.jpa.show-sql=false","logging.level.root=WARN","booking.push-enabled=false",
+        "booking.pickup-check-enabled=false","booking.reservation-sweep-ms=3600000"})
 class PricingPostgresIT {
     static final String schema="diladrive_pricing_check_"+System.currentTimeMillis();
     static String url,user,password;
@@ -34,7 +35,7 @@ class PricingPostgresIT {
         url=env.getProperty("spring.datasource.url");user=env.getProperty("spring.datasource.username");password=env.getProperty("spring.datasource.password");
         try(var c=DriverManager.getConnection(url,user,password);var s=c.createStatement()) {
             s.execute("create schema "+schema);s.execute("set search_path to "+schema);
-            for(String file:List.of("BASELINE_CURRENT.sql","020_one_driver_one_vehicle.sql","021_driver_profile_image.sql","022_active_booking_assignment.sql","023_customer_booking_flow.sql","024_pending_without_reservation.sql","025_distance_pricing.sql","026_trip_charges_and_commission.sql"))
+            for(String file:List.of("BASELINE_CURRENT.sql","020_one_driver_one_vehicle.sql","021_driver_profile_image.sql","022_active_booking_assignment.sql","023_customer_booking_flow.sql","024_pending_without_reservation.sql","025_distance_pricing.sql","026_trip_charges_and_commission.sql","028_customer_account_verification.sql"))
                 s.execute(Files.readString(Path.of("../../database/schema/"+file)));
         }
         registry.add("spring.datasource.url",()->url+(url.contains("?")?"&":"?")+"currentSchema="+schema);
@@ -114,7 +115,7 @@ class PricingPostgresIT {
         assertEquals(401,send(customer,"GET","/api/admin/pricing",null,null).statusCode());
         assertEquals(401,send(driver,"PATCH","/api/admin/pricing/SEDAN/status",Map.of("active",false),null).statusCode());
     }
-    @Test void realRoadFareAndPendingSnapshotWithoutReservation() throws Exception {
+    @Test void realRoadFareAndPendingSnapshotWithReservation() throws Exception {
         rate("SEDAN","17.35","1.2345");
         var quote=body(send(customer,"POST","/api/bookings/estimate",trip(),null),200);
         assertTrue(quote.path("geometry").size()>2);assertTrue(quote.path("durationSeconds").asLong()>0);
@@ -124,7 +125,7 @@ class PricingPostgresIT {
         String key=UUID.randomUUID().toString();long id=create(request,key);assertEquals(id,create(request,key));
         assertEquals("PENDING",jdbc.queryForObject("select booking_status from booking where booking_id=?",String.class,id));
         assertEquals(0,jdbc.queryForObject("select count(*) from booking where vehicle_id is not null or driver_id is not null",Integer.class));
-        assertEquals(0,jdbc.queryForObject("select count(*) from booking_vehicle_hold",Integer.class));
+        assertEquals(1,jdbc.queryForObject("select count(*) from booking_vehicle_hold where driver_id is not null",Integer.class));
         assertEquals(0,jdbc.queryForObject("select count(*) from driver_assignment",Integer.class));
         String snapshot=jdbc.queryForObject("select fare_snapshot from booking where booking_id=?",String.class,id);assertTrue(json.readTree(snapshot).hasNonNull("quoteToken"));
         body(send(admin,"PUT","/api/admin/pricing/SEDAN",Map.of("vehicleCategory","SEDAN","baseFare","19.35","ratePerKm","1.3333","active",true),null),200);

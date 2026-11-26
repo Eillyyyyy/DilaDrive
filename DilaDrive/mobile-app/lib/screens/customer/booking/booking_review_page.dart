@@ -1,8 +1,8 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../models/booking_draft.dart';
+import '../../../models/booking_schedule.dart';
 import '../../../services/booking_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../auth/login.dart';
@@ -14,11 +14,19 @@ class BookingReviewPage extends StatefulWidget {
     required this.draft,
     this.bookingService,
     this.requestDistanceReview = false,
+    this.onSubmitting,
+    this.onSubmitted,
+    this.onChooseRide,
+    this.idempotencyKey,
   });
 
   final BookingDraft draft;
   final BookingService? bookingService;
   final bool requestDistanceReview;
+  final ValueChanged<bool>? onSubmitting;
+  final VoidCallback? onSubmitted;
+  final VoidCallback? onChooseRide;
+  final String Function(String, String Function())? idempotencyKey;
 
   @override
   State<BookingReviewPage> createState() => _BookingReviewPageState();
@@ -31,7 +39,8 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
   bool _isSubmitting = false;
   String? _error;
   String? _reference;
-  late final String _idempotencyKey = _newIdempotencyKey();
+  bool _rideUnavailable = false;
+  final _submissionKeys = <String, String>{};
 
   @override
   void dispose() {
@@ -54,13 +63,19 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
       _isSubmitting = true;
       _error = null;
     });
+    widget.onSubmitting?.call(true);
+    final scope = '${draft.availabilityKey}|${draft.recommendedVehicle?.type}|'
+        '${draft.recommendedVehicle?.id}|${draft.fareEstimate?.quoteToken}';
     try {
+      final requestKey = widget.idempotencyKey?.call(scope, const Uuid().v4) ??
+          _submissionKeys.putIfAbsent(scope, const Uuid().v4);
       final reference = await (widget.requestDistanceReview
           ? _bookingService.requestRoadDistanceReview(draft,
-              idempotencyKey: _idempotencyKey)
-          : _bookingService.createBooking(draft, idempotencyKey: _idempotencyKey));
+              idempotencyKey: requestKey)
+          : _bookingService.createBooking(draft, idempotencyKey: requestKey));
       if (!mounted) return;
       setState(() => _reference = reference);
+      widget.onSubmitted?.call();
     } on BookingException catch (exception) {
       if (!mounted) return;
       if (exception.requiresLogin) {
@@ -82,7 +97,7 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
                       'Previous: MYR ${draft.fareEstimate!.total.toStringAsFixed(2)}\n'
                       'Updated: MYR ${fare.total.toStringAsFixed(2)}\n'
                       'Category: ${quote['recommendedVehicleType']}\n'
-                      'Road distance: ${fare.distanceKm.toStringAsFixed(2)} km\n'
+                      'Road distance: ${bookingDistanceLabel(fare.distanceKm)}\n'
                       'Base fare: MYR ${fare.baseFare.toStringAsFixed(2)}\n'
                       'Rate/km: MYR ${(fare.ratePerKm ?? 0).toStringAsFixed(4)}\n'
                       'Distance charge: MYR ${fare.distanceCharge.toStringAsFixed(2)}\n'
@@ -108,9 +123,24 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
         }
         return;
       }
-      setState(() => _error = exception.message);
+      setState(() {
+        _error = exception.message;
+        _rideUnavailable = const {
+          'CATEGORY_UNAVAILABLE',
+          'PREFERRED_VEHICLE_UNAVAILABLE'
+        }.contains(exception.code);
+        if (_rideUnavailable) draft.clearAvailability();
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(
+            () => _error = 'Could not complete the request. Please try again.');
+      }
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        widget.onSubmitting?.call(false);
+      }
     }
   }
 
@@ -118,32 +148,38 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  String _newIdempotencyKey() {
-    final random = Random.secure();
-    return '${DateTime.now().microsecondsSinceEpoch}-'
-        '${random.nextInt(1 << 32)}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final draft = widget.draft;
     final isSubmitted = _reference != null;
+    final mapBooking = widget.onSubmitted != null;
+    final flightTime = parseBookingFlightTime(draft.flightTime);
     return BookingPageLayout(
       title: isSubmitted ? 'Booking request received' : 'Review your booking',
       subtitle: isSubmitted
           ? 'Your request is pending Admin verification.'
-          : 'Check the details below before sending your request.',
+          : 'Your booking request will be reviewed by DilaDrive Admin. '
+              'Vehicle and driver assignments are confirmed after approval.',
       currentStep: 4,
       actionLabel: isSubmitted
           ? 'Finish'
           : _isSubmitting
-              ? 'Submitting bookingâ€¦'
-              : _error == null
-                  ? 'Confirm booking'
-                  : 'Try again',
-      onAction: isSubmitted ? _closeFlow : _confirmBooking,
+              ? 'Submitting booking'
+              : _rideUnavailable
+                  ? 'Check available rides'
+                  : _error == null
+                      ? (widget.onSubmitted == null
+                          ? 'Confirm booking'
+                          : 'Request Booking')
+                      : 'Try again',
+      onAction: isSubmitted
+          ? _closeFlow
+          : _rideUnavailable
+              ? (widget.onChooseRide ?? () => Navigator.of(context).pop())
+              : _confirmBooking,
       isLoading: _isSubmitting,
       actionEnabled: isSubmitted ||
+          _rideUnavailable ||
           (!_isSubmitting &&
               (widget.requestDistanceReview ||
                   (draft.hasFreshAvailability && draft.fareEstimate != null))),
@@ -170,11 +206,12 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
                   const SizedBox(height: 8),
                   Text('Booking reference: $_reference'),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Your booking request has been submitted and is awaiting Admin confirmation. '
-                    'Vehicle availability is not reserved until your booking is confirmed.',
+                  Text(
+                    widget.requestDistanceReview
+                        ? 'DilaDrive will review the route before reserving a ride.'
+                        : 'A driver and vehicle are temporarily held while Admin reviews your request.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(height: 1.4),
+                    style: const TextStyle(height: 1.4),
                   ),
                 ],
               ),
@@ -201,102 +238,153 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
               ),
               const SizedBox(height: 14),
             ],
-            BookingCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 12,
                 children: [
-                  const _SectionTitle(title: 'Customer'),
-                  _SummaryLine(label: 'Name', value: draft.customerName),
-                  _SummaryLine(label: 'Phone', value: draft.phoneNumber),
-                  const Divider(height: 24),
-                  _SummaryLine(
-                      label: 'Small / medium / large bags',
-                      value:
-                          '${draft.smallCount} / ${draft.mediumCount} / ${draft.largeCount}'),
-                  _SummaryLine(
-                      label: 'Luggage points', value: '${draft.luggageUnits}'),
-                  if (!widget.requestDistanceReview) _SummaryLine(
-                      label: 'Travel duration',
-                      value:
-                          '${((draft.fareEstimate?.durationSeconds ?? 0) / 60).ceil()} minutes'),
-                  const _SectionTitle(title: 'Trip'),
-                  _SummaryLine(label: 'Trip type', value: draft.tripType.label),
-                  _SummaryLine(
-                    label: 'Pickup',
-                    value: draft.pickupAddress,
-                    icon: Icons.trip_origin,
+                  _ReviewSection(
+                    title: 'Customer',
+                    lines: [
+                      _SummaryLine(label: 'Name', value: draft.customerName),
+                      _SummaryLine(label: 'Phone', value: draft.phoneNumber),
+                    ],
                   ),
-                  _SummaryLine(
-                    label: 'Destination',
-                    value: draft.destinationAddress,
-                    icon: Icons.location_on_outlined,
+                  _ReviewSection(
+                    title: 'Pickup and destination',
+                    lines: [
+                      if (!mapBooking)
+                        _SummaryLine(
+                            label: 'Trip type', value: draft.tripType.label),
+                      _SummaryLine(
+                          label: 'Pickup',
+                          value: draft.pickupAddress,
+                          icon: Icons.trip_origin),
+                      _SummaryLine(
+                          label: 'Destination',
+                          value: draft.destinationAddress,
+                          icon: Icons.location_on_outlined),
+                      if (draft.fareEstimate case final fare?) ...[
+                        _SummaryLine(
+                            label: 'Road distance',
+                            value: bookingDistanceLabel(fare.distanceKm)),
+                        if (fare.durationSeconds > 0)
+                          _SummaryLine(
+                              label: 'Travel duration',
+                              value:
+                                  '${(fare.durationSeconds / 60).ceil()} minutes'),
+                      ],
+                    ],
                   ),
-                  _SummaryLine(
-                    label: 'Booking date',
-                    value: bookingDateLabel(draft.bookingDate),
-                    icon: Icons.calendar_month_outlined,
+                  _ReviewSection(
+                    title: 'Pickup date & time',
+                    lines: [
+                      _SummaryLine(
+                          label: 'Date',
+                          value: bookingDateLabel(draft.bookingDate),
+                          icon: Icons.calendar_month_outlined),
+                      if (draft.tripType == BookingTripType.airportPickup)
+                        _SummaryLine(
+                            label: 'Landed time',
+                            value: bookingTimeLabel(context, draft.landedTime))
+                      else
+                        _SummaryLine(
+                            label: 'Time',
+                            value: mapBooking && draft.pickupTime != null
+                                ? bookingClockLabel(draft.pickupTime!.hour,
+                                    draft.pickupTime!.minute)
+                                : bookingTimeLabel(context, draft.pickupTime),
+                            icon: Icons.access_time),
+                    ],
                   ),
-                  if (draft.tripType == BookingTripType.airportPickup)
-                    _SummaryLine(
-                      label: 'Landed time',
-                      value: bookingTimeLabel(context, draft.landedTime),
-                      icon: Icons.flight_land_outlined,
-                    )
-                  else
-                    _SummaryLine(
-                      label: 'Pickup time',
-                      value: bookingTimeLabel(context, draft.pickupTime),
-                      icon: Icons.access_time,
+                  if (draft.flightNumber?.trim().isNotEmpty == true ||
+                      draft.flightDate != null ||
+                      flightTime != null)
+                    _ReviewSection(
+                      title: 'Flight details',
+                      lines: [
+                        if (draft.flightNumber?.trim().isNotEmpty == true)
+                          _SummaryLine(
+                              label: 'Number',
+                              value: draft.flightNumber!.trim(),
+                              icon: Icons.flight_outlined),
+                        if (draft.flightDate case final date?)
+                          _SummaryLine(
+                              label: 'Date', value: bookingDateLabel(date)),
+                        if (flightTime != null)
+                          _SummaryLine(
+                              label: 'Time',
+                              value: bookingClockLabel(
+                                  flightTime.hour, flightTime.minute)),
+                      ],
                     ),
-                  if (draft.flightNumber != null)
-                    _SummaryLine(
-                      label: 'Flight number',
-                      value: draft.flightNumber!,
-                      icon: Icons.flight_outlined,
-                    ),
-                  _SummaryLine(
-                    label: 'Passengers',
-                    value: '${draft.passengerCount}',
-                    icon: Icons.people_outline,
+                  _ReviewSection(
+                    title: 'Passengers and luggage',
+                    lines: [
+                      _SummaryLine(
+                          label: 'Passengers',
+                          value: '${draft.passengerCount}'),
+                      _SummaryLine(
+                          label: 'Small / medium / large bags',
+                          value:
+                              '${draft.smallCount} / ${draft.mediumCount} / ${draft.largeCount}'),
+                      _SummaryLine(
+                          label: 'Total luggage',
+                          value: '${draft.totalBagCount} bags'),
+                      _SummaryLine(
+                          label: 'Total boot usage',
+                          value: '${draft.luggageUnits} units'),
+                      if (draft.additionalNotes != null)
+                        _SummaryLine(
+                            label: 'Notes', value: draft.additionalNotes!),
+                    ],
                   ),
-                  _SummaryLine(
-                    label: 'Luggage',
-                    value: draft.luggageCount == 0
-                        ? 'None'
-                        : '${draft.luggageCount} â€¢ ${draft.luggageSize}',
-                    icon: Icons.luggage_outlined,
+                  _ReviewSection(
+                    title: 'Selected ride',
+                    lines: [
+                      _SummaryLine(
+                          label: 'Vehicle',
+                          value:
+                              draft.recommendedVehicle?.type ?? 'Not available',
+                          icon: Icons.airport_shuttle_outlined),
+                      if (draft.recommendedVehicle case final vehicle?) ...[
+                        _SummaryLine(
+                            label: 'Passenger capacity',
+                            value: '${vehicle.passengerCapacity}'),
+                      ],
+                    ],
                   ),
-                  if (draft.additionalNotes != null)
-                    _SummaryLine(
-                      label: 'Notes',
-                      value: draft.additionalNotes!,
-                      icon: Icons.notes_outlined,
-                    ),
-                  const Divider(height: 24),
-                  const _SectionTitle(title: 'Recommendation & fare'),
-                  _SummaryLine(
-                    label: 'Vehicle',
-                    value: draft.recommendedVehicle?.model ?? 'Not available',
-                    icon: Icons.airport_shuttle_outlined,
+                  _ReviewSection(
+                    title: 'Estimated fare',
+                    lines: [
+                      if (draft.fareEstimate case final fare?) ...[
+                        if (fare.ratePerKm case final rate?)
+                          _SummaryLine(
+                              label: 'Distance rate',
+                              value: 'RM ${rate.toStringAsFixed(2)} / km'),
+                        _SummaryLine(
+                            label: 'Road-distance fare',
+                            value:
+                                'RM ${fare.distanceCharge.toStringAsFixed(2)}'),
+                        for (final charge in fare.additionalCharges)
+                          _SummaryLine(
+                              label: charge.label,
+                              value: 'RM ${charge.amount.toStringAsFixed(2)}'),
+                        const _SummaryLine(
+                            label: 'Extra hours',
+                            value: 'Approved hours are charged separately.'),
+                        const _SummaryLine(
+                            label: 'Toll and parking',
+                            value: 'Actual charges are added if applicable.'),
+                      ],
+                      _SummaryLine(
+                          label: 'Estimated total',
+                          value: draft.fareEstimate == null
+                              ? 'Pending Admin confirmation of road distance'
+                              : 'RM ${draft.fareEstimate!.total.toStringAsFixed(2)}',
+                          icon: Icons.payments_outlined),
+                    ],
                   ),
-                  if (draft.fareEstimate != null)
-                    _SummaryLine(
-                      label: 'Distance',
-                      value:
-                          '${draft.fareEstimate!.distanceKm.toStringAsFixed(1)} km',
-                      icon: Icons.route_outlined,
-                    ),
-                  _SummaryLine(
-                    label: 'Estimated fare',
-                    value: draft.fareEstimate == null
-                        ? 'Pending Admin confirmation of road distance'
-                        : 'Estimate: RM '
-                            '${draft.fareEstimate!.total.toStringAsFixed(2)}',
-                    icon: Icons.payments_outlined,
-                  ),
-                ],
-              ),
-            ),
+                ]),
           ],
         ],
       ),
@@ -304,25 +392,27 @@ class _BookingReviewPageState extends State<BookingReviewPage> {
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title});
+class _ReviewSection extends StatelessWidget {
+  const _ReviewSection({required this.title, required this.lines});
 
   final String title;
+  final List<Widget> lines;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: bookingNavy,
-          fontSize: 16,
-          fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: BookingCard(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              ...lines,
+            ],
+          ),
         ),
-      ),
-    );
-  }
+      );
 }
 
 class _SummaryLine extends StatelessWidget {

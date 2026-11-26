@@ -14,6 +14,8 @@ class DriverTrip {
     this.luggageCount,
     this.luggageSize,
     this.vehiclePlate,
+    this.vehicleModel,
+    this.vehicleCategory,
     this.assignmentDate,
     this.smallCount,
     this.mediumCount,
@@ -35,6 +37,8 @@ class DriverTrip {
   final int? luggageCount;
   final String? luggageSize;
   final String? vehiclePlate;
+  final String? vehicleModel;
+  final String? vehicleCategory;
   final DateTime? assignmentDate;
   final int? smallCount;
   final int? mediumCount;
@@ -118,6 +122,8 @@ class DriverTrip {
       luggageUnits: _intValue(json['luggageUnits']),
       luggageSize: _stringValue(json['luggageSize']),
       vehiclePlate: _stringValue(json['vehiclePlate']),
+      vehicleModel: _stringValue(json['vehicleModel']),
+      vehicleCategory: _stringValue(json['vehicleCategory']),
       assignmentDate: _dateValue(json['assignmentDate']),
     );
   }
